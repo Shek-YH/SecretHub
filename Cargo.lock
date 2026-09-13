@@ -3667,9 +3667,11 @@ version = "0.1.0"
 dependencies = [
  "secrethub-backup",
  "secrethub-crypto",
+ "secrethub-exporter",
  "secrethub-storage",
  "sha2",
  "subtle",
+ "tempfile",
  "thiserror 2.0.20",
  "uuid",
 ]

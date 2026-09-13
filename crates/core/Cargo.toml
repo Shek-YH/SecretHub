@@ -12,3 +12,7 @@ sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+secrethub-exporter = { path = "../exporter" }
+tempfile = "3.27"
