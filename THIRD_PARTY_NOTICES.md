@@ -14,6 +14,6 @@ No third-party source code has been copied into SecretHub at project initializat
 | serde / serde_json | 1.x | Apache-2.0 / MIT | Serialization |
 | Playwright Python | host-provided | Apache-2.0 | Browser E2E verification |
 
-Transitive licenses remain governed by the package lockfiles. A public release must generate a complete dependency license report.
+Transitive licenses remain governed by the package lockfiles. A public release must generate a complete dependency license report. `npm audit` is currently clean; `cargo audit` exits 0 but reports seven unmaintained/unsound transitive warnings in cross-platform Tauri build dependencies (`proc-macro-error`, `unic-*`, `glib`). These are tracked for dependency refresh and are not silently treated as zero-risk.
 
 Dependencies will be listed here with version, license, attribution and modification details before a release artifact is produced.

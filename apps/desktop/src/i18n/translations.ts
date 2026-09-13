@@ -52,3 +52,7 @@ export const translations: Record<Locale, Translation> = {
 export function getTranslation(locale: Locale | undefined): Translation {
   return translations[locale ?? 'zh-CN'];
 }
+
+export function readStoredLocale(value: string | null): Locale {
+  return value === 'en-US' ? 'en-US' : 'zh-CN';
+}

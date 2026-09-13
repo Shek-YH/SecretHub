@@ -438,14 +438,20 @@ pub fn settings_update(
 
 #[tauri::command]
 pub fn backup_export(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    touch_activity(&state)?;
     let bytes = vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
         .encrypted_backup()
         .map_err(|error| error.to_string())?;
     let target = Path::new(&path);
-    if target.extension().and_then(|value| value.to_str()) != Some("secrethub-backup") {
+    if target.file_name().and_then(|value| value.to_str()) != Some("SecretHub.secrethub-backup") {
         return Err("backup must use .secrethub-backup extension".to_owned());
     }
-    std::fs::write(target, bytes).map_err(|error| error.to_string())
+    let parent = target
+        .parent()
+        .ok_or_else(|| "backup parent directory is required".to_owned())?;
+    let directory = validate_export_directory(parent).map_err(|error| error.to_string())?;
+    std::fs::write(directory.join("SecretHub.secrethub-backup"), bytes)
+        .map_err(|error| error.to_string())
 }

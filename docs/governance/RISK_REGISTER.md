@@ -9,3 +9,4 @@
 | RSK-005 | Real provider validation needs private credentials | Medium | Synthetic readiness first; user-local only when required | Deferred |
 | RSK-006 | UI prototype drifts from implementation | Medium | Actual desktop UI is the interactive prototype source | Active |
 | RSK-007 | Native UI manual acceptance unavailable in current session | Medium | Process launch verified; retain manual acceptance gate for install/unlock/reveal/export | Waiting user |
+| RSK-008 | Cross-platform Rust dependency warnings | Medium | `cargo audit` exit 0; warnings recorded and tied to non-Windows Tauri transitive graph | Tracked |

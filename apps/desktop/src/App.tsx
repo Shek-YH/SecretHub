@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { getTranslation, type Locale } from './i18n/translations';
+import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { backend, isTauriRuntime, type VaultStatus } from './lib/backend';
 
 type SecretMetadata = {
@@ -21,7 +21,7 @@ const demoSecrets: SecretMetadata[] = [
 ];
 
 export function App() {
-  const [locale, setLocale] = useState<Locale>(() => (localStorage.getItem('secrethub-locale') as Locale) || 'zh-CN');
+  const [locale, setLocale] = useState<Locale>(() => readStoredLocale(localStorage.getItem('secrethub-locale')));
   const [secrets, setSecrets] = useState<SecretMetadata[]>(demoSecrets);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
