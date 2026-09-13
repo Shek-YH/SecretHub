@@ -9,6 +9,7 @@ members = [
   "crates/providers",
   "crates/profiles",
   "crates/backup",
+  "crates/proxy",
   "apps/cli",
   "apps/desktop/src-tauri"
 ]

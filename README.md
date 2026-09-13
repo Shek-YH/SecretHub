@@ -34,6 +34,8 @@ The MCP server exposes `secrethub_*` catalog/recommendation tools. It opens SQLi
 
 For runtime injection, copy `.secrethub.toml.example` to `.secrethub.toml` in a project and list only environment-key names. The file contains no Secret values and can be committed. Run `secrethub-cli run -- <program>` from that project.
 
+The V3.5 proxy policy foundation is in `crates/proxy`: it issues short-lived tokens and validates fixed provider origins without storing token plaintext. HTTP forwarding remains a separate implementation gate.
+
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before using real credentials. Never paste a real API key into chat, tests, fixtures or commits.
