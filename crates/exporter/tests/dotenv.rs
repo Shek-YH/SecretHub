@@ -1,5 +1,6 @@
 use secrethub_exporter::{
-    detect_conflicts, ensure_gitignore_env, gitignore_has_env, render_env, render_example, EnvEntry,
+    detect_conflicts, ensure_gitignore_env, gitignore_has_env, parse_env_entries,
+    parse_json_entries, render_env, render_example, EnvEntry,
 };
 
 #[test]
@@ -37,4 +38,35 @@ fn checks_and_explicitly_repairs_gitignore_without_touching_existing_rules() {
     assert!(gitignore_has_env(&gitignore).unwrap());
     assert!(!ensure_gitignore_env(&gitignore).unwrap());
     assert_eq!(std::fs::read_to_string(gitignore).unwrap(), ".env\n");
+}
+
+#[test]
+fn previews_env_and_json_imports_without_persisting_values() {
+    let env_entries = parse_env_entries("OPENAI_API_KEY=fixture\nPORT=3000\n").unwrap();
+    assert_eq!(
+        env_entries
+            .iter()
+            .map(|entry| entry.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["OPENAI_API_KEY", "PORT"]
+    );
+    let json_entries =
+        parse_json_entries(r#"{"SUPABASE_URL":"https://example.invalid","DEBUG":true}"#).unwrap();
+    assert_eq!(
+        json_entries
+            .iter()
+            .find(|entry| entry.key == "SUPABASE_URL")
+            .unwrap()
+            .value,
+        "https://example.invalid"
+    );
+    assert_eq!(
+        json_entries
+            .iter()
+            .find(|entry| entry.key == "DEBUG")
+            .unwrap()
+            .value,
+        "true"
+    );
+    assert!(parse_json_entries(r#"["not-an-object"]"#).is_err());
 }

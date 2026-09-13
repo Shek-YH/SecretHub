@@ -2,13 +2,18 @@ use super::AppState;
 use arboard::Clipboard;
 use secrethub_core::{NewSecretInput, VaultService};
 use secrethub_exporter::{
-    detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, render_env,
-    render_example, validate_export_directory, write_atomic, EnvEntry,
+    detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, parse_env_entries,
+    parse_json_entries, render_env, render_example, validate_export_directory, write_atomic,
+    EnvEntry,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{path::Path, sync::MutexGuard};
-use tauri::State;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::MutexGuard,
+};
+use tauri::{AppHandle, Manager, State};
 
 #[derive(Debug, Serialize)]
 pub struct VaultStatus {
@@ -41,6 +46,22 @@ pub struct ProfileRequest {
     pub name: String,
     pub description: String,
     pub secret_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportRequest {
+    pub format: String,
+    pub contents: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PendingPlan {
+    pub request_id: String,
+    pub kind: String,
+    pub project_path: String,
+    pub secret_ids: Vec<String>,
+    pub created_at: String,
 }
 
 fn vault_from_state<'a>(
@@ -256,6 +277,120 @@ fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry
             Ok(EnvEntry::new(&item.env_key, value))
         })
         .collect()
+}
+
+fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {
+    match request.format.as_str() {
+        "env" => parse_env_entries(&request.contents),
+        "json" => parse_json_entries(&request.contents),
+        _ => return Err("import format must be env or json".to_owned()),
+    }
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn secret_import_preview(request: ImportRequest) -> Result<Vec<String>, String> {
+    Ok(parse_import(&request)?
+        .into_iter()
+        .map(|entry| entry.key)
+        .collect())
+}
+
+#[tauri::command]
+pub fn secret_import(
+    request: ImportRequest,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    if !request.confirmed {
+        return Err("import requires explicit confirmation after preview".to_owned());
+    }
+    touch_activity(&state)?;
+    let entries = parse_import(&request)?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    entries
+        .into_iter()
+        .map(|entry| {
+            vault
+                .create_secret(NewSecretInput {
+                    name: entry.key.clone(),
+                    provider_id: "generic".to_owned(),
+                    env_key: entry.key,
+                    description: "Imported locally".to_owned(),
+                    tags: vec!["imported".to_owned()],
+                    value: entry.value,
+                })
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+fn plan_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("mcp-pending");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+#[tauri::command]
+pub fn mcp_pending_plans(app: AppHandle) -> Result<Vec<PendingPlan>, String> {
+    let directory = plan_directory(&app)?;
+    let mut plans = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(contents) = fs::read_to_string(path) {
+            if let Ok(plan) = serde_json::from_str::<PendingPlan>(&contents) {
+                plans.push(plan);
+            }
+        }
+    }
+    plans.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    Ok(plans)
+}
+
+#[tauri::command]
+pub fn mcp_confirm_plan(
+    request_id: String,
+    confirmed: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("plan confirmation was declined".to_owned());
+    }
+    if !request_id.starts_with("plan-") || request_id.contains(['/', '\\', '.']) {
+        return Err("invalid pending plan id".to_owned());
+    }
+    let path = plan_directory(&app)?.join(format!("{request_id}.json"));
+    let contents = fs::read_to_string(&path).map_err(|_| "pending plan not found".to_owned())?;
+    let plan: PendingPlan =
+        serde_json::from_str(&contents).map_err(|_| "pending plan is invalid".to_owned())?;
+    if plan.request_id != request_id
+        || plan.secret_ids.is_empty()
+        || plan.project_path.trim().is_empty()
+    {
+        return Err("pending plan is invalid".to_owned());
+    }
+    export_env(
+        ExportRequest {
+            directory: plan.project_path,
+            secret_ids: plan.secret_ids,
+            write_example: true,
+            replace_existing: false,
+            ensure_gitignore: true,
+        },
+        state,
+    )?;
+    fs::remove_file(path).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

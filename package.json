@@ -7,6 +7,9 @@
     "dev": "npm --prefix apps/desktop run dev",
     "build": "npm --prefix apps/desktop run build",
     "test": "npm --prefix apps/desktop run test",
-    "typecheck": "npm --prefix apps/desktop run typecheck"
+    "typecheck": "npm --prefix apps/desktop run typecheck",
+    "mcp:test": "npm --prefix apps/mcp run test",
+    "mcp:build": "npm --prefix apps/mcp run build",
+    "mcp:smoke": "npm --prefix apps/mcp run smoke"
   }
 }

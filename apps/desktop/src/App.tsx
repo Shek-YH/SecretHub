@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
-import { backend, isTauriRuntime, type VaultStatus } from './lib/backend';
+import { backend, isTauriRuntime, type PendingPlan, type VaultStatus } from './lib/backend';
 
 type SecretMetadata = {
   id: string;
@@ -25,11 +25,13 @@ export function App() {
   const [secrets, setSecrets] = useState<SecretMetadata[]>(demoSecrets);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [pendingPlans, setPendingPlans] = useState<PendingPlan[]>([]);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState(demoSecrets[0].id);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingSecret, setEditingSecret] = useState<SecretMetadata | null>(null);
   const [activeNav, setActiveNav] = useState<'all' | 'profiles' | 'projects' | 'settings' | 'audit'>('all');
   const t = getTranslation(locale);
@@ -45,6 +47,18 @@ export function App() {
     if (!isTauriRuntime()) return;
     backend.status().then((status) => { setVaultStatus(status); if (status.unlocked) void refreshSecrets(); else setSecrets([]); }).catch((error) => setRuntimeError(String(error)));
   }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); };
+    loadPlans();
+    const timer = window.setInterval(loadPlans, 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  async function confirmPlan(plan: PendingPlan) {
+    try { await backend.confirmPlan(plan.request_id, true); setPendingPlans((current) => current.filter((item) => item.request_id !== plan.request_id)); await refreshSecrets(); } catch (error) { setRuntimeError(String(error)); }
+  }
 
   function changeLocale(next: Locale) {
     setLocale(next);
@@ -110,14 +124,16 @@ export function App() {
           <div><p className="eyebrow">{t.header.eyebrow}</p><h1>{t.header.title}</h1><p className="subtitle">{t.header.subtitle}</p></div>
           <div className="header-actions">
             <button className="language-switch" onClick={() => changeLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')} aria-label={t.header.language}>{t.header.language}</button>
+            <button className="secondary-button" onClick={() => setShowImport(true)}>{t.actions.import}</button>
             <button className="primary-button" onClick={() => setShowForm(true)}><span aria-hidden="true">+</span>{t.header.add}</button>
           </div>
         </header>
         <section className="security-strip" aria-label="Security status">
           <span className="shield-icon" aria-hidden="true">◆</span><span>{t.security.localOnly}</span><span className="strip-divider" /><span>{t.security.encrypted}</span><span className="strip-divider" /><span>{t.security.audit}</span>
         </section>
+        {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onConfirm={() => void confirmPlan(plan)} />)}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'profiles' ? <ProfilePanel t={t} selectedIds={selectedIds} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'profiles' ? <ProfilePanel t={t} selectedIds={selectedIds} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
               <label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label>
@@ -147,6 +163,7 @@ export function App() {
       </main>
       {showForm && <SecretForm t={t} initial={editingSecret} onClose={() => { setShowForm(false); setEditingSecret(null); }} onSave={saveSecret} />}
       {showExport && <ExportPanel t={t} selectedIds={selectedIds} onClose={() => setShowExport(false)} />}
+      {showImport && <ImportPanel t={t} onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); void refreshSecrets(); }} />}
     </div>
   );
 }
@@ -186,11 +203,11 @@ function SettingsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
   return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
 }
 
-function ProfilePanel({ t, selectedIds }: { t: ReturnType<typeof getTranslation>; selectedIds: string[] }) {
+function ProfilePanel({ t, selectedIds, onApply }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onApply: (ids: string[]) => void }) {
   const [name, setName] = useState('AI Standard'); const [profiles, setProfiles] = useState<Array<{ id: string; name: string; secret_ids: string[] }>>([]); const [message, setMessage] = useState('');
   useEffect(() => { if (isTauriRuntime()) void backend.profiles().then(setProfiles).catch(() => undefined); }, []);
   async function save() { const profile = { id: `profile-${Date.now()}`, name, description: '', secret_ids: selectedIds }; if (isTauriRuntime()) await backend.saveProfile(profile); setProfiles((current) => [profile, ...current]); setMessage(t.profile.saved); }
-  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">PROJECT RECIPE / {selectedIds.length} SELECTED</span><h2>{t.profile.title}</h2><p>{t.security.warning}</p></div><div className="profile-editor"><label>{t.profile.name}<input value={name} onChange={(event) => setName(event.target.value)} /></label><button className="primary-button" onClick={save}>{t.profile.save}</button>{message && <span className="form-success">{message}</span>}</div><div className="profile-list">{profiles.length === 0 ? <div className="empty-state"><strong>{t.profile.empty}</strong></div> : profiles.map((profile) => <div className="profile-row" key={profile.id}><div><strong>{profile.name}</strong><span>{profile.secret_ids.length} {t.nav.secrets}</span></div><button className="secondary-button" onClick={() => setMessage(`${t.profile.apply}: ${profile.name}`)}>{t.profile.apply}</button></div>)}</div></section>;
+  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">PROJECT RECIPE / {selectedIds.length} SELECTED</span><h2>{t.profile.title}</h2><p>{t.security.warning}</p></div><div className="profile-editor"><label>{t.profile.name}<input value={name} onChange={(event) => setName(event.target.value)} /></label><button className="primary-button" onClick={save}>{t.profile.save}</button>{message && <span className="form-success">{message}</span>}</div><div className="profile-list">{profiles.length === 0 ? <div className="empty-state"><strong>{t.profile.empty}</strong></div> : profiles.map((profile) => <div className="profile-row" key={profile.id}><div><strong>{profile.name}</strong><span>{profile.secret_ids.length} {t.nav.secrets}</span></div><button className="secondary-button" onClick={() => onApply(profile.secret_ids)}>{t.profile.apply}</button></div>)}</div></section>;
 }
 
 function ProjectsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
@@ -204,6 +221,10 @@ function AuditPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
   const [events, setEvents] = useState<Array<{ id: string; operation: string; result: string }>>([]);
   useEffect(() => { if (isTauriRuntime()) void backend.audit().then(setEvents).catch(() => undefined); }, []);
   return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">SECURITY / TRACEABLE</span><h2>{t.auditPanel.title}</h2><p>{t.security.audit}</p></div><div className="audit-list">{events.length === 0 ? <div className="empty-state"><strong>{t.auditPanel.empty}</strong></div> : events.map((event) => <div className="audit-row" key={event.id}><strong>{event.operation}</strong><span>{event.result}</span></div>)}</div></section>;
+}
+
+function McpPlanBanner({ plan, t, onConfirm }: { plan: PendingPlan; t: ReturnType<typeof getTranslation>; onConfirm: () => void }) {
+  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{plan.secret_ids.length} {t.nav.secrets}</small></div><button className="primary-button" onClick={onConfirm}>{t.mcp.confirm}</button></section>;
 }
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }
@@ -221,4 +242,11 @@ function ExportPanel({ t, selectedIds, onClose }: { t: ReturnType<typeof getTran
   async function showPreview() { if (isTauriRuntime()) { setPreview(await backend.preview(request)); setConflicts(await backend.conflicts(request)); } else { setPreview(selectedIds.map((id) => `${id.toUpperCase()}="••••••••"`).join('\n')); setConflicts([]); } }
   async function exportFiles() { if (isTauriRuntime()) await backend.export(request); setMessage('Export complete'); }
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.actions.export}><div className="secret-form export-form"><div className="form-heading"><div><span className="section-kicker">PROJECT OUTPUT / SAFE WRITE</span><h2>{t.actions.export}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.actions.chooseFolder}<div className="folder-row"><input value={directory} onChange={(event) => setDirectory(event.target.value)} /><button type="button" className="secondary-button" onClick={chooseFolder}>...</button></div></label><div className="preview-box">{preview || 'Select Preview to inspect masked output.'}</div>{conflicts.length > 0 && <div className="conflict-box">Conflict keys: {conflicts.join(', ')}</div>}<div className="form-security"><span>◆</span>{t.security.warning}</div>{message && <div className="form-success">{message}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={showPreview}>{t.actions.preview}</button><button className="primary-button" type="button" onClick={exportFiles}>{t.actions.export}</button></div></div></div>;
+}
+
+function ImportPanel({ t, onClose, onDone }: { t: ReturnType<typeof getTranslation>; onClose: () => void; onDone: () => void }) {
+  const [format, setFormat] = useState<'env' | 'json'>('env'); const [contents, setContents] = useState(''); const [keys, setKeys] = useState<string[]>([]); const [error, setError] = useState(''); const [message, setMessage] = useState('');
+  async function preview() { try { if (isTauriRuntime()) setKeys(await backend.importPreview({ format, contents, confirmed: false })); else setKeys(format === 'env' ? contents.split(/\r?\n/).map((line) => line.split('=')[0].trim()).filter(Boolean) : Object.keys(JSON.parse(contents))); setError(''); } catch (reason) { setError(String(reason)); setKeys([]); } }
+  async function confirm() { try { if (isTauriRuntime()) await backend.importSecrets({ format, contents, confirmed: true }); setMessage(t.actions.imported); setTimeout(onDone, 500); } catch (reason) { setError(String(reason)); } }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.actions.import}><form className="secret-form import-form" onSubmit={(event) => { event.preventDefault(); void preview(); }}><div className="form-heading"><div><span className="section-kicker">IMPORT / ENCRYPTED</span><h2>{t.actions.import}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.actions.importFormat}<select value={format} onChange={(event) => setFormat(event.target.value as 'env' | 'json')}><option value="env">.env</option><option value="json">JSON</option></select></label><label>{t.actions.importContent}<textarea className="import-textarea" rows={8} value={contents} onChange={(event) => setContents(event.target.value)} /></label>{keys.length > 0 && <div className="preview-box">{keys.map((key) => `${key} = [encrypted]`).join('\n')}</div>}{error && <div className="form-error" role="alert">{error}</div>}{message && <div className="form-success">{message}</div>}<div className="form-security"><span>◆</span>{t.security.warning}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={preview}>{t.actions.importPreview}</button><button type="button" className="primary-button" disabled={keys.length === 0} onClick={() => void confirm()}>{t.actions.confirmImport}</button></div></form></div>;
 }

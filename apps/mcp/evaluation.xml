@@ -1,0 +1,12 @@
+<evaluation>
+  <qa_pair><question>Using the SecretHub metadata catalog, which environment key belongs to the OpenAI provider?</question><answer>OPENAI_API_KEY</answer></qa_pair>
+  <qa_pair><question>When a catalog item has an encrypted payload, which boolean metadata field indicates that a value exists without exposing it?</question><answer>hasValue</answer></qa_pair>
+  <qa_pair><question>Which SecretHub MCP tool maps a stack such as Next.js, Supabase and OpenAI to recommended environment keys?</question><answer>secrethub_recommend_secrets_for_project</answer></qa_pair>
+  <qa_pair><question>What field reports recommended keys that are not present in the local catalog?</question><answer>missing</answer></qa_pair>
+  <qa_pair><question>Which MCP transport is used for the local SecretHub server?</question><answer>stdio</answer></qa_pair>
+  <qa_pair><question>Does secrethub_list_secret_catalog return a Secret value field?</question><answer>false</answer></qa_pair>
+  <qa_pair><question>What must be true before SecretHub prepares a project environment file?</question><answer>requiresUserConfirmation</answer></qa_pair>
+  <qa_pair><question>Which MCP tool lists saved profiles without revealing values?</question><answer>secrethub_list_profiles</answer></qa_pair>
+  <qa_pair><question>Which MCP tool returns the locally stored validation status without making a network request?</question><answer>secrethub_validate_secret</answer></qa_pair>
+  <qa_pair><question>What is the SecretHub MCP server name used during initialize?</question><answer>secrethub-mcp-server</answer></qa_pair>
+</evaluation>

@@ -29,6 +29,12 @@ def main() -> None:
         export_dialog.get_by_role("button", name="预览 .env").click()
         assert "••••••••" in export_dialog.locator(".preview-box").inner_text()
         page.screenshot(path=str(evidence / "secrethub-ui-en-export.png"), full_page=True)
+        export_dialog.locator("button.close-button").click()
+        page.get_by_role("button", name="导入").click()
+        import_dialog = page.get_by_role("dialog")
+        import_dialog.get_by_label("粘贴 .env 或 JSON 内容").fill("IMPORTED_FIXTURE=fixture-only-value")
+        import_dialog.get_by_role("button", name="预览字段").click()
+        assert "IMPORTED_FIXTURE = [encrypted]" in import_dialog.locator(".preview-box").inner_text()
         browser.close()
 
 

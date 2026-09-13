@@ -13,3 +13,6 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R07 | Profile | create/edit/apply, project history | COMPLETED | profile/storage tests + UI pages |
 | R08 | Provider | registry, detection, fixed validators | COMPLETED | registry + HTTPS/SSRF tests |
 | R09 | QA | unit/integration/security/E2E/release artifacts | IN_PROGRESS | automated gates pass; native window manual acceptance pending |
+| R10 | V2 MCP | metadata catalog, recommendation and confirmation-required plans | COMPLETED | MCP protocol smoke + TypeScript tests |
+| R11 | CLI | shared-core status/catalog/hidden-input create | COMPLETED | Rust check/clippy/test/help smoke |
+| R12 | Import / AI bridge | `.env`/JSON import and confirmation boundary | IN_PROGRESS | parser/Tauri commands/pending-plan bridge complete; native visual confirmation pending |

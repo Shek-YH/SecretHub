@@ -13,6 +13,9 @@ No third-party source code has been copied into SecretHub at project initializat
 | arboard / rfd | 3.x / 0.15.x | MIT | Native clipboard and dialogs |
 | serde / serde_json | 1.x | Apache-2.0 / MIT | Serialization |
 | Playwright Python | host-provided | Apache-2.0 | Browser E2E verification |
+| `@modelcontextprotocol/sdk` | 1.30.x | Apache-2.0 / MIT | Local MCP stdio server |
+| `zod` | 4.x | MIT | MCP input schemas |
+| `rpassword` | 7.x | MIT | Hidden CLI password input |
 
 Transitive licenses remain governed by the package lockfiles. A public release must generate a complete dependency license report. `npm audit` is currently clean; `cargo audit` exits 0 but reports seven unmaintained/unsound transitive warnings in cross-platform Tauri build dependencies (`proc-macro-error`, `unic-*`, `glib`). These are tracked for dependency refresh and are not silently treated as zero-risk.
 

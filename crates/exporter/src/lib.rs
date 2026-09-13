@@ -29,6 +29,8 @@ pub enum ExportError {
     InvalidKey(String),
     #[error("dotenv parse failed: {0}")]
     Parse(#[from] dotenvy::Error),
+    #[error("invalid import JSON: {0}")]
+    InvalidJson(String),
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -52,6 +54,41 @@ pub fn render_example(entries: &[EnvEntry]) -> Result<String, ExportError> {
             .map(|entry| EnvEntry::new(&entry.key, ""))
             .collect::<Vec<_>>(),
     )
+}
+
+pub fn parse_env_entries(contents: &str) -> Result<Vec<EnvEntry>, ExportError> {
+    dotenvy::from_read_iter(Cursor::new(contents.as_bytes()))
+        .map(|item| {
+            let (key, value) = item?;
+            validate_key(&key)?;
+            Ok(EnvEntry::new(key, value))
+        })
+        .collect()
+}
+
+pub fn parse_json_entries(contents: &str) -> Result<Vec<EnvEntry>, ExportError> {
+    let value: serde_json::Value = serde_json::from_str(contents)
+        .map_err(|error| ExportError::InvalidJson(error.to_string()))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| ExportError::InvalidJson("import JSON must be an object".to_owned()))?;
+    object
+        .iter()
+        .map(|(key, value)| {
+            validate_key(key)?;
+            let value = value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .or_else(|| value.as_number().map(ToString::to_string))
+                .or_else(|| value.as_bool().map(|value| value.to_string()))
+                .ok_or_else(|| {
+                    ExportError::InvalidJson(format!(
+                        "JSON value for {key} must be a string, number or boolean"
+                    ))
+                })?;
+            Ok(EnvEntry::new(key, value))
+        })
+        .collect()
 }
 
 pub fn detect_conflicts(existing: &str, desired: &[EnvEntry]) -> Result<Vec<String>, ExportError> {

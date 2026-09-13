@@ -16,6 +16,16 @@ Rust Core / Commands
  └─ redaction/audit
 ```
 
+Local integrations:
+
+```text
+CLI ───────┐
+MCP stdio ─┼─> shared encrypted SQLite / Rust Core boundary
+Desktop ───┘
+```
+
+The MCP process opens SQLite read-only for metadata catalog access. It never decrypts `secret_payloads`; write-capable project preparation is returned as a confirmation-required plan for Desktop.
+
 ## V1 command boundary
 
 - `vault_status`, `unlock`, `lock`: status only; unlock never returns a key.
