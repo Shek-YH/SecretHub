@@ -4,7 +4,7 @@
 
 - Project root: `F:\CCPJ\SecretHub`
 - Initial state: PRD only; no Git repository, source code, tests, package metadata or UI prototype.
-- Host tools at intake: Node.js 24.11.0, npm 11.6.1, Git 2.53.0; Rust/Cargo unavailable at intake.
+- Host tools: Node.js 24.11.0, npm 11.6.1, Git 2.53.0, Rust/Cargo 1.98.1 installed during bootstrap.
 - Target: Windows 11 first, macOS later.
 
 ## Execution mode

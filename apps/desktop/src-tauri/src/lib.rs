@@ -1,11 +1,11 @@
-use secrethub_core::VaultService;
+use secrethub_core::{AutoLockPolicy, VaultService};
 use secrethub_storage::Database;
 use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
 mod commands;
 
-pub struct AppState { pub vault: Mutex<Option<VaultService>> }
+pub struct AppState { pub vault: Mutex<Option<VaultService>>, pub policy: Mutex<AutoLockPolicy> }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
@@ -19,7 +19,8 @@ pub fn run() {
             let path = database_path(app.handle()).map_err(|error| Box::<dyn std::error::Error>::from(error))?;
             let database = Database::open(path).map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
             let vault = VaultService::open(database).map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
-            app.manage(AppState { vault: Mutex::new(Some(vault)) });
+            let settings = vault.get_settings().map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
+            app.manage(AppState { vault: Mutex::new(Some(vault)), policy: Mutex::new(AutoLockPolicy::new(settings.auto_lock_minutes as u64 * 60, now_seconds())) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -34,6 +35,7 @@ pub fn run() {
             commands::secret_copy,
             commands::secret_reveal,
             commands::export_preview,
+            commands::export_conflicts,
             commands::export_env,
             commands::choose_project_directory,
             commands::profile_list,
@@ -48,3 +50,5 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running SecretHub");
 }
+
+fn now_seconds() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() }

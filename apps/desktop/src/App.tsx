@@ -30,6 +30,7 @@ export function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [editingSecret, setEditingSecret] = useState<SecretMetadata | null>(null);
   const [activeNav, setActiveNav] = useState<'all' | 'profiles' | 'projects' | 'settings' | 'audit'>('all');
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
@@ -56,9 +57,23 @@ export function App() {
   }
 
   async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) {
+    if (editingSecret) {
+      if (isTauriRuntime()) await backend.update(editingSecret.id, request);
+      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, updated: 'now' } : secret));
+      setEditingSecret(null);
+      if (isTauriRuntime()) await refreshSecrets();
+      return;
+    }
     if (isTauriRuntime()) { await backend.create(request); await refreshSecrets(); return; }
     const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, status: 'unknown', updated: 'now' };
     setSecrets((current) => [localSecret, ...current]);
+  }
+
+  async function removeSelected() {
+    if (!selected || !window.confirm(t.detail.deleteConfirm)) return;
+    if (isTauriRuntime()) await backend.remove(selected.id);
+    setSecrets((current) => current.filter((secret) => secret.id !== selected.id));
+    setSelectedId('');
   }
 
   return (
@@ -121,7 +136,7 @@ export function App() {
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {selected.provider.toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
                   <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey}</strong><span className="masked-value">••••••••••••••••Km2</span></div><span className="valid-badge">{selected.status === 'valid' ? t.list.valid : t.list.unknown}</span></div>
                   <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={selected.status === 'valid' ? t.list.valid : t.list.unknown} /><div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.'} /></div>
-                  <div className="detail-actions"><button className="secondary-button" onClick={() => { if (isTauriRuntime()) void backend.copy(selected.id); }}>{t.detail.copy}</button><button className="secondary-button" onClick={() => { if (isTauriRuntime()) void backend.reveal(selected.id); }}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => undefined}>{t.detail.validate}</button></div><button className="edit-button" onClick={() => setShowForm(true)}>{t.detail.edit}</button>
+                  <div className="detail-actions"><button className="secondary-button" onClick={() => { if (isTauriRuntime()) void backend.copy(selected.id); }}>{t.detail.copy}</button><button className="secondary-button" onClick={() => { if (isTauriRuntime()) void backend.reveal(selected.id); }}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => undefined}>{t.detail.validate}</button></div><button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
                   <div className="detail-note"><span className="lock-small">◆</span><span>{t.security.warning}</span></div>
                 </> : <div className="empty-detail">{t.detail.noSelection}</div>}
               </section>
@@ -130,7 +145,7 @@ export function App() {
         )}
         <footer className="app-footer"><span>SecretHub / {t.footer.version}</span><span>{t.footer.vault} · {t.footer.synced}</span></footer>
       </main>
-      {showForm && <SecretForm t={t} onClose={() => setShowForm(false)} onSave={saveSecret} />}
+      {showForm && <SecretForm t={t} initial={editingSecret} onClose={() => { setShowForm(false); setEditingSecret(null); }} onSave={saveSecret} />}
       {showExport && <ExportPanel t={t} selectedIds={selectedIds} onClose={() => setShowExport(false)} />}
     </div>
   );
@@ -186,17 +201,17 @@ function AuditPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }
 
-function SecretForm({ t, onClose, onSave }: { t: ReturnType<typeof getTranslation>; onClose: () => void; onSave: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) => Promise<void> }) {
-  const [name, setName] = useState(''); const [envKey, setEnvKey] = useState(''); const [provider, setProvider] = useState('OpenAI'); const [value, setValue] = useState(''); const [tags, setTags] = useState(''); const [notes, setNotes] = useState(''); const [error, setError] = useState('');
+function SecretForm({ t, initial, onClose, onSave }: { t: ReturnType<typeof getTranslation>; initial: SecretMetadata | null; onClose: () => void; onSave: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) => Promise<void> }) {
+  const [name, setName] = useState(initial?.name ?? ''); const [envKey, setEnvKey] = useState(initial?.envKey ?? ''); const [provider, setProvider] = useState(initial?.provider ?? 'OpenAI'); const [value, setValue] = useState(''); const [tags, setTags] = useState(initial?.tags.join(', ') ?? ''); const [notes, setNotes] = useState(''); const [error, setError] = useState('');
   async function submit(event: FormEvent) { event.preventDefault(); try { await onSave({ name, provider_id: provider.toLowerCase(), env_key: envKey, description: notes, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean), value }); onClose(); } catch (reason) { setError(String(reason)); } }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">NEW ENTRY / ENCRYPTED</span><h2>{t.form.addTitle}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<input required value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.provider}<select value={provider} onChange={(event) => setProvider(event.target.value)}><option>OpenAI</option><option>Anthropic</option><option>Generic</option></select></label><label>{t.form.value}<input required value={value} onChange={(event) => setValue(event.target.value)} type="password" autoComplete="new-password" /></label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">NEW ENTRY / ENCRYPTED</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<input required value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.provider}<select value={provider} onChange={(event) => setProvider(event.target.value)}><option>OpenAI</option><option>Anthropic</option><option>Generic</option></select></label><label>{t.form.value}<input required value={value} onChange={(event) => setValue(event.target.value)} type="password" autoComplete="new-password" placeholder={initial ? 'Enter replacement value' : undefined} /></label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
 }
 
 function ExportPanel({ t, selectedIds, onClose }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void }) {
-  const [directory, setDirectory] = useState('.'); const [preview, setPreview] = useState(''); const [message, setMessage] = useState('');
+  const [directory, setDirectory] = useState('.'); const [preview, setPreview] = useState(''); const [message, setMessage] = useState(''); const [conflicts, setConflicts] = useState<string[]>([]);
   const request = { directory, secret_ids: selectedIds, write_example: true, replace_existing: false, ensure_gitignore: true };
   async function chooseFolder() { if (isTauriRuntime()) { const folder = await backend.chooseFolder(); if (folder) setDirectory(folder); } }
-  async function showPreview() { if (isTauriRuntime()) setPreview(await backend.preview(request)); else setPreview(selectedIds.map((id) => `${id.toUpperCase()}="••••••••"`).join('\n')); }
+  async function showPreview() { if (isTauriRuntime()) { setPreview(await backend.preview(request)); setConflicts(await backend.conflicts(request)); } else { setPreview(selectedIds.map((id) => `${id.toUpperCase()}="••••••••"`).join('\n')); setConflicts([]); } }
   async function exportFiles() { if (isTauriRuntime()) await backend.export(request); setMessage('Export complete'); }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.actions.export}><div className="secret-form export-form"><div className="form-heading"><div><span className="section-kicker">PROJECT OUTPUT / SAFE WRITE</span><h2>{t.actions.export}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.actions.chooseFolder}<div className="folder-row"><input value={directory} onChange={(event) => setDirectory(event.target.value)} /><button type="button" className="secondary-button" onClick={chooseFolder}>...</button></div></label><div className="preview-box">{preview || 'Select Preview to inspect masked output.'}</div><div className="form-security"><span>◆</span>{t.security.warning}</div>{message && <div className="form-success">{message}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={showPreview}>{t.actions.preview}</button><button className="primary-button" type="button" onClick={exportFiles}>{t.actions.export}</button></div></div></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.actions.export}><div className="secret-form export-form"><div className="form-heading"><div><span className="section-kicker">PROJECT OUTPUT / SAFE WRITE</span><h2>{t.actions.export}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.actions.chooseFolder}<div className="folder-row"><input value={directory} onChange={(event) => setDirectory(event.target.value)} /><button type="button" className="secondary-button" onClick={chooseFolder}>...</button></div></label><div className="preview-box">{preview || 'Select Preview to inspect masked output.'}</div>{conflicts.length > 0 && <div className="conflict-box">Conflict keys: {conflicts.join(', ')}</div>}<div className="form-security"><span>◆</span>{t.security.warning}</div>{message && <div className="form-success">{message}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={showPreview}>{t.actions.preview}</button><button className="primary-button" type="button" onClick={exportFiles}>{t.actions.export}</button></div></div></div>;
 }
