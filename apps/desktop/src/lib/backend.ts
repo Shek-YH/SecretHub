@@ -1,0 +1,25 @@
+import { invoke } from '@tauri-apps/api/core';
+
+export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; created_at: number; updated_at: number };
+export type VaultStatus = { initialized: boolean; unlocked: boolean };
+
+export function isTauriRuntime() { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window; }
+
+export const backend = {
+  status: () => invoke<VaultStatus>('vault_status'),
+  setupMaster: (password: string) => invoke<void>('setup_master', { password }),
+  unlock: (password: string) => invoke<void>('unlock', { password }),
+  lock: () => invoke<void>('lock'),
+  list: (query?: string) => invoke<BackendSecret[]>('secret_list', { query }),
+  create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) => invoke<string>('secret_create', { request }),
+  copy: (id: string) => invoke<void>('secret_copy', { id }),
+  reveal: (id: string) => invoke<void>('secret_reveal', { id }),
+  preview: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<string>('export_preview', { request }),
+  export: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<void>('export_env', { request }),
+  chooseFolder: () => invoke<string | null>('choose_project_directory'),
+  profiles: () => invoke<Array<{ id: string; name: string; description: string; secret_ids: string[] }>>('profile_list'),
+  saveProfile: (profile: { id: string; name: string; description: string; secret_ids: string[] }) => invoke<void>('profile_save', { request: profile }),
+  projects: () => invoke<Array<{ id: string; path: string; display_name: string; last_used_at: number }>>('project_list'),
+  recordProject: (path: string, display_name: string) => invoke<void>('project_record', { path, display_name }),
+  audit: () => invoke<Array<{ id: string; operation: string; result: string; created_at: number }>>('audit_list'),
+};

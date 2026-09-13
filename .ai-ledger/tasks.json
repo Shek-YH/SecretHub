@@ -1,13 +1,13 @@
 {
   "tasks": [
-    {"id":"R01","title":"Architecture and governance","status":"IN_PROGRESS","progress":40,"dependencies":[],"primaryFiles":["docs/"],"acceptance":["Architecture, security model, data model, reuse strategy and ledger exist"]},
-    {"id":"R02","title":"Core security","status":"NOT_STARTED","progress":0,"dependencies":["R01"],"primaryFiles":["crates/crypto","crates/redaction"],"acceptance":["Encrypted payload and redaction tests pass"]},
-    {"id":"R03","title":"SQLite storage","status":"NOT_STARTED","progress":0,"dependencies":["R02"],"primaryFiles":["crates/storage"],"acceptance":["Schema and repository integration tests pass"]},
-    {"id":"R04","title":"Vault vertical slice","status":"NOT_STARTED","progress":0,"dependencies":["R03"],"primaryFiles":["crates/core","apps/desktop/src-tauri"],"acceptance":["Create, restart, unlock and metadata read work"]},
-    {"id":"R05","title":"Desktop UI and localization","status":"NOT_STARTED","progress":0,"dependencies":["R04"],"primaryFiles":["apps/desktop/src"],"acceptance":["Default Chinese and immediate zh/en switch work"]},
-    {"id":"R06","title":"Project export","status":"NOT_STARTED","progress":0,"dependencies":["R04","R05"],"primaryFiles":["crates/exporter","apps/desktop/src"],"acceptance":["Preview and safe .env export work"]},
-    {"id":"R07","title":"Profiles and project history","status":"NOT_STARTED","progress":0,"dependencies":["R06"],"primaryFiles":["crates/profiles","apps/desktop/src"],"acceptance":["Profile save/apply and history work"]},
-    {"id":"R08","title":"Provider intelligence","status":"NOT_STARTED","progress":0,"dependencies":["R04"],"primaryFiles":["crates/providers"],"acceptance":["Registry and nine initial providers work"]},
-    {"id":"R09","title":"QA and release","status":"NOT_STARTED","progress":0,"dependencies":["R07","R08"],"primaryFiles":["tests","README.md","SECURITY.md"],"acceptance":["Unit, integration, security, E2E and package gates are evidenced"]}
+    {"id":"R01","title":"Architecture and governance","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T13:30:00Z","dependencies":[],"primaryFiles":["docs/"],"acceptance":["Architecture, security model, data model, reuse strategy and ledger exist"]},
+    {"id":"R02","title":"Core security","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T14:30:00Z","dependencies":["R01"],"primaryFiles":["crates/crypto","crates/redaction"],"acceptance":["Encrypted payload and redaction tests pass"]},
+    {"id":"R03","title":"SQLite storage","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T15:00:00Z","dependencies":["R02"],"primaryFiles":["crates/storage"],"acceptance":["Schema and repository integration tests pass"]},
+    {"id":"R04","title":"Vault vertical slice","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T15:30:00Z","dependencies":["R03"],"primaryFiles":["crates/core","apps/desktop/src-tauri"],"acceptance":["Create, restart, unlock and metadata read work"]},
+    {"id":"R05","title":"Desktop UI and localization","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T16:00:00Z","dependencies":["R04"],"primaryFiles":["apps/desktop/src"],"acceptance":["Default Chinese and immediate zh/en switch work"]},
+    {"id":"R06","title":"Project export","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T16:30:00Z","dependencies":["R04","R05"],"primaryFiles":["crates/exporter","apps/desktop/src"],"acceptance":["Preview and safe .env export work"]},
+    {"id":"R07","title":"Profiles and project history","status":"COMPLETED","progress":100,"completedAt":"2026-09-13T17:00:00Z","dependencies":["R06"],"primaryFiles":["crates/profiles","apps/desktop/src"],"acceptance":["Profile save/apply and history work"]},
+    {"id":"R08","title":"Provider intelligence","status":"IN_PROGRESS","progress":65,"dependencies":["R04"],"primaryFiles":["crates/providers"],"acceptance":["Registry and nine initial providers work"]},
+    {"id":"R09","title":"QA and release","status":"IN_PROGRESS","progress":75,"dependencies":["R07","R08"],"primaryFiles":["tests","README.md","SECURITY.md"],"acceptance":["Unit, integration, security, E2E and package gates are evidenced"]}
   ]
 }

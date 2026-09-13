@@ -1,0 +1,13 @@
+[package]
+name = "secrethub-backup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secrethub-crypto = { path = "../crypto" }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27"

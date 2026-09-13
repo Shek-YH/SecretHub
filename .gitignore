@@ -1,0 +1,15 @@
+node_modules/
+dist/
+target/
+*.env
+.env
+.env.*
+!.env.example
+*.secrethub-backup
+*.sqlite
+*.sqlite3
+*.db
+apps/desktop/src-tauri/gen/
+test-results/
+playwright-report/
+.DS_Store

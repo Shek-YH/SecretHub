@@ -1,0 +1,12 @@
+[package]
+name = "secrethub-exporter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dotenvy.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"

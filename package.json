@@ -1,0 +1,12 @@
+{
+  "name": "secrethub",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix apps/desktop run dev",
+    "build": "npm --prefix apps/desktop run build",
+    "test": "npm --prefix apps/desktop run test",
+    "typecheck": "npm --prefix apps/desktop run typecheck"
+  }
+}

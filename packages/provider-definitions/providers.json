@@ -1,0 +1,12 @@
+[
+  {"id":"openai","name":"OpenAI","envKeys":["OPENAI_API_KEY"],"prefixes":["sk-"]},
+  {"id":"anthropic","name":"Anthropic","envKeys":["ANTHROPIC_API_KEY"],"prefixes":["sk-ant-"]},
+  {"id":"gemini","name":"Google Gemini","envKeys":["GEMINI_API_KEY"],"prefixes":["AIza"]},
+  {"id":"deepseek","name":"DeepSeek","envKeys":["DEEPSEEK_API_KEY"],"prefixes":["sk-deep-"]},
+  {"id":"xai","name":"xAI","envKeys":["XAI_API_KEY"],"prefixes":["xai-"]},
+  {"id":"openrouter","name":"OpenRouter","envKeys":["OPENROUTER_API_KEY"],"prefixes":["sk-or-"]},
+  {"id":"github","name":"GitHub","envKeys":["GITHUB_TOKEN"],"prefixes":["ghp_","github_pat_"]},
+  {"id":"supabase","name":"Supabase","envKeys":["SUPABASE_URL","SUPABASE_ANON_KEY"],"prefixes":["sbp_"]},
+  {"id":"cloudflare","name":"Cloudflare","envKeys":["CLOUDFLARE_API_TOKEN"],"prefixes":["cf_"]},
+  {"id":"generic","name":"Generic API Key","envKeys":["API_KEY"],"prefixes":[]}
+]
