@@ -10,6 +10,7 @@ members = [
   "crates/profiles",
   "crates/backup",
   "crates/proxy",
+  "apps/proxy",
   "apps/cli",
   "apps/desktop/src-tauri"
 ]
@@ -41,3 +42,4 @@ thiserror = "2.0"
 uuid = { version = "1.10", features = ["v4", "serde"] }
 zeroize = { version = "1.8", features = ["derive"] }
 rpassword = "7.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }

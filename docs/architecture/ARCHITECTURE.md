@@ -26,6 +26,8 @@ Desktop ───┘
 
 The MCP process opens SQLite read-only for metadata catalog access. It never decrypts `secret_payloads`; write-capable project preparation is returned as a confirmation-required plan for Desktop.
 
+The optional V3.5 proxy is a separate localhost process. It decrypts a selected value only after an interactive vault unlock, authenticates Agent requests with a 300-second token hash, forwards only to fixed Provider origins, and never returns the provider credential.
+
 ## V1 command boundary
 
 - `vault_status`, `unlock`, `lock`: status only; unlock never returns a key.

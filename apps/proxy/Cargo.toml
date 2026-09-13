@@ -1,0 +1,14 @@
+[package]
+name = "secrethub-proxy-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dirs.workspace = true
+reqwest.workspace = true
+rpassword.workspace = true
+secrethub-core = { path = "../../crates/core" }
+secrethub-proxy = { path = "../../crates/proxy" }
+secrethub-storage = { path = "../../crates/storage" }
+zeroize.workspace = true
