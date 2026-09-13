@@ -107,3 +107,33 @@ fn creates_secret_with_classification_attributes() {
     assert_eq!(metadata.category, "ai");
     assert!(metadata.favorite);
 }
+
+#[test]
+fn records_value_free_user_actions_in_the_audit_log() {
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    let id = vault
+        .create_secret(NewSecretInput {
+            name: "Audited".into(),
+            provider_id: "generic".into(),
+            env_key: "AUDITED_SECRET".into(),
+            description: String::new(),
+            tags: vec![],
+            value: "fixture-audited-value".into(),
+        })
+        .unwrap();
+
+    vault
+        .record_action("secret_copied", Some(&id), "{\"source\":\"desktop\"}")
+        .unwrap();
+    let event = vault
+        .list_audit()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.operation == "secret_copied")
+        .unwrap();
+    assert_eq!(event.secret_id.as_deref(), Some(id.as_str()));
+    assert!(event.value_hash.is_none());
+    assert_eq!(event.metadata_json, "{\"source\":\"desktop\"}");
+}

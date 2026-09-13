@@ -231,6 +231,17 @@ impl VaultService {
     pub fn list_audit(&self) -> Result<Vec<secrethub_storage::AuditEvent>, VaultError> {
         self.database.list_audit().map_err(Into::into)
     }
+    pub fn record_action(
+        &self,
+        operation: &str,
+        secret_id: Option<&str>,
+        metadata_json: &str,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        self.database
+            .record_audit(operation, secret_id, None, "success", metadata_json)
+            .map_err(Into::into)
+    }
     pub fn save_profile(
         &self,
         profile: secrethub_storage::StoredProfile,

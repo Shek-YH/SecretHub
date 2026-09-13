@@ -260,14 +260,22 @@ pub fn secret_delete(id: String, state: State<'_, AppState>) -> Result<bool, Str
 #[tauri::command]
 pub fn secret_copy(id: String, state: State<'_, AppState>) -> Result<(), String> {
     touch_activity(&state)?;
-    let value = vault_from_state(&state)?
-        .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?
-        .read_secret(&id)
-        .map_err(|error| error.to_string())?;
+    let value = {
+        let vault = vault_from_state(&state)?;
+        vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?
+            .read_secret(&id)
+            .map_err(|error| error.to_string())?
+    };
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
     clipboard
         .set_text(&value)
+        .map_err(|error| error.to_string())?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .record_action("secret_copied", Some(&id), "{\"source\":\"desktop\"}")
         .map_err(|error| error.to_string())?;
     let value_hash = Sha256::digest(value.as_bytes()).to_vec();
     std::thread::spawn(move || {
@@ -288,16 +296,24 @@ pub fn secret_copy(id: String, state: State<'_, AppState>) -> Result<(), String>
 #[tauri::command]
 pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), String> {
     touch_activity(&state)?;
-    let value = vault_from_state(&state)?
-        .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?
-        .read_secret(&id)
-        .map_err(|error| error.to_string())?;
+    let value = {
+        let vault = vault_from_state(&state)?;
+        vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?
+            .read_secret(&id)
+            .map_err(|error| error.to_string())?
+    };
     rfd::MessageDialog::new()
         .set_title("SecretHub")
         .set_description(&value)
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .record_action("secret_revealed", Some(&id), "{\"source\":\"desktop\"}")
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -501,6 +517,16 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
         )
         .map_err(|error| error.to_string())?;
     }
+    vault
+        .record_action(
+            "env_exported",
+            None,
+            &format!(
+                "{{\"source\":\"desktop\",\"count\":{}}}",
+                request.secret_ids.len()
+            ),
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
