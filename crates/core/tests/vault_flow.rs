@@ -73,3 +73,37 @@ fn updates_and_deletes_secret_through_the_vault_service() {
     assert!(vault.delete_secret(&id).unwrap());
     assert!(vault.list_metadata().unwrap().is_empty());
 }
+
+#[test]
+fn creates_secret_with_classification_attributes() {
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    let id = vault
+        .create_secret_with_attributes(
+            NewSecretInput {
+                name: "Classified".into(),
+                provider_id: "openai".into(),
+                env_key: "OPENAI_API_KEY".into(),
+                description: String::new(),
+                tags: vec!["ai".into()],
+                value: "fixture-classified".into(),
+            },
+            secrethub_storage::SecretAttributes {
+                value_type: "token".into(),
+                category: "ai".into(),
+                scope: "project".into(),
+                favorite: true,
+                archived: false,
+            },
+        )
+        .unwrap();
+    let metadata = vault
+        .list_metadata()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == id)
+        .unwrap();
+    assert_eq!(metadata.category, "ai");
+    assert!(metadata.favorite);
+}

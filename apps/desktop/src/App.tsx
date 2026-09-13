@@ -11,13 +11,17 @@ type SecretMetadata = {
   status: 'valid' | 'unknown';
   updated: string;
   favorite?: boolean;
+  valueType?: string;
+  category?: string;
+  scope?: string;
+  archived?: boolean;
 };
 
 const demoSecrets: SecretMetadata[] = [
-  { id: 'openai-main', name: 'OpenAI Main', envKey: 'OPENAI_API_KEY', provider: 'OpenAI', tags: ['ai', 'production'], status: 'valid', updated: '2h ago', favorite: true },
-  { id: 'anthropic-lab', name: 'Anthropic Lab', envKey: 'ANTHROPIC_API_KEY', provider: 'Anthropic', tags: ['ai', 'research'], status: 'valid', updated: '1d ago' },
-  { id: 'supabase-cuecut', name: 'Supabase CueCut', envKey: 'SUPABASE_URL', provider: 'Supabase', tags: ['database', 'cuecut'], status: 'unknown', updated: '3d ago' },
-  { id: 'github-build', name: 'GitHub Build', envKey: 'GITHUB_TOKEN', provider: 'GitHub', tags: ['ci', 'developer'], status: 'valid', updated: '5d ago' },
+  { id: 'openai-main', name: 'OpenAI Main', envKey: 'OPENAI_API_KEY', provider: 'OpenAI', tags: ['ai', 'production'], status: 'valid', updated: '2h ago', favorite: true, valueType: 'api_key', category: 'ai', scope: 'global' },
+  { id: 'anthropic-lab', name: 'Anthropic Lab', envKey: 'ANTHROPIC_API_KEY', provider: 'Anthropic', tags: ['ai', 'research'], status: 'valid', updated: '1d ago', valueType: 'api_key', category: 'ai', scope: 'global' },
+  { id: 'supabase-cuecut', name: 'Supabase CueCut', envKey: 'SUPABASE_URL', provider: 'Supabase', tags: ['database', 'cuecut'], status: 'unknown', updated: '3d ago', valueType: 'url', category: 'database', scope: 'project' },
+  { id: 'github-build', name: 'GitHub Build', envKey: 'GITHUB_TOKEN', provider: 'GitHub', tags: ['ci', 'developer'], status: 'valid', updated: '5d ago', valueType: 'token', category: 'git', scope: 'global' },
 ];
 
 export function App() {
@@ -27,6 +31,10 @@ export function App() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [pendingPlans, setPendingPlans] = useState<PendingPlan[]>([]);
   const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [selectedId, setSelectedId] = useState(demoSecrets[0].id);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -36,11 +44,11 @@ export function App() {
   const [activeNav, setActiveNav] = useState<'all' | 'profiles' | 'projects' | 'settings' | 'audit'>('all');
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
-  const filtered = useMemo(() => secrets.filter((secret) => `${secret.name} ${secret.envKey} ${secret.provider} ${secret.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase())), [query, secrets]);
+  const filtered = useMemo(() => secrets.filter((secret) => `${secret.name} ${secret.envKey} ${secret.provider} ${secret.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && (categoryFilter === 'all' || secret.category === categoryFilter) && (statusFilter === 'all' || secret.status === statusFilter) && (!favoriteOnly || Boolean(secret.favorite)) && (includeArchived || !secret.archived)), [categoryFilter, favoriteOnly, includeArchived, query, secrets, statusFilter]);
 
   async function refreshSecrets() {
     if (!isTauriRuntime()) return;
-    try { setSecrets((await backend.list(query)).map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : 'unknown', updated: 'now' }))); setRuntimeError(null); } catch (error) { setRuntimeError(String(error)); }
+    try { setSecrets((await backend.list(query)).map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : 'unknown', updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived }))); setRuntimeError(null); } catch (error) { setRuntimeError(String(error)); }
   }
 
   useEffect(() => {
@@ -70,16 +78,16 @@ export function App() {
     setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
-  async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) {
+  async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean }) {
     if (editingSecret) {
       if (isTauriRuntime()) await backend.update(editingSecret.id, request);
-      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, updated: 'now' } : secret));
+      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived } : secret));
       setEditingSecret(null);
       if (isTauriRuntime()) await refreshSecrets();
       return;
     }
     if (isTauriRuntime()) { await backend.create(request); await refreshSecrets(); return; }
-    const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, status: 'unknown', updated: 'now' };
+    const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, status: 'unknown', updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived };
     setSecrets((current) => [localSecret, ...current]);
   }
 
@@ -136,7 +144,7 @@ export function App() {
         {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'profiles' ? <ProfilePanel t={t} selectedIds={selectedIds} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
-              <label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label>
+              <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="unknown">{t.list.unknown}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
               {selectedIds.length > 0 && <div className="selection-actions"><span>{selectedIds.length} {t.list.selected}</span><button onClick={() => setShowExport(true)}>{t.actions.export}</button><button onClick={() => undefined}>{t.actions.profile}</button><button onClick={() => setSelectedIds([])}>×</button></div>}
             </div>
             <div className="workspace-grid">
@@ -229,10 +237,10 @@ function McpPlanBanner({ plan, t, onConfirm }: { plan: PendingPlan; t: ReturnTyp
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }
 
-function SecretForm({ t, initial, onClose, onSave }: { t: ReturnType<typeof getTranslation>; initial: SecretMetadata | null; onClose: () => void; onSave: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) => Promise<void> }) {
-  const [name, setName] = useState(initial?.name ?? ''); const [envKey, setEnvKey] = useState(initial?.envKey ?? ''); const [provider, setProvider] = useState(initial?.provider ?? 'OpenAI'); const [value, setValue] = useState(''); const [tags, setTags] = useState(initial?.tags.join(', ') ?? ''); const [notes, setNotes] = useState(''); const [error, setError] = useState('');
-  async function submit(event: FormEvent) { event.preventDefault(); try { await onSave({ name, provider_id: provider.toLowerCase(), env_key: envKey, description: notes, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean), value }); onClose(); } catch (reason) { setError(String(reason)); } }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">NEW ENTRY / ENCRYPTED</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<input required value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.provider}<select value={provider} onChange={(event) => setProvider(event.target.value)}><option>OpenAI</option><option>Anthropic</option><option>Generic</option></select></label><label>{t.form.value}<input required value={value} onChange={(event) => setValue(event.target.value)} type="password" autoComplete="new-password" placeholder={initial ? 'Enter replacement value' : undefined} /></label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
+function SecretForm({ t, initial, onClose, onSave }: { t: ReturnType<typeof getTranslation>; initial: SecretMetadata | null; onClose: () => void; onSave: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean }) => Promise<void> }) {
+  const [name, setName] = useState(initial?.name ?? ''); const [envKey, setEnvKey] = useState(initial?.envKey ?? ''); const [provider, setProvider] = useState(initial?.provider ?? 'OpenAI'); const [value, setValue] = useState(''); const [valueType, setValueType] = useState(initial?.valueType ?? 'api_key'); const [category, setCategory] = useState(initial?.category ?? 'other'); const [scope, setScope] = useState(initial?.scope ?? 'global'); const [favorite, setFavorite] = useState(initial?.favorite ?? false); const [tags, setTags] = useState(initial?.tags.join(', ') ?? ''); const [notes, setNotes] = useState(''); const [error, setError] = useState('');
+  async function submit(event: FormEvent) { event.preventDefault(); try { await onSave({ name, provider_id: provider.toLowerCase(), env_key: envKey, description: notes, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean), value, value_type: valueType, category, scope, favorite, archived: initial?.archived ?? false }); onClose(); } catch (reason) { setError(String(reason)); } }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">NEW ENTRY / ENCRYPTED</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<input required value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.provider}<select value={provider} onChange={(event) => setProvider(event.target.value)}><option>OpenAI</option><option>Anthropic</option><option>Generic</option></select></label><label>{t.form.value}<input required value={value} onChange={(event) => setValue(event.target.value)} type="password" autoComplete="new-password" placeholder={initial ? 'Enter replacement value' : undefined} /></label><div className="form-two-col"><label>{t.form.valueType}<select value={valueType} onChange={(event) => setValueType(event.target.value)}><option value="api_key">API key</option><option value="token">Token</option><option value="url">URL</option><option value="password">Password</option><option value="text">Text</option></select></label><label>{t.form.category}<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select></label></div><label>{t.form.scope}<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="global">Global</option><option value="project">Project</option><option value="profile">Profile</option></select></label><label className="checkbox-label"><input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />{t.form.favorite}</label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
 }
 
 function ExportPanel({ t, selectedIds, onClose }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void }) {

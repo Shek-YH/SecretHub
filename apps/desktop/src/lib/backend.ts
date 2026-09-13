@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; created_at: number; updated_at: number };
+export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; created_at: number; updated_at: number };
 export type VaultStatus = { initialized: boolean; unlocked: boolean };
 export type PendingPlan = { request_id: string; kind: string; project_path: string; secret_ids: string[]; created_at: string };
 
@@ -12,8 +12,8 @@ export const backend = {
   unlock: (password: string) => invoke<void>('unlock', { password }),
   lock: () => invoke<void>('lock'),
   list: (query?: string) => invoke<BackendSecret[]>('secret_list', { query }),
-  create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) => invoke<string>('secret_create', { request }),
-  update: (id: string, request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string }) => invoke<void>('secret_update', { id, request }),
+  create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean }) => invoke<string>('secret_create', { request }),
+  update: (id: string, request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean }) => invoke<void>('secret_update', { id, request }),
   remove: (id: string) => invoke<boolean>('secret_delete', { id }),
   importPreview: (request: { format: 'env' | 'json'; contents: string; confirmed: false }) => invoke<string[]>('secret_import_preview', { request }),
   importSecrets: (request: { format: 'env' | 'json'; contents: string; confirmed: true }) => invoke<string[]>('secret_import', { request }),

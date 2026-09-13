@@ -15,5 +15,6 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R09 | QA | unit/integration/security/E2E/release artifacts | IN_PROGRESS | automated gates pass; native window manual acceptance pending |
 | R10 | V2 MCP | metadata catalog, recommendation and confirmation-required plans | COMPLETED | MCP protocol smoke + TypeScript tests |
 | R11 | CLI | shared-core status/catalog/hidden-input create | COMPLETED | Rust check/clippy/test/help smoke |
-| R12 | Import / AI bridge | `.env`/JSON import and confirmation boundary | IN_PROGRESS | parser/Tauri commands/pending-plan bridge complete; native visual confirmation pending |
+| R12 | Import / AI bridge | `.env`/JSON import and confirmation boundary | COMPLETED | parser/Tauri commands/pending-plan bridge; native manual visual acceptance remains under R09 |
 | R13 | Agent Proxy | short-lived token and fixed endpoint policy | WAITING_USER | HTTP forwarding and unauthorized tests pass; real-provider smoke needs local test credential |
+| R14 | Classification | type/category/scope/favorite/archived metadata and filters | COMPLETED | storage/core tests + desktop filters |

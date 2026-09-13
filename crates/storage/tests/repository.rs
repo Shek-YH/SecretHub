@@ -139,3 +139,35 @@ fn updates_and_deletes_secret_payload_by_id() {
     assert!(database.delete_secret(&id).unwrap());
     assert!(database.get_metadata(&id).unwrap().is_none());
 }
+
+#[test]
+fn persists_secret_classification_scope_and_flags() {
+    let (_path, database) = temp_database();
+    let id = database
+        .create_secret_with_attributes(
+            NewSecret {
+                name: "Classified".into(),
+                provider_id: "openai".into(),
+                env_key: "OPENAI_API_KEY".into(),
+                description: "note".into(),
+                tags: vec!["ai".into()],
+                ciphertext: vec![1],
+                nonce: vec![0; 12],
+            },
+            secrethub_storage::SecretAttributes {
+                value_type: "token".into(),
+                category: "ai".into(),
+                scope: "project".into(),
+                favorite: true,
+                archived: false,
+            },
+        )
+        .unwrap();
+    let metadata = database.get_metadata(&id).unwrap().unwrap();
+    assert_eq!(
+        (metadata.value_type, metadata.category, metadata.scope),
+        ("token".into(), "ai".into(), "project".into())
+    );
+    assert!(metadata.favorite);
+    assert!(!metadata.archived);
+}

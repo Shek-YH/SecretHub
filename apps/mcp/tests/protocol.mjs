@@ -9,7 +9,7 @@ const directory = mkdtempSync(join(tmpdir(), 'secrethub-mcp-'));
 const databasePath = join(directory, 'vault.sqlite');
 const planDirectory = join(directory, 'plans');
 const database = new DatabaseSync(databasePath);
-database.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, updated_at INTEGER); CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB); CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER); CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER); CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER); INSERT INTO secrets VALUES ('secret-fixture', 'Fixture Metadata', 'generic', 'FIXTURE_KEY', 'unknown', '["test"]', 1); INSERT INTO secret_payloads VALUES ('secret-fixture', X'010203');`);
+database.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, value_type TEXT, category TEXT, scope TEXT, favorite INTEGER, archived INTEGER, updated_at INTEGER); CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB); CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER); CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER); CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER); INSERT INTO secrets VALUES ('secret-fixture', 'Fixture Metadata', 'generic', 'FIXTURE_KEY', 'unknown', '["test"]', 'token', 'other', 'global', 0, 0, 1); INSERT INTO secret_payloads VALUES ('secret-fixture', X'010203');`);
 database.close();
 const messages = [
   { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
@@ -27,7 +27,7 @@ try {
   assert.ok(tools.some((tool) => tool.name === 'secrethub_prepare_project_env'));
   const catalogResponse = responses.find((response) => response.id === 3);
   const item = catalogResponse.result.structuredContent.items[0];
-  assert.deepEqual(item, { id: 'secret-fixture', name: 'Fixture Metadata', provider: 'generic', envKey: 'FIXTURE_KEY', status: 'unknown', tags: ['test'], hasValue: true });
+  assert.deepEqual(item, { id: 'secret-fixture', name: 'Fixture Metadata', provider: 'generic', envKey: 'FIXTURE_KEY', status: 'unknown', tags: ['test'], hasValue: true, valueType: 'token', category: 'other', scope: 'global', favorite: false, archived: false });
   assert.equal(Object.hasOwn(item, 'value'), false);
   assert.equal(JSON.stringify(catalogResponse).includes('010203'), false);
   const planResponse = responses.find((response) => response.id === 4);

@@ -29,6 +29,26 @@ pub struct SecretCreateRequest {
     pub description: String,
     pub tags: Vec<String>,
     pub value: String,
+    #[serde(default = "default_value_type")]
+    pub value_type: String,
+    #[serde(default = "default_category")]
+    pub category: String,
+    #[serde(default = "default_scope")]
+    pub scope: String,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+fn default_value_type() -> String {
+    "api_key".into()
+}
+fn default_category() -> String {
+    "other".into()
+}
+fn default_scope() -> String {
+    "global".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,14 +196,23 @@ pub fn secret_create(
     vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
-        .create_secret(NewSecretInput {
-            name: request.name,
-            provider_id: request.provider_id,
-            env_key: request.env_key,
-            description: request.description,
-            tags: request.tags,
-            value: request.value,
-        })
+        .create_secret_with_attributes(
+            NewSecretInput {
+                name: request.name,
+                provider_id: request.provider_id,
+                env_key: request.env_key,
+                description: request.description,
+                tags: request.tags,
+                value: request.value,
+            },
+            secrethub_storage::SecretAttributes {
+                value_type: request.value_type,
+                category: request.category,
+                scope: request.scope,
+                favorite: request.favorite,
+                archived: request.archived,
+            },
+        )
         .map_err(|error| error.to_string())
 }
 
@@ -197,7 +226,7 @@ pub fn secret_update(
     vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
-        .update_secret(
+        .update_secret_with_attributes(
             &id,
             NewSecretInput {
                 name: request.name,
@@ -206,6 +235,13 @@ pub fn secret_update(
                 description: request.description,
                 tags: request.tags,
                 value: request.value,
+            },
+            secrethub_storage::SecretAttributes {
+                value_type: request.value_type,
+                category: request.category,
+                scope: request.scope,
+                favorite: request.favorite,
+                archived: request.archived,
             },
         )
         .map_err(|error| error.to_string())

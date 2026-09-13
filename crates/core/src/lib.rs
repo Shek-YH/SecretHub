@@ -109,6 +109,14 @@ impl VaultService {
     }
 
     pub fn create_secret(&self, input: NewSecretInput) -> Result<String, VaultError> {
+        self.create_secret_with_attributes(input, secrethub_storage::SecretAttributes::default())
+    }
+
+    pub fn create_secret_with_attributes(
+        &self,
+        input: NewSecretInput,
+        attributes: secrethub_storage::SecretAttributes,
+    ) -> Result<String, VaultError> {
         let key = self.require_key()?;
         if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty()
         {
@@ -116,15 +124,18 @@ impl VaultService {
         }
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
         let value_hash = format!("sha256:{:x}", Sha256::digest(input.value.as_bytes()));
-        let id = self.database.create_secret(NewSecret {
-            name: input.name,
-            provider_id: input.provider_id,
-            env_key: input.env_key,
-            description: input.description,
-            tags: input.tags,
-            ciphertext: encrypted.ciphertext,
-            nonce: encrypted.nonce.to_vec(),
-        })?;
+        let id = self.database.create_secret_with_attributes(
+            NewSecret {
+                name: input.name,
+                provider_id: input.provider_id,
+                env_key: input.env_key,
+                description: input.description,
+                tags: input.tags,
+                ciphertext: encrypted.ciphertext,
+                nonce: encrypted.nonce.to_vec(),
+            },
+            attributes,
+        )?;
         self.database.record_audit(
             "create_secret",
             Some(&id),
@@ -157,6 +168,19 @@ impl VaultService {
     }
 
     pub fn update_secret(&self, id: &str, input: NewSecretInput) -> Result<(), VaultError> {
+        self.update_secret_with_attributes(
+            id,
+            input,
+            secrethub_storage::SecretAttributes::default(),
+        )
+    }
+
+    pub fn update_secret_with_attributes(
+        &self,
+        id: &str,
+        input: NewSecretInput,
+        attributes: secrethub_storage::SecretAttributes,
+    ) -> Result<(), VaultError> {
         let key = self.require_key()?;
         if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty()
         {
@@ -164,7 +188,7 @@ impl VaultService {
         }
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
         let value_hash = format!("sha256:{:x}", Sha256::digest(input.value.as_bytes()));
-        if !self.database.update_secret(
+        if !self.database.update_secret_with_attributes(
             id,
             UpdatedSecret {
                 name: input.name,
@@ -175,6 +199,7 @@ impl VaultService {
                 ciphertext: encrypted.ciphertext,
                 nonce: encrypted.nonce.to_vec(),
             },
+            attributes,
         )? {
             return Err(VaultError::InvalidSecret);
         }

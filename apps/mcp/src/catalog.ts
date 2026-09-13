@@ -8,6 +8,11 @@ export type CatalogSecret = {
   status: string;
   tags: string[];
   hasValue: boolean;
+  valueType?: string;
+  category?: string;
+  scope?: string;
+  favorite?: boolean;
+  archived?: boolean;
 };
 
 export type CatalogProfile = { id: string; name: string; description: string; secretIds: string[] };
@@ -23,7 +28,7 @@ export type CatalogStore = {
 };
 
 export function createCatalogStore(seed: CatalogSeed): CatalogStore {
-  const secrets = seed.secrets.map((secret) => ({ ...secret, tags: [...secret.tags] }));
+  const secrets = seed.secrets.map((secret) => ({ ...secret, tags: [...secret.tags], valueType: secret.valueType ?? 'api_key', category: secret.category ?? 'other', scope: secret.scope ?? 'global', favorite: secret.favorite ?? false, archived: secret.archived ?? false }));
   return {
     list({ query, limit, offset }) {
       const normalized = query?.trim().toLowerCase();
@@ -43,7 +48,7 @@ export function openCatalogStore(path: string): CatalogStore {
   let db: DatabaseSync;
   try { db = new DatabaseSync(path, { readOnly: true }); } catch { return createCatalogStore({ secrets: [], profiles: [], projects: [] }); }
   try {
-    const secrets = (db.prepare(`SELECT s.id, s.name, s.provider_id, s.env_key, s.status, s.tags_json, EXISTS(SELECT 1 FROM secret_payloads p WHERE p.secret_id = s.id) AS has_value FROM secrets s ORDER BY s.updated_at DESC`).all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), provider: String(row.provider_id), envKey: String(row.env_key), status: String(row.status), tags: parseTags(row.tags_json), hasValue: Number(row.has_value) === 1 }));
+    const secrets = (db.prepare(`SELECT s.id, s.name, s.provider_id, s.env_key, s.status, s.tags_json, s.value_type, s.category, s.scope, s.favorite, s.archived, EXISTS(SELECT 1 FROM secret_payloads p WHERE p.secret_id = s.id) AS has_value FROM secrets s ORDER BY s.updated_at DESC`).all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), provider: String(row.provider_id), envKey: String(row.env_key), status: String(row.status), tags: parseTags(row.tags_json), hasValue: Number(row.has_value) === 1, valueType: String(row.value_type), category: String(row.category), scope: String(row.scope), favorite: Number(row.favorite) === 1, archived: Number(row.archived) === 1 }));
     const profiles = (db.prepare('SELECT id, name, description FROM profiles ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), description: String(row.description), secretIds: (db.prepare('SELECT secret_id FROM profile_secrets WHERE profile_id = ? ORDER BY position').all(String(row.id)) as Array<Record<string, unknown>>).map((item) => String(item.secret_id)) }));
     const projects = (db.prepare('SELECT id, path, display_name, last_used_at FROM projects ORDER BY last_used_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), path: String(row.path), displayName: String(row.display_name), lastUsedAt: Number(row.last_used_at) }));
     return createCatalogStore({ secrets, profiles, projects });

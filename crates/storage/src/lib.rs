@@ -24,6 +24,11 @@ pub struct SecretMetadata {
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub value_type: String,
+    pub category: String,
+    pub scope: String,
+    pub favorite: bool,
+    pub archived: bool,
 }
 
 pub struct NewSecret {
@@ -44,6 +49,27 @@ pub struct UpdatedSecret {
     pub tags: Vec<String>,
     pub ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretAttributes {
+    pub value_type: String,
+    pub category: String,
+    pub scope: String,
+    pub favorite: bool,
+    pub archived: bool,
+}
+
+impl Default for SecretAttributes {
+    fn default() -> Self {
+        Self {
+            value_type: "api_key".into(),
+            category: "other".into(),
+            scope: "global".into(),
+            favorite: false,
+            archived: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -114,6 +140,11 @@ impl Database {
                 description TEXT NOT NULL DEFAULT '',
                 tags_json TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL DEFAULT 'unknown',
+                value_type TEXT NOT NULL DEFAULT 'api_key',
+                category TEXT NOT NULL DEFAULT 'other',
+                scope TEXT NOT NULL DEFAULT 'global',
+                favorite INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
              );
@@ -163,6 +194,36 @@ impl Database {
                 require_auth_before_reveal INTEGER NOT NULL DEFAULT 1
              );",
         )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "value_type",
+            "TEXT NOT NULL DEFAULT 'api_key'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "category",
+            "TEXT NOT NULL DEFAULT 'other'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "scope",
+            "TEXT NOT NULL DEFAULT 'global'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "favorite",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "archived",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         Ok(Self {
             connection,
             database_path,
@@ -200,14 +261,22 @@ impl Database {
     }
 
     pub fn create_secret(&self, secret: NewSecret) -> Result<String, StorageError> {
+        self.create_secret_with_attributes(secret, SecretAttributes::default())
+    }
+
+    pub fn create_secret_with_attributes(
+        &self,
+        secret: NewSecret,
+        attributes: SecretAttributes,
+    ) -> Result<String, StorageError> {
         let id = format!("secret-{}", uuid::Uuid::new_v4());
         let now = unix_time();
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
         self.connection.execute(
-            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, now],
+            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, now],
         )?;
         self.connection.execute(
             "INSERT INTO secret_payloads(secret_id, ciphertext, nonce) VALUES (?1, ?2, ?3)",
@@ -218,14 +287,14 @@ impl Database {
 
     pub fn get_metadata(&self, id: &str) -> Result<Option<SecretMetadata>, StorageError> {
         self.connection.query_row(
-            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at FROM secrets WHERE id = ?1",
+            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived FROM secrets WHERE id = ?1",
             params![id],
             metadata_from_row,
         ).optional().map_err(Into::into)
     }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, StorageError> {
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at FROM secrets ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived FROM secrets ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map([], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -234,7 +303,7 @@ impl Database {
 
     pub fn search_metadata(&self, query: &str) -> Result<Vec<SecretMetadata>, StorageError> {
         let pattern = format!("%{}%", query);
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map(params![pattern], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -260,10 +329,19 @@ impl Database {
     }
 
     pub fn update_secret(&self, id: &str, secret: UpdatedSecret) -> Result<bool, StorageError> {
+        self.update_secret_with_attributes(id, secret, SecretAttributes::default())
+    }
+
+    pub fn update_secret_with_attributes(
+        &self,
+        id: &str,
+        secret: UpdatedSecret,
+        attributes: SecretAttributes,
+    ) -> Result<bool, StorageError> {
         let now = unix_time();
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
-        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, updated_at = ?6 WHERE id = ?7", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, now, id])?;
+        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, updated_at = ?11 WHERE id = ?12", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, now, id])?;
         if updated == 0 {
             return Ok(false);
         }
@@ -422,7 +500,31 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         status: row.get(6)?,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+        value_type: row.get(9)?,
+        category: row.get(10)?,
+        scope: row.get(11)?,
+        favorite: row.get::<_, i64>(12)? != 0,
+        archived: row.get::<_, i64>(13)? != 0,
     })
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if columns.iter().any(|existing| existing == column) {
+        return Ok(());
+    }
+    connection.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+    ))?;
+    Ok(())
 }
 
 fn unix_time() -> i64 {
