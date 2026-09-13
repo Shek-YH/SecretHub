@@ -11,5 +11,5 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R05 | Desktop | shell, list, detail, add/edit, search, zh/en switch | COMPLETED | Vitest + Playwright E2E |
 | R06 | Export | selection, folder picker, preview, dotenv, conflict, gitignore | COMPLETED | exporter tests + Tauri commands |
 | R07 | Profile | create/edit/apply, project history | COMPLETED | profile/storage tests + UI pages |
-| R08 | Provider | registry, detection, fixed validators | IN_PROGRESS | registry/detection complete; network validators pending |
-| R09 | QA | unit/integration/security/E2E/release artifacts | IN_PROGRESS | automated gates pass; manual installer acceptance pending |
+| R08 | Provider | registry, detection, fixed validators | COMPLETED | registry + HTTPS/SSRF tests |
+| R09 | QA | unit/integration/security/E2E/release artifacts | IN_PROGRESS | automated gates pass; native window manual acceptance pending |

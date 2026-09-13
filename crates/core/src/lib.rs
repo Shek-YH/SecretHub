@@ -48,18 +48,27 @@ pub struct VaultService {
 
 impl VaultService {
     pub fn open(database: Database) -> Result<Self, VaultError> {
-        Ok(Self { database, key: None })
+        Ok(Self {
+            database,
+            key: None,
+        })
     }
 
     pub fn is_initialized(&self) -> Result<bool, VaultError> {
         Ok(self.database.get_vault_meta()?.is_some())
     }
 
-    pub fn is_unlocked(&self) -> bool { self.key.is_some() }
+    pub fn is_unlocked(&self) -> bool {
+        self.key.is_some()
+    }
 
     pub fn setup_master(&mut self, password: &str) -> Result<(), VaultError> {
-        if self.is_initialized()? { return Err(VaultError::AlreadyInitialized); }
-        if password.len() < 12 { return Err(VaultError::InvalidPassword); }
+        if self.is_initialized()? {
+            return Err(VaultError::AlreadyInitialized);
+        }
+        if password.len() < 12 {
+            return Err(VaultError::InvalidPassword);
+        }
         let salt = generate_salt();
         let key = derive_key(password, &salt)?;
         let verifier = verifier_for(&key);
@@ -69,14 +78,25 @@ impl VaultService {
     }
 
     pub fn unlock(&mut self, password: &str) -> Result<(), VaultError> {
-        let Some((salt, expected_verifier)) = self.database.get_vault_meta()? else { return Err(VaultError::NotInitialized); };
+        let Some((salt, expected_verifier)) = self.database.get_vault_meta()? else {
+            return Err(VaultError::NotInitialized);
+        };
         let key = derive_key(password, &salt)?;
-        if verifier_for(&key).as_slice().ct_eq(expected_verifier.as_slice()).unwrap_u8() != 1 { return Err(VaultError::InvalidPassword); }
+        if verifier_for(&key)
+            .as_slice()
+            .ct_eq(expected_verifier.as_slice())
+            .unwrap_u8()
+            != 1
+        {
+            return Err(VaultError::InvalidPassword);
+        }
         self.key = Some(key);
         Ok(())
     }
 
-    pub fn lock(&mut self) { self.key.take(); }
+    pub fn lock(&mut self) {
+        self.key.take();
+    }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, VaultError> {
         self.require_key()?;
@@ -90,51 +110,145 @@ impl VaultService {
 
     pub fn create_secret(&self, input: NewSecretInput) -> Result<String, VaultError> {
         let key = self.require_key()?;
-        if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty() { return Err(VaultError::InvalidSecret); }
+        if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty()
+        {
+            return Err(VaultError::InvalidSecret);
+        }
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
         let value_hash = format!("sha256:{:x}", Sha256::digest(input.value.as_bytes()));
-        let id = self.database.create_secret(NewSecret { name: input.name, provider_id: input.provider_id, env_key: input.env_key, description: input.description, tags: input.tags, ciphertext: encrypted.ciphertext, nonce: encrypted.nonce.to_vec() })?;
-        self.database.record_audit("create_secret", Some(&id), Some(&value_hash), "success", "{\"source\":\"desktop\"}")?;
+        let id = self.database.create_secret(NewSecret {
+            name: input.name,
+            provider_id: input.provider_id,
+            env_key: input.env_key,
+            description: input.description,
+            tags: input.tags,
+            ciphertext: encrypted.ciphertext,
+            nonce: encrypted.nonce.to_vec(),
+        })?;
+        self.database.record_audit(
+            "create_secret",
+            Some(&id),
+            Some(&value_hash),
+            "success",
+            "{\"source\":\"desktop\"}",
+        )?;
         Ok(id)
     }
 
     pub fn read_secret(&self, id: &str) -> Result<String, VaultError> {
         let key = self.require_key()?;
-        let Some((ciphertext, nonce)) = self.database.get_payload(id)? else { return Err(VaultError::InvalidSecret); };
-        if nonce.len() != 12 { return Err(VaultError::InvalidSecret); }
+        let Some((ciphertext, nonce)) = self.database.get_payload(id)? else {
+            return Err(VaultError::InvalidSecret);
+        };
+        if nonce.len() != 12 {
+            return Err(VaultError::InvalidSecret);
+        }
         let mut nonce_bytes = [0u8; 12];
         nonce_bytes.copy_from_slice(&nonce);
-        let plaintext = decrypt(key, &secrethub_crypto::EncryptedPayload { nonce: nonce_bytes, ciphertext }, PAYLOAD_AAD)?;
+        let plaintext = decrypt(
+            key,
+            &secrethub_crypto::EncryptedPayload {
+                nonce: nonce_bytes,
+                ciphertext,
+            },
+            PAYLOAD_AAD,
+        )?;
         String::from_utf8(plaintext).map_err(|_| VaultError::InvalidUtf8)
     }
 
     pub fn update_secret(&self, id: &str, input: NewSecretInput) -> Result<(), VaultError> {
         let key = self.require_key()?;
-        if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty() { return Err(VaultError::InvalidSecret); }
+        if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty()
+        {
+            return Err(VaultError::InvalidSecret);
+        }
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
         let value_hash = format!("sha256:{:x}", Sha256::digest(input.value.as_bytes()));
-        if !self.database.update_secret(id, UpdatedSecret { name: input.name, provider_id: input.provider_id, env_key: input.env_key, description: input.description, tags: input.tags, ciphertext: encrypted.ciphertext, nonce: encrypted.nonce.to_vec() })? { return Err(VaultError::InvalidSecret); }
-        self.database.record_audit("update_secret", Some(id), Some(&value_hash), "success", "{\"source\":\"desktop\"}")?;
+        if !self.database.update_secret(
+            id,
+            UpdatedSecret {
+                name: input.name,
+                provider_id: input.provider_id,
+                env_key: input.env_key,
+                description: input.description,
+                tags: input.tags,
+                ciphertext: encrypted.ciphertext,
+                nonce: encrypted.nonce.to_vec(),
+            },
+        )? {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database.record_audit(
+            "update_secret",
+            Some(id),
+            Some(&value_hash),
+            "success",
+            "{\"source\":\"desktop\"}",
+        )?;
         Ok(())
     }
 
     pub fn delete_secret(&self, id: &str) -> Result<bool, VaultError> {
         self.require_key()?;
         let deleted = self.database.delete_secret(id)?;
-        if deleted { self.database.record_audit("delete_secret", Some(id), None, "success", "{\"source\":\"desktop\"}")?; }
+        if deleted {
+            self.database.record_audit(
+                "delete_secret",
+                Some(id),
+                None,
+                "success",
+                "{\"source\":\"desktop\"}",
+            )?;
+        }
         Ok(deleted)
     }
 
-    pub fn list_audit(&self) -> Result<Vec<secrethub_storage::AuditEvent>, VaultError> { self.database.list_audit().map_err(Into::into) }
-    pub fn save_profile(&self, profile: secrethub_storage::StoredProfile) -> Result<(), VaultError> { self.require_key()?; self.database.save_profile(&profile).map_err(Into::into) }
-    pub fn list_profiles(&self) -> Result<Vec<secrethub_storage::StoredProfile>, VaultError> { self.require_key()?; self.database.list_profiles().map_err(Into::into) }
-    pub fn record_project(&self, path: &str, display_name: &str) -> Result<secrethub_storage::ProjectRecord, VaultError> { self.require_key()?; self.database.record_project(path, display_name).map_err(Into::into) }
-    pub fn list_projects(&self) -> Result<Vec<secrethub_storage::ProjectRecord>, VaultError> { self.require_key()?; self.database.list_projects().map_err(Into::into) }
-    pub fn get_settings(&self) -> Result<secrethub_storage::Settings, VaultError> { self.database.get_settings().map_err(Into::into) }
-    pub fn update_settings(&self, settings: secrethub_storage::Settings) -> Result<(), VaultError> { self.database.update_settings(&settings).map_err(Into::into) }
-    pub fn encrypted_backup(&self) -> Result<Vec<u8>, VaultError> { let key = self.require_key()?; let contents = std::fs::read(self.database.path()).map_err(|_| VaultError::InvalidSecret)?; secrethub_backup::create_backup(key, &contents).map_err(|error| VaultError::Storage(StorageError::InvalidData(error.to_string()))) }
+    pub fn list_audit(&self) -> Result<Vec<secrethub_storage::AuditEvent>, VaultError> {
+        self.database.list_audit().map_err(Into::into)
+    }
+    pub fn save_profile(
+        &self,
+        profile: secrethub_storage::StoredProfile,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        self.database.save_profile(&profile).map_err(Into::into)
+    }
+    pub fn list_profiles(&self) -> Result<Vec<secrethub_storage::StoredProfile>, VaultError> {
+        self.require_key()?;
+        self.database.list_profiles().map_err(Into::into)
+    }
+    pub fn record_project(
+        &self,
+        path: &str,
+        display_name: &str,
+    ) -> Result<secrethub_storage::ProjectRecord, VaultError> {
+        self.require_key()?;
+        self.database
+            .record_project(path, display_name)
+            .map_err(Into::into)
+    }
+    pub fn list_projects(&self) -> Result<Vec<secrethub_storage::ProjectRecord>, VaultError> {
+        self.require_key()?;
+        self.database.list_projects().map_err(Into::into)
+    }
+    pub fn get_settings(&self) -> Result<secrethub_storage::Settings, VaultError> {
+        self.database.get_settings().map_err(Into::into)
+    }
+    pub fn update_settings(&self, settings: secrethub_storage::Settings) -> Result<(), VaultError> {
+        self.database.update_settings(&settings).map_err(Into::into)
+    }
+    pub fn encrypted_backup(&self) -> Result<Vec<u8>, VaultError> {
+        let key = self.require_key()?;
+        self.database.checkpoint()?;
+        let contents =
+            std::fs::read(self.database.path()).map_err(|_| VaultError::InvalidSecret)?;
+        secrethub_backup::create_backup(key, &contents)
+            .map_err(|error| VaultError::Storage(StorageError::InvalidData(error.to_string())))
+    }
 
-    fn require_key(&self) -> Result<&VaultKey, VaultError> { self.key.as_ref().ok_or(VaultError::Locked) }
+    fn require_key(&self) -> Result<&VaultKey, VaultError> {
+        self.key.as_ref().ok_or(VaultError::Locked)
+    }
 }
 
 fn verifier_for(key: &VaultKey) -> Vec<u8> {

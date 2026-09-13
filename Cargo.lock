@@ -3434,6 +3434,7 @@ dependencies = [
  "secrethub-storage",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
 ]

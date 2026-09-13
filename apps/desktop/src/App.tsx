@@ -176,7 +176,14 @@ function SecretRow({ secret, selected, checked, t, onClick, onToggle }: { secret
 function Field({ label, value }: { label: string; value: string }) { return <div><span className="field-label">{label}</span><strong className="field-value">{value}</strong></div>; }
 
 function SettingsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
-  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div></section>;
+  const [message, setMessage] = useState('');
+  async function exportBackup() {
+    const folder = isTauriRuntime() ? await backend.chooseFolder() : '.';
+    if (!folder) return;
+    if (isTauriRuntime()) await backend.backup(`${folder}/SecretHub.secrethub-backup`);
+    setMessage(t.settings.backupSaved);
+  }
+  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
 }
 
 function ProfilePanel({ t, selectedIds }: { t: ReturnType<typeof getTranslation>; selectedIds: string[] }) {

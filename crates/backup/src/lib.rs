@@ -23,8 +23,18 @@ pub fn create_backup(key: &VaultKey, contents: &[u8]) -> Result<Vec<u8>, BackupE
 }
 
 pub fn restore_backup(key: &VaultKey, backup: &[u8]) -> Result<Vec<u8>, BackupError> {
-    if backup.len() < HEADER.len() + 12 + 16 || &backup[..HEADER.len()] != HEADER { return Err(BackupError::InvalidFormat); }
+    if backup.len() < HEADER.len() + 12 + 16 || &backup[..HEADER.len()] != HEADER {
+        return Err(BackupError::InvalidFormat);
+    }
     let mut nonce = [0u8; 12];
     nonce.copy_from_slice(&backup[HEADER.len()..HEADER.len() + 12]);
-    decrypt(key, &EncryptedPayload { nonce, ciphertext: backup[HEADER.len() + 12..].to_vec() }, AAD).map_err(Into::into)
+    decrypt(
+        key,
+        &EncryptedPayload {
+            nonce,
+            ciphertext: backup[HEADER.len() + 12..].to_vec(),
+        },
+        AAD,
+    )
+    .map_err(Into::into)
 }

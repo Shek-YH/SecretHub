@@ -7,6 +7,11 @@ fn backup_bytes_are_encrypted_and_round_trip() {
     let key = derive_key("correct horse battery staple", &salt).unwrap();
     let backup = create_backup(&key, b"encrypted-vault-fixture").unwrap();
 
-    assert!(!backup.windows(b"encrypted-vault-fixture".len()).any(|window| window == b"encrypted-vault-fixture"));
-    assert_eq!(restore_backup(&key, &backup).unwrap(), b"encrypted-vault-fixture");
+    assert!(!backup
+        .windows(b"encrypted-vault-fixture".len())
+        .any(|window| window == b"encrypted-vault-fixture"));
+    assert_eq!(
+        restore_backup(&key, &backup).unwrap(),
+        b"encrypted-vault-fixture"
+    );
 }

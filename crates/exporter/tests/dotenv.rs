@@ -1,4 +1,6 @@
-use secrethub_exporter::{detect_conflicts, ensure_gitignore_env, gitignore_has_env, render_env, render_example, EnvEntry};
+use secrethub_exporter::{
+    detect_conflicts, ensure_gitignore_env, gitignore_has_env, render_env, render_example, EnvEntry,
+};
 
 #[test]
 fn writes_values_with_spaces_hash_quotes_json_unicode_and_multiline_safely() {

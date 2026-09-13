@@ -25,4 +25,5 @@ export const backend = {
   projects: () => invoke<Array<{ id: string; path: string; display_name: string; last_used_at: number }>>('project_list'),
   recordProject: (path: string, display_name: string) => invoke<void>('project_record', { path, display_name }),
   audit: () => invoke<Array<{ id: string; operation: string; result: string; created_at: number }>>('audit_list'),
+  backup: (path: string) => invoke<void>('backup_export', { path }),
 };

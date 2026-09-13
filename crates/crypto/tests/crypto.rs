@@ -7,7 +7,10 @@ fn encrypts_and_decrypts_without_exposing_plaintext_in_ciphertext() {
     let encrypted = encrypt(&key, b"fixture-secret-value", b"secret:v1").unwrap();
 
     assert_ne!(encrypted.ciphertext, b"fixture-secret-value");
-    assert_eq!(decrypt(&key, &encrypted, b"secret:v1").unwrap(), b"fixture-secret-value");
+    assert_eq!(
+        decrypt(&key, &encrypted, b"secret:v1").unwrap(),
+        b"fixture-secret-value"
+    );
 }
 
 #[test]

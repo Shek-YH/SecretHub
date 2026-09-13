@@ -1,1 +1,3 @@
-fn main() { secrethub_desktop_lib::run(); }
+fn main() {
+    secrethub_desktop_lib::run();
+}

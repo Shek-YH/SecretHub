@@ -9,7 +9,7 @@ export type Translation = {
   form: { addTitle: string; editTitle: string; name: string; envKey: string; provider: string; value: string; notes: string; tags: string; cancel: string; save: string; required: string };
   security: { localOnly: string; encrypted: string; audit: string; locked: string; unlock: string; warning: string };
   auth: { setupTitle: string; unlockTitle: string; subtitle: string; password: string; confirmPassword: string; setup: string; unlock: string; minLength: string; mismatch: string };
-  settings: { title: string; general: string; security: string; ai: string; theme: string; defaultExport: string; autoLock: string; requireAuth: string; language: string; on: string; off: string };
+  settings: { title: string; general: string; security: string; ai: string; theme: string; defaultExport: string; autoLock: string; requireAuth: string; language: string; backup: string; backupSaved: string; on: string; off: string };
   profile: { title: string; name: string; save: string; apply: string; saved: string; empty: string };
   project: { title: string; recent: string; record: string; empty: string };
   auditPanel: { title: string; operation: string; result: string; empty: string };
@@ -26,7 +26,7 @@ export const translations: Record<Locale, Translation> = {
     form: { addTitle: '添加凭据', editTitle: '编辑凭据', name: '名称', envKey: '环境变量名', provider: '服务商', value: 'Secret 值', notes: '备注', tags: '标签（逗号分隔）', cancel: '取消', save: '保存凭据', required: '必填' },
     security: { localOnly: '仅保存在本机', encrypted: 'AES-256-GCM 加密', audit: '操作可审计且不记录明文', locked: '保险库已锁定', unlock: '解锁保险库', warning: '安全提示：Secret 值不会进入浏览器存储、日志或 AI 上下文。' },
     auth: { setupTitle: '创建本地保险库', unlockTitle: '解锁 SecretHub', subtitle: 'Master Password 只保存在本机，无法通过服务器找回。', password: 'Master Password', confirmPassword: '确认 Password', setup: '创建并解锁', unlock: '解锁保险库', minLength: '至少 12 个字符', mismatch: '两次输入的 Password 不一致' },
-    settings: { title: '设置', general: '常规', security: '安全', ai: 'AI / MCP', theme: '主题', defaultExport: '默认导出文件', autoLock: '自动锁定', requireAuth: '导出前需要验证', language: '显示语言', on: '开启', off: '关闭' },
+    settings: { title: '设置', general: '常规', security: '安全', ai: 'AI / MCP', theme: '主题', defaultExport: '默认导出文件', autoLock: '自动锁定', requireAuth: '导出前需要验证', language: '显示语言', backup: '导出加密备份', backupSaved: '加密备份已写入所选目录', on: '开启', off: '关闭' },
     profile: { title: '配置组合', name: '组合名称', save: '保存组合', apply: '应用组合', saved: '组合已保存', empty: '还没有配置组合' },
     project: { title: '项目历史', recent: '最近使用的项目', record: '记录当前项目', empty: '还没有项目记录' },
     auditPanel: { title: '操作审计', operation: '操作', result: '结果', empty: '还没有审计事件' },
@@ -41,7 +41,7 @@ export const translations: Record<Locale, Translation> = {
     form: { addTitle: 'Add secret', editTitle: 'Edit secret', name: 'Name', envKey: 'Environment key', provider: 'Provider', value: 'Secret value', notes: 'Notes', tags: 'Tags (comma separated)', cancel: 'Cancel', save: 'Save secret', required: 'Required' },
     security: { localOnly: 'Stored on this device', encrypted: 'AES-256-GCM encrypted', audit: 'Audited without plaintext', locked: 'Vault is locked', unlock: 'Unlock vault', warning: 'Security note: secret values never enter browser storage, logs or AI context.' },
     auth: { setupTitle: 'Create local vault', unlockTitle: 'Unlock SecretHub', subtitle: 'Your Master Password stays on this device and cannot be recovered by a server.', password: 'Master Password', confirmPassword: 'Confirm password', setup: 'Create and unlock', unlock: 'Unlock vault', minLength: 'At least 12 characters', mismatch: 'The passwords do not match' },
-    settings: { title: 'Settings', general: 'General', security: 'Security', ai: 'AI / MCP', theme: 'Theme', defaultExport: 'Default export file', autoLock: 'Auto lock', requireAuth: 'Require verification before export', language: 'Display language', on: 'On', off: 'Off' },
+    settings: { title: 'Settings', general: 'General', security: 'Security', ai: 'AI / MCP', theme: 'Theme', defaultExport: 'Default export file', autoLock: 'Auto lock', requireAuth: 'Require verification before export', language: 'Display language', backup: 'Export encrypted backup', backupSaved: 'Encrypted backup written to the selected folder', on: 'On', off: 'Off' },
     profile: { title: 'Profiles', name: 'Profile name', save: 'Save profile', apply: 'Apply profile', saved: 'Profile saved', empty: 'No profiles yet' },
     project: { title: 'Project history', recent: 'Recently used projects', record: 'Record current project', empty: 'No project history yet' },
     auditPanel: { title: 'Audit log', operation: 'Operation', result: 'Result', empty: 'No audit events yet' },
