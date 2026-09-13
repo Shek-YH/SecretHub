@@ -1,0 +1,1 @@
+{"roles":[{"id":"orchestrator","name":"Orchestrator","scope":"ledger, dependency order, evidence"},{"id":"core-security","name":"Core Security","scope":"crypto, storage, redaction, policy"},{"id":"desktop-ui","name":"Desktop UI","scope":"Tauri shell, React UI, localization"},{"id":"qa-release","name":"QA and Release","scope":"tests, security scans, packaging"}]}

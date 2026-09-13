@@ -1,0 +1,14 @@
+{
+  "id": "secrethub",
+  "name": "SecretHub",
+  "version": "1.0.0-mvp",
+  "complexity": "COMPLEX",
+  "executionMode": "constrained-single-agent",
+  "defaultLocale": "zh-CN",
+  "activePrd": "SecretHub_Codex_PRD.md",
+  "sourceOfTruth": "docs/governance/SOURCE_OF_TRUTH.md",
+  "status": "IN_PROGRESS",
+  "progress": 4,
+  "createdAt": "2026-09-13T13:00:00Z",
+  "updatedAt": "2026-09-13T13:00:00Z"
+}
