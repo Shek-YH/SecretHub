@@ -29,6 +29,8 @@ pub struct SecretMetadata {
     pub scope: String,
     pub favorite: bool,
     pub archived: bool,
+    pub model_id: String,
+    pub model_env_key: String,
 }
 
 pub struct NewSecret {
@@ -58,6 +60,8 @@ pub struct SecretAttributes {
     pub scope: String,
     pub favorite: bool,
     pub archived: bool,
+    pub model_id: String,
+    pub model_env_key: String,
 }
 
 impl Default for SecretAttributes {
@@ -68,6 +72,8 @@ impl Default for SecretAttributes {
             scope: "global".into(),
             favorite: false,
             archived: false,
+            model_id: String::new(),
+            model_env_key: String::new(),
         }
     }
 }
@@ -145,6 +151,8 @@ impl Database {
                 scope TEXT NOT NULL DEFAULT 'global',
                 favorite INTEGER NOT NULL DEFAULT 0,
                 archived INTEGER NOT NULL DEFAULT 0,
+                model_id TEXT NOT NULL DEFAULT '',
+                model_env_key TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
              );
@@ -221,6 +229,18 @@ impl Database {
         add_column_if_missing(
             &connection,
             "secrets",
+            "model_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "model_env_key",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
             "archived",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
@@ -274,9 +294,9 @@ impl Database {
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
         self.connection.execute(
-            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, now],
+            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, model_id, model_env_key, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, now],
         )?;
         self.connection.execute(
             "INSERT INTO secret_payloads(secret_id, ciphertext, nonce) VALUES (?1, ?2, ?3)",
@@ -287,14 +307,14 @@ impl Database {
 
     pub fn get_metadata(&self, id: &str) -> Result<Option<SecretMetadata>, StorageError> {
         self.connection.query_row(
-            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived FROM secrets WHERE id = ?1",
+            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key FROM secrets WHERE id = ?1",
             params![id],
             metadata_from_row,
         ).optional().map_err(Into::into)
     }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, StorageError> {
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived FROM secrets ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key FROM secrets ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map([], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -303,7 +323,7 @@ impl Database {
 
     pub fn search_metadata(&self, query: &str) -> Result<Vec<SecretMetadata>, StorageError> {
         let pattern = format!("%{}%", query);
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map(params![pattern], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -341,7 +361,7 @@ impl Database {
         let now = unix_time();
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
-        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, updated_at = ?11 WHERE id = ?12", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, now, id])?;
+        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, updated_at = ?13 WHERE id = ?14", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, now, id])?;
         if updated == 0 {
             return Ok(false);
         }
@@ -505,6 +525,8 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         scope: row.get(11)?,
         favorite: row.get::<_, i64>(12)? != 0,
         archived: row.get::<_, i64>(13)? != 0,
+        model_id: row.get(14)?,
+        model_env_key: row.get(15)?,
     })
 }
 

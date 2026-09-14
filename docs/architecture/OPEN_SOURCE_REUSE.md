@@ -2,6 +2,8 @@
 
 The PRD identifies Townrain/API-Key-Manager, rapg, Infisical, Infisical MCP Server, dotenvx, Tene and envkeep as references. V1 initially uses no copied third-party source code. We will prefer small, independently licensed dependencies and record any actual reuse in `THIRD_PARTY_NOTICES.md` before shipping.
 
+The EchoBird `Model Nexus` source was inspected as a behavioral reference for this Work Item: a value-free provider directory supplies website, base URL, default model and optional model ID choices, and the add form consumes that entry. SecretHub copied no EchoBird source, assets, branding or UI layout; its local provider catalog is an independent implementation.
+
 ## Planned reference boundaries
 
 - Provider registry and format detection: conceptual reference only until adapters are implemented.

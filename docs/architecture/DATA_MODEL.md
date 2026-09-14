@@ -7,10 +7,12 @@
 
 ## Secret
 
-- `secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, created_at, updated_at, last_used_at)`
+- `secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, model_id, model_env_key, created_at, updated_at, last_used_at)`
 - `secret_payloads(secret_id, ciphertext, nonce, algorithm, version)`
 
 The payload table is intentionally separated so metadata search never touches plaintext.
+
+`model_id` and `model_env_key` are value-free metadata. When selected for export, the existing encrypted payload supplies the API-key value and the model metadata supplies a separate model environment entry.
 
 ## Profile and project
 

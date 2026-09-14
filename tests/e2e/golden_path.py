@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 from playwright.sync_api import sync_playwright
 
 
@@ -8,7 +9,9 @@ def main() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True, executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe")
         page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.goto("http://127.0.0.1:1420", wait_until="networkidle")
+        page.set_default_timeout(3000)
+        page.goto("http://127.0.0.1:1420", wait_until="domcontentloaded")
+        page.wait_for_timeout(500)
         page.screenshot(path=str(evidence / "secrethub-ui-zh.png"), full_page=True)
         assert page.get_by_text("凭据中心").is_visible()
         page.get_by_role("button", name="English").click()
@@ -18,8 +21,9 @@ def main() -> None:
         assert page.get_by_text("凭据中心").is_visible()
         page.get_by_role("button", name="添加凭据").first.click()
         dialog = page.get_by_role("dialog")
+        dialog.get_by_role("button", name=re.compile("OpenAI")).click()
         dialog.get_by_label("名称").fill("Browser Fixture")
-        dialog.get_by_label("环境变量名").fill("BROWSER_FIXTURE_KEY")
+        assert dialog.get_by_label("环境变量名").get_attribute("required") is None
         dialog.get_by_label("Secret 值").fill("fixture-only-value")
         dialog.get_by_role("button", name="保存凭据").click()
         assert page.get_by_text("Browser Fixture").is_visible()

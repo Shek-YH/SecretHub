@@ -39,6 +39,10 @@ pub struct SecretCreateRequest {
     pub favorite: bool,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub model_id: String,
+    #[serde(default)]
+    pub model_env_key: String,
 }
 
 fn default_value_type() -> String {
@@ -211,6 +215,8 @@ pub fn secret_create(
                 scope: request.scope,
                 favorite: request.favorite,
                 archived: request.archived,
+                model_id: request.model_id,
+                model_env_key: request.model_env_key,
             },
         )
         .map_err(|error| error.to_string())
@@ -242,6 +248,8 @@ pub fn secret_update(
                 scope: request.scope,
                 favorite: request.favorite,
                 archived: request.archived,
+                model_id: request.model_id,
+                model_env_key: request.model_env_key,
             },
         )
         .map_err(|error| error.to_string())
@@ -319,16 +327,21 @@ pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), Strin
 
 fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>, String> {
     let metadata = vault.list_metadata().map_err(|error| error.to_string())?;
-    ids.iter()
-        .map(|id| {
-            let item = metadata
-                .iter()
-                .find(|item| item.id == *id)
-                .ok_or_else(|| "secret not found".to_owned())?;
-            let value = vault.read_secret(id).map_err(|error| error.to_string())?;
-            Ok(EnvEntry::new(&item.env_key, value))
-        })
-        .collect()
+    let mut entries = Vec::new();
+    for id in ids {
+        let item = metadata
+            .iter()
+            .find(|item| item.id == *id)
+            .ok_or_else(|| "secret not found".to_owned())?;
+        let value = vault.read_secret(id).map_err(|error| error.to_string())?;
+        if !item.env_key.trim().is_empty() {
+            entries.push(EnvEntry::new(&item.env_key, value.clone()));
+        }
+        if !item.model_id.trim().is_empty() && !item.model_env_key.trim().is_empty() {
+            entries.push(EnvEntry::new(&item.model_env_key, item.model_id.clone()));
+        }
+    }
+    Ok(entries)
 }
 
 fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {

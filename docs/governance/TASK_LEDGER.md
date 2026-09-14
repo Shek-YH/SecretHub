@@ -18,3 +18,4 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R12 | Import / AI bridge | `.env`/JSON import and confirmation boundary | COMPLETED | parser/Tauri commands/pending-plan bridge; native manual visual acceptance remains under R09 |
 | R13 | Agent Proxy | short-lived token and fixed endpoint policy | WAITING_USER | HTTP forwarding and unauthorized tests pass; real-provider smoke needs local test credential |
 | R14 | Classification | type/category/scope/favorite/archived metadata and filters | COMPLETED | storage/core tests + desktop filters |
+| R15 | Provider templates | provider-first add flow, model metadata and optional env key | COMPLETED | provider/model tests, E2E, Rust migration and Tauri package pass; real provider/manual acceptance remains separate |

@@ -8,4 +8,16 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByText('凭据')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'English' })).toBeInTheDocument();
   });
+
+  it('opens provider templates before the secret form and makes env key optional', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    await user.click(screen.getByRole('button', { name: /DeepSeek/ }));
+    expect(screen.getAllByDisplayValue('DeepSeek').length).toBeGreaterThan(0);
+    const envKey = screen.getByPlaceholderText('OPENAI_API_KEY');
+    expect(envKey).not.toBeRequired();
+    expect(screen.getByText('前往官网生成 / 更新 ↗')).toBeInTheDocument();
+    expect(screen.getByText(/DeepSeek Chat/)).toBeInTheDocument();
+  });
 });

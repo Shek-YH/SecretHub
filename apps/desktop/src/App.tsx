@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { backend, isTauriRuntime, type PendingPlan, type VaultStatus } from './lib/backend';
+import { defaultApiKeyEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
 
 type SecretMetadata = {
   id: string;
@@ -15,6 +16,8 @@ type SecretMetadata = {
   category?: string;
   scope?: string;
   archived?: boolean;
+  modelId?: string;
+  modelEnvKey?: string;
 };
 
 const demoSecrets: SecretMetadata[] = [
@@ -48,7 +51,7 @@ export function App() {
 
   async function refreshSecrets() {
     if (!isTauriRuntime()) return;
-    try { setSecrets((await backend.list(query)).map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : 'unknown', updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived }))); setRuntimeError(null); } catch (error) { setRuntimeError(String(error)); }
+    try { setSecrets((await backend.list(query)).map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : 'unknown', updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key }))); setRuntimeError(null); } catch (error) { setRuntimeError(String(error)); }
   }
 
   useEffect(() => {
@@ -78,16 +81,16 @@ export function App() {
     setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
-  async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean }) {
+  async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string }) {
     if (editingSecret) {
       if (isTauriRuntime()) await backend.update(editingSecret.id, request);
-      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived } : secret));
+      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key } : secret));
       setEditingSecret(null);
       if (isTauriRuntime()) await refreshSecrets();
       return;
     }
     if (isTauriRuntime()) { await backend.create(request); await refreshSecrets(); return; }
-    const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, status: 'unknown', updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived };
+    const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, tags: request.tags, status: 'unknown', updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key };
     setSecrets((current) => [localSecret, ...current]);
   }
 
@@ -237,10 +240,52 @@ function McpPlanBanner({ plan, t, onConfirm }: { plan: PendingPlan; t: ReturnTyp
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }
 
-function SecretForm({ t, initial, onClose, onSave }: { t: ReturnType<typeof getTranslation>; initial: SecretMetadata | null; onClose: () => void; onSave: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean }) => Promise<void> }) {
-  const [name, setName] = useState(initial?.name ?? ''); const [envKey, setEnvKey] = useState(initial?.envKey ?? ''); const [provider, setProvider] = useState(initial?.provider ?? 'OpenAI'); const [value, setValue] = useState(''); const [valueType, setValueType] = useState(initial?.valueType ?? 'api_key'); const [category, setCategory] = useState(initial?.category ?? 'other'); const [scope, setScope] = useState(initial?.scope ?? 'global'); const [favorite, setFavorite] = useState(initial?.favorite ?? false); const [tags, setTags] = useState(initial?.tags.join(', ') ?? ''); const [notes, setNotes] = useState(''); const [error, setError] = useState('');
-  async function submit(event: FormEvent) { event.preventDefault(); try { await onSave({ name, provider_id: provider.toLowerCase(), env_key: envKey, description: notes, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean), value, value_type: valueType, category, scope, favorite, archived: initial?.archived ?? false }); onClose(); } catch (reason) { setError(String(reason)); } }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">NEW ENTRY / ENCRYPTED</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<input required value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.provider}<select value={provider} onChange={(event) => setProvider(event.target.value)}><option>OpenAI</option><option>Anthropic</option><option>Generic</option></select></label><label>{t.form.value}<input required value={value} onChange={(event) => setValue(event.target.value)} type="password" autoComplete="new-password" placeholder={initial ? 'Enter replacement value' : undefined} /></label><div className="form-two-col"><label>{t.form.valueType}<select value={valueType} onChange={(event) => setValueType(event.target.value)}><option value="api_key">API key</option><option value="token">Token</option><option value="url">URL</option><option value="password">Password</option><option value="text">Text</option></select></label><label>{t.form.category}<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select></label></div><label>{t.form.scope}<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="global">Global</option><option value="project">Project</option><option value="profile">Profile</option></select></label><label className="checkbox-label"><input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />{t.form.favorite}</label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
+type SecretRequest = { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string };
+
+function SecretForm({ t, initial, onClose, onSave }: { t: ReturnType<typeof getTranslation>; initial: SecretMetadata | null; onClose: () => void; onSave: (request: SecretRequest) => Promise<void> }) {
+  const existingProvider = initial ? providerTemplates.find((item) => item.id === initial.provider || item.name === initial.provider)?.id ?? 'custom' : '';
+  const [mode, setMode] = useState<'select' | 'form'>(initial ? 'form' : 'select');
+  const [name, setName] = useState(initial?.name ?? '');
+  const [envKey, setEnvKey] = useState(initial?.envKey ?? '');
+  const [provider, setProvider] = useState(existingProvider);
+  const [value, setValue] = useState('');
+  const [valueType, setValueType] = useState(initial?.valueType ?? 'api_key');
+  const [category, setCategory] = useState(initial?.category ?? 'other');
+  const [scope, setScope] = useState(initial?.scope ?? 'global');
+  const [favorite, setFavorite] = useState(initial?.favorite ?? false);
+  const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
+  const [notes, setNotes] = useState('');
+  const [modelId, setModelId] = useState(initial?.modelId ?? '');
+  const [modelEnvKey, setModelEnvKey] = useState(initial?.modelEnvKey ?? '');
+  const [error, setError] = useState('');
+  const template: ProviderTemplate = providerTemplate(provider);
+  const isCustomModel = template.id === 'custom' || !template.models.some((model) => model.id === modelId);
+
+  function selectTemplate(next: ProviderTemplate) {
+    const firstModel = next.models[0];
+    setProvider(next.id);
+    setName((current) => current || next.name);
+    setEnvKey((current) => current || defaultApiKeyEnvKey(next.id));
+    setModelId(firstModel.id);
+    setModelEnvKey(firstModel.envKey);
+    setCategory(next.id === 'custom' ? 'other' : 'ai');
+    setMode('form');
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await onSave({ name, provider_id: provider || 'custom', env_key: envKey.trim().toUpperCase(), description: notes, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean), value, value_type: valueType, category, scope, favorite, archived: initial?.archived ?? false, model_id: modelId.trim(), model_env_key: modelEnvKey.trim().toUpperCase() });
+      onClose();
+    } catch (reason) { setError(String(reason)); }
+  }
+
+  if (mode === 'select') {
+    return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.form.addTitle}><div className="secret-form provider-picker"><div className="form-heading"><div><span className="section-kicker">TEMPLATE CATALOG / PROVIDERS</span><h2>{t.form.addTitle}</h2><p className="form-intro">先选择服务商，下一步会自动填充模型和环境变量模板。</p></div><button type="button" className="close-button" onClick={onClose}>×</button></div><div className="provider-grid">{providerTemplates.map((item) => <button type="button" className="provider-card" key={item.id} onClick={() => selectTemplate(item)}><strong>{item.name}</strong><span>{item.models.length} models</span>{item.keyUrl && <small>API Key ↗</small>}</button>)}</div></div></div>;
+  }
+
+  const modelOptions = template.models;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">TEMPLATE / {template.name.toUpperCase()}</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2><p className="form-intro">已预填该服务商常用配置，可按需修改。</p></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.form.provider}<select value={provider} onChange={(event) => selectTemplate(providerTemplate(event.target.value))}>{providerTemplates.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>{template.keyUrl && <div className="provider-link-row"><span>API Key</span><a href={template.keyUrl} target="_blank" rel="noreferrer">前往官网生成 / 更新 ↗</a></div>}<label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<span className="optional-label">（可选）</span><input value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.value}<input required value={value} onChange={(event) => setValue(event.target.value)} type="password" autoComplete="new-password" placeholder={initial ? 'Enter replacement value' : undefined} /></label><div className="form-two-col"><label>{t.form.model}<select value={isCustomModel ? '__custom__' : modelId} onChange={(event) => { const next = event.target.value; if (next === '__custom__') { setModelId(''); setModelEnvKey('MODEL_NAME'); } else { const found = modelOptions.find((item) => item.id === next); setModelId(next); if (found) setModelEnvKey(found.envKey); } }}>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.label} · {model.id}</option>)}<option value="__custom__">自定义模型 ID</option></select>{isCustomModel && <input value={modelId} onChange={(event) => setModelId(event.target.value)} placeholder="your-model-id" />}</label><label>{t.form.modelEnvKey}<input value={modelEnvKey} onChange={(event) => setModelEnvKey(event.target.value)} placeholder="OPENAI_MODEL" /></label></div><div className="template-hint">API Base URL: <code>{template.baseUrl || '自定义填写'}</code></div><div className="form-two-col"><label>{t.form.valueType}<select value={valueType} onChange={(event) => setValueType(event.target.value)}><option value="api_key">API key</option><option value="token">Token</option><option value="url">URL</option><option value="password">Password</option><option value="text">Text</option></select>{valueType === 'url' && value.trim() && <button type="button" className="inline-link" onClick={() => window.open(value.trim(), '_blank', 'noopener,noreferrer')}>打开网址 ↗</button>}</label><label>{t.form.category}<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select></label></div><label>{t.form.scope}<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="global">Global</option><option value="project">Project</option><option value="profile">Profile</option></select></label><label className="checkbox-label"><input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />{t.form.favorite}</label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
 }
 
 function ExportPanel({ t, selectedIds, onClose }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void }) {

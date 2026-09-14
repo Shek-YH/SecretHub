@@ -118,8 +118,7 @@ impl VaultService {
         attributes: secrethub_storage::SecretAttributes,
     ) -> Result<String, VaultError> {
         let key = self.require_key()?;
-        if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty()
-        {
+        if input.name.trim().is_empty() || input.value.is_empty() {
             return Err(VaultError::InvalidSecret);
         }
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
@@ -182,8 +181,7 @@ impl VaultService {
         attributes: secrethub_storage::SecretAttributes,
     ) -> Result<(), VaultError> {
         let key = self.require_key()?;
-        if input.name.trim().is_empty() || input.env_key.trim().is_empty() || input.value.is_empty()
-        {
+        if input.name.trim().is_empty() || input.value.is_empty() {
             return Err(VaultError::InvalidSecret);
         }
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;

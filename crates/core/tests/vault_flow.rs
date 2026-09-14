@@ -95,6 +95,8 @@ fn creates_secret_with_classification_attributes() {
                 scope: "project".into(),
                 favorite: true,
                 archived: false,
+                model_id: "deepseek-chat".into(),
+                model_env_key: "DEEPSEEK_MODEL".into(),
             },
         )
         .unwrap();
@@ -106,6 +108,8 @@ fn creates_secret_with_classification_attributes() {
         .unwrap();
     assert_eq!(metadata.category, "ai");
     assert!(metadata.favorite);
+    assert_eq!(metadata.model_id, "deepseek-chat");
+    assert_eq!(metadata.model_env_key, "DEEPSEEK_MODEL");
 }
 
 #[test]
@@ -136,4 +140,23 @@ fn records_value_free_user_actions_in_the_audit_log() {
     assert_eq!(event.secret_id.as_deref(), Some(id.as_str()));
     assert!(event.value_hash.is_none());
     assert_eq!(event.metadata_json, "{\"source\":\"desktop\"}");
+}
+
+#[test]
+fn allows_a_secret_without_an_environment_key() {
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    let id = vault
+        .create_secret(NewSecretInput {
+            name: "Model-only entry".into(),
+            provider_id: "openai".into(),
+            env_key: String::new(),
+            description: String::new(),
+            tags: vec!["model".into()],
+            value: "fixture-model-only".into(),
+        })
+        .unwrap();
+    assert_eq!(vault.read_secret(&id).unwrap(), "fixture-model-only");
+    assert!(vault.list_metadata().unwrap()[0].env_key.is_empty());
 }

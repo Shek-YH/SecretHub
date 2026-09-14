@@ -160,6 +160,7 @@ fn persists_secret_classification_scope_and_flags() {
                 scope: "project".into(),
                 favorite: true,
                 archived: false,
+                ..Default::default()
             },
         )
         .unwrap();
