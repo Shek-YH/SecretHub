@@ -18,10 +18,10 @@ describe('SecretHub desktop shell', () => {
   it('opens the provider management view from the provider navigation', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
-    await user.click(screen.getByRole('button', { name: 'OpenAI' }));
-    expect(screen.getByRole('heading', { name: 'OpenAI' })).toBeInTheDocument();
-    expect(screen.getByText('可用模型模板')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: '配置此模型' })[0]);
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    expect(screen.getByRole('heading', { name: '服务商' })).toBeInTheDocument();
+    expect(screen.getByText('OpenAI')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: '配置' })[9]);
     expect(screen.getAllByRole('combobox')[1]).toHaveValue('gpt-5.6-sol');
     expect(screen.getByDisplayValue('https://api.openai.com/v1')).toBeInTheDocument();
   });
