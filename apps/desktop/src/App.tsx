@@ -165,7 +165,7 @@ export function App() {
           <NavItem active={activeNav === 'profiles'} label={t.nav.profiles} onClick={() => setActiveNav('profiles')} />
           <NavItem active={activeNav === 'projects'} label={t.nav.projects} onClick={() => setActiveNav('projects')} />
           <p className="nav-label">{t.nav.providers}</p>
-          {providerTemplates.slice(0, 5).map((provider) => <NavItem key={provider.id} active={activeNav === 'providers' && selectedProvider === provider.id} label={provider.name} dot="green" onClick={() => { setSelectedProvider(provider.id); setActiveNav('providers'); }} />)}
+          {providerTemplates.map((provider) => <NavItem key={provider.id} active={activeNav === 'providers' && selectedProvider === provider.id} label={provider.name} dot="green" onClick={() => { setSelectedProvider(provider.id); setActiveNav('providers'); }} />)}
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setActiveNav('settings')}><span className="nav-glyph">/</span>{t.nav.settings}</button>

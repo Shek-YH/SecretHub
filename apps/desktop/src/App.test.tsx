@@ -22,7 +22,7 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByRole('heading', { name: 'OpenAI' })).toBeInTheDocument();
     expect(screen.getByText('可用模型模板')).toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: '配置此模型' })[0]);
-    expect(screen.getAllByRole('combobox')[1]).toHaveValue('gpt-5.5');
+    expect(screen.getAllByRole('combobox')[1]).toHaveValue('gpt-5.6-sol');
     expect(screen.getByDisplayValue('https://api.openai.com/v1')).toBeInTheDocument();
   });
 
@@ -45,12 +45,12 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByRole('button', { name: /^Password/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Text/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^API KEY/ }));
-    await user.click(screen.getByRole('button', { name: /DeepSeek 2 models/ }));
+    await user.click(screen.getByRole('button', { name: /DeepSeek 3 models/ }));
     expect(screen.getAllByDisplayValue('DeepSeek').length).toBeGreaterThan(0);
     const envKey = screen.getByPlaceholderText('OPENAI_API_KEY');
     expect(envKey).not.toBeRequired();
     expect(screen.getByText('前往官网生成 / 更新 ↗')).toBeInTheDocument();
-    expect(screen.getByText(/DeepSeek Chat/)).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'DeepSeek V4 Flash · deepseek-v4-flash' })).toBeInTheDocument();
   });
 
   it('opens a type-specific Token form without showing the model catalog', async () => {

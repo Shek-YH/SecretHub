@@ -19,4 +19,13 @@ describe('provider model templates', () => {
     expect(custom?.models[0].id).toBe('custom-model');
     expect(custom?.baseUrl).toBe('');
   });
+
+  it('mirrors the expanded EchoBird directory and removes retired DeepSeek aliases', () => {
+    expect(providerTemplates.length).toBeGreaterThanOrEqual(30);
+    const deepseek = providerTemplates.find((provider) => provider.id === 'deepseek');
+    expect(deepseek?.models.map((model) => model.id)).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp']);
+    expect(providerTemplates.flatMap((provider) => provider.models).map((model) => model.id)).not.toContain('deepseek-chat');
+    expect(providerTemplates.flatMap((provider) => provider.models).map((model) => model.id)).not.toContain('deepseek-reasoner');
+    expect(providerTemplates.find((provider) => provider.id === 'hunyuan')?.models.map((model) => model.id)).not.toContain('hunyuan-t1-latest');
+  });
 });
