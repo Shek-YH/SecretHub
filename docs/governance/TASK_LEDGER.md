@@ -23,3 +23,4 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R17 | Reliability and quick actions | export feedback, edit persistence, system links and copy modes | COMPLETED | Rust workspace, desktop 7/7, MCP 4/4, E2E, security scan and Tauri package pass |
 | R18 | Export and validation semantics | Env-only copy/export, select all, fixed-provider validation | COMPLETED | native command tests 2/2, Core 7/7, provider endpoint tests, desktop 7/7 and package gates pass |
 | R19 | Request URL and profiles | request address Env projection and ID-backed profile CRUD | COMPLETED | Rust workspace, desktop 8/8, MCP 4/4 and Tauri package pass |
+| R20 | Profile detail editor | draft-based profile membership editor with nested credential picker | COMPLETED | Desktop 9/9 and latest frontend build pass; final Tauri rebuild pending |

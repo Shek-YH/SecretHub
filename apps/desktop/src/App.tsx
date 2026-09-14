@@ -22,6 +22,7 @@ type SecretMetadata = {
   endpointUrl?: string;
   endpointEnvKey?: string;
 };
+type Profile = { id: string; name: string; description: string; secret_ids: string[] };
 
 const demoSecrets: SecretMetadata[] = [
   { id: 'openai-main', name: 'OpenAI Main', envKey: 'OPENAI_API_KEY', provider: 'OpenAI', tags: ['ai', 'production'], status: 'valid', updated: '2h ago', favorite: true, valueType: 'api_key', category: 'ai', scope: 'global' },
@@ -47,6 +48,8 @@ export function App() {
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
+  const [profileRevision, setProfileRevision] = useState(0);
   const [editingSecret, setEditingSecret] = useState<SecretMetadata | null>(null);
   const [validationMessage, setValidationMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
@@ -170,7 +173,7 @@ export function App() {
         </section>
         {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onConfirm={() => void confirmPlan(plan)} />)}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'profiles' ? <ProfilePanel t={t} selectedIds={selectedIds} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
               <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
@@ -202,6 +205,7 @@ export function App() {
       {showExport && <ExportPanel t={t} selectedIds={selectedIds} onClose={() => setShowExport(false)} />}
       {showImport && <ImportPanel t={t} onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); void refreshSecrets(); }} />}
       {showProfilePrompt && <ProfilePrompt t={t} selectedIds={selectedIds} onClose={() => setShowProfilePrompt(false)} onSaved={() => { setShowProfilePrompt(false); setActiveNav('profiles'); }} />}
+      {editingProfile && <ProfileDetailModal t={t} profile={editingProfile} secrets={secrets} onClose={() => setEditingProfile(null)} onSaved={() => { setEditingProfile(null); setProfileRevision((value) => value + 1); }} />}
     </div>
   );
 }
@@ -257,13 +261,31 @@ function ProfilePrompt({ t, selectedIds, onClose, onSaved }: { t: ReturnType<typ
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.profile.create}><form className="secret-form profile-prompt" onSubmit={(event) => void submit(event)}><div className="form-heading"><div><span className="section-kicker">PROFILE / {selectedIds.length} SELECTED</span><h2>{t.profile.create}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.profile.name}<input autoFocus required value={name} onChange={(event) => setName(event.target.value)} /></label><label>{t.profile.description}<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.profile.cancel}</button><button className="primary-button" type="submit">{t.profile.save}</button></div></form></div>;
 }
 
-function ProfilePanel({ t, selectedIds, onApply }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onApply: (ids: string[]) => void }) {
-  type Profile = { id: string; name: string; description: string; secret_ids: string[] };
+export function ProfileDetailModal({ t, profile, secrets, onClose, onSaved }: { t: ReturnType<typeof getTranslation>; profile: Profile; secrets: SecretMetadata[]; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(profile.name);
+  const [description, setDescription] = useState(profile.description);
+  const [draftIds, setDraftIds] = useState(profile.secret_ids);
+  const [showPicker, setShowPicker] = useState(false);
+  const [error, setError] = useState('');
+  async function save() {
+    if (!name.trim()) { setError(t.form.required); return; }
+    try { if (isTauriRuntime()) await backend.saveProfile({ id: profile.id, name: name.trim(), description, secret_ids: draftIds }); onSaved(); } catch (reason) { setError(String(reason)); }
+  }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.profile.detailTitle}><div className="secret-form profile-detail-modal"><div className="form-heading"><div><span className="section-kicker">PROFILE / {draftIds.length} {t.nav.secrets.toUpperCase()}</span><h2>{t.profile.detailTitle}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.profile.name}<input value={name} onChange={(event) => setName(event.target.value)} /></label><label>{t.profile.description}<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} /></label><div className="profile-detail-heading"><strong>{t.profile.selectCredentials}</strong><button type="button" className="secondary-button" onClick={() => setShowPicker(true)}>{t.profile.addCredential}</button></div><div className="profile-secret-list">{draftIds.length === 0 ? <div className="empty-state"><strong>{t.profile.empty}</strong></div> : draftIds.map((id) => { const secret = secrets.find((item) => item.id === id); return <div className="profile-secret-row" key={id}><div><strong>{secret?.name ?? id}</strong><span>{secret?.envKey || secret?.provider || 'Missing from current vault'}</span></div><button type="button" className="delete-button" onClick={() => setDraftIds((current) => current.filter((item) => item !== id))}>{t.profile.removeCredential}</button></div>; })}</div>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.profile.cancel}</button><button type="button" className="primary-button" onClick={() => void save()}>{t.profile.save}</button></div>{showPicker && <ProfileSecretPicker t={t} secrets={secrets} selectedIds={draftIds} onClose={() => setShowPicker(false)} onConfirm={(ids) => { setDraftIds(ids); setShowPicker(false); }} />}</div></div>;
+}
+
+export function ProfileSecretPicker({ t, secrets, selectedIds, onClose, onConfirm }: { t: ReturnType<typeof getTranslation>; secrets: SecretMetadata[]; selectedIds: string[]; onClose: () => void; onConfirm: (ids: string[]) => void }) {
+  const [draftIds, setDraftIds] = useState(selectedIds);
+  function toggle(id: string) { setDraftIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }
+  return <div className="modal-backdrop nested-modal" role="dialog" aria-modal="true" aria-label={t.profile.selectCredentials}><div className="secret-form profile-picker"><div className="form-heading"><div><span className="section-kicker">PROFILE / PICK CREDENTIALS</span><h2>{t.profile.selectCredentials}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><div className="picker-list">{secrets.length === 0 ? <div className="empty-state"><strong>{t.list.empty}</strong></div> : secrets.map((secret) => <label className="picker-row" key={secret.id}><input type="checkbox" checked={draftIds.includes(secret.id)} onChange={() => toggle(secret.id)} /><span><strong>{secret.name}</strong><small>{secret.provider} · {secret.envKey || 'No environment key'}</small></span></label>)}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.profile.cancel}</button><button type="button" className="primary-button" onClick={() => onConfirm(draftIds)}>{t.profile.confirmSelection}</button></div></div></div>;
+}
+
+function ProfilePanel({ t, selectedIds, secrets, revision, onEdit, onApply }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; secrets: SecretMetadata[]; revision: number; onEdit: (profile: Profile) => void; onApply: (ids: string[]) => void }) {
   const [name, setName] = useState(''); const [description, setDescription] = useState(''); const [profiles, setProfiles] = useState<Profile[]>([]); const [editingId, setEditingId] = useState<string | null>(null); const [message, setMessage] = useState(''); const [error, setError] = useState('');
-  useEffect(() => { if (isTauriRuntime()) void backend.profiles().then(setProfiles).catch((reason) => setError(String(reason))); }, []);
+  useEffect(() => { if (isTauriRuntime()) void backend.profiles().then(setProfiles).catch((reason) => setError(String(reason))); }, [revision]);
   async function save() { if (!name.trim()) { setError(t.form.required); return; } const profile = { id: editingId ?? `profile-${Date.now()}`, name: name.trim(), description, secret_ids: selectedIds }; try { if (isTauriRuntime()) await backend.saveProfile(profile); setProfiles((current) => editingId ? current.map((item) => item.id === editingId ? profile : item) : [profile, ...current]); setName(''); setDescription(''); setEditingId(null); setMessage(t.profile.saved); setError(''); } catch (reason) { setError(String(reason)); } }
   async function remove(id: string) { if (!window.confirm(t.profile.deleteConfirm)) return; try { if (isTauriRuntime()) await backend.deleteProfile(id); setProfiles((current) => current.filter((item) => item.id !== id)); } catch (reason) { setError(String(reason)); } }
-  function edit(profile: Profile) { setEditingId(profile.id); setName(profile.name); setDescription(profile.description); setMessage(''); }
+  function edit(profile: Profile) { onEdit(profile); }
   return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">PROJECT RECIPE / {selectedIds.length} SELECTED</span><h2>{t.profile.title}</h2><p>{t.security.warning}</p></div><div className="profile-editor"><label>{t.profile.name}<input value={name} onChange={(event) => setName(event.target.value)} /></label><label>{t.profile.description}<input value={description} onChange={(event) => setDescription(event.target.value)} /></label><button className="primary-button" onClick={() => void save()}>{editingId ? t.profile.edit : t.profile.create}</button>{editingId && <button className="secondary-button" onClick={() => { setEditingId(null); setName(''); setDescription(''); }}>{t.profile.cancel}</button>}{message && <span className="form-success">{message}</span>}{error && <span className="form-error" role="alert">{error}</span>}</div><div className="profile-list">{profiles.length === 0 ? <div className="empty-state"><strong>{t.profile.empty}</strong></div> : profiles.map((profile) => <div className="profile-row" key={profile.id}><div><strong>{profile.name}</strong><span>{profile.secret_ids.length} {t.nav.secrets}{profile.description ? ` · ${profile.description}` : ''}</span></div><div className="profile-actions"><button className="secondary-button" onClick={() => edit(profile)}>{t.profile.edit}</button><button className="delete-button" onClick={() => void remove(profile.id)}>{t.profile.delete}</button><button className="secondary-button" onClick={() => onApply(profile.secret_ids)}>{t.profile.apply}</button></div></div>)}</div></section>;
 }
 

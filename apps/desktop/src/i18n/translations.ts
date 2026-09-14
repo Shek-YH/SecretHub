@@ -10,7 +10,7 @@ export type Translation = {
   security: { localOnly: string; encrypted: string; audit: string; locked: string; unlock: string; warning: string };
   auth: { setupTitle: string; unlockTitle: string; subtitle: string; password: string; confirmPassword: string; setup: string; unlock: string; minLength: string; mismatch: string };
   settings: { title: string; general: string; security: string; ai: string; theme: string; defaultExport: string; autoLock: string; requireAuth: string; language: string; backup: string; backupSaved: string; on: string; off: string };
-  profile: { title: string; name: string; description: string; create: string; save: string; edit: string; delete: string; deleteConfirm: string; cancel: string; apply: string; saved: string; empty: string };
+  profile: { title: string; name: string; description: string; detailTitle: string; selectCredentials: string; addCredential: string; removeCredential: string; confirmSelection: string; create: string; save: string; edit: string; delete: string; deleteConfirm: string; cancel: string; apply: string; saved: string; empty: string };
   project: { title: string; recent: string; record: string; empty: string };
   auditPanel: { title: string; operation: string; result: string; empty: string };
   mcp: { title: string; description: string; confirm: string; confirmed: string };
@@ -28,7 +28,7 @@ export const translations: Record<Locale, Translation> = {
     security: { localOnly: '仅保存在本机', encrypted: 'AES-256-GCM 加密', audit: '操作可审计且不记录明文', locked: '保险库已锁定', unlock: '解锁保险库', warning: '安全提示：Secret 值不会进入浏览器存储、日志或 AI 上下文。' },
     auth: { setupTitle: '创建本地保险库', unlockTitle: '解锁 SecretHub', subtitle: 'Master Password 只保存在本机，无法通过服务器找回。', password: 'Master Password', confirmPassword: '确认 Password', setup: '创建并解锁', unlock: '解锁保险库', minLength: '至少 12 个字符', mismatch: '两次输入的 Password 不一致' },
     settings: { title: '设置', general: '常规', security: '安全', ai: 'AI / MCP', theme: '主题', defaultExport: '默认导出文件', autoLock: '自动锁定', requireAuth: '导出前需要验证', language: '显示语言', backup: '导出加密备份', backupSaved: '加密备份已写入所选目录', on: '开启', off: '关闭' },
-    profile: { title: '配置组合', name: '组合名称', description: '组合说明', create: '新建组合', save: '保存组合', edit: '编辑', delete: '删除', deleteConfirm: '确定删除这个组合？', cancel: '取消', apply: '应用组合', saved: '组合已保存', empty: '还没有配置组合' },
+    profile: { title: '配置组合', name: '组合名称', description: '组合说明', detailTitle: '编辑组合详情', selectCredentials: '选择要加入组合的凭据', addCredential: '增加凭据', removeCredential: '从组合移除', confirmSelection: '确定选择', create: '新建组合', save: '保存组合', edit: '编辑', delete: '删除', deleteConfirm: '确定删除这个组合？', cancel: '取消', apply: '应用组合', saved: '组合已保存', empty: '还没有配置组合' },
     project: { title: '项目历史', recent: '最近使用的项目', record: '记录当前项目', empty: '还没有项目记录' },
     auditPanel: { title: '操作审计', operation: '操作', result: '结果', empty: '还没有审计事件' },
     mcp: { title: 'AI 请求待确认', description: 'MCP 请求准备项目环境。请确认遮罩预览后再写入项目。', confirm: '确认导出', confirmed: '已确认并导出' },
@@ -44,7 +44,7 @@ export const translations: Record<Locale, Translation> = {
     security: { localOnly: 'Stored on this device', encrypted: 'AES-256-GCM encrypted', audit: 'Audited without plaintext', locked: 'Vault is locked', unlock: 'Unlock vault', warning: 'Security note: secret values never enter browser storage, logs or AI context.' },
     auth: { setupTitle: 'Create local vault', unlockTitle: 'Unlock SecretHub', subtitle: 'Your Master Password stays on this device and cannot be recovered by a server.', password: 'Master Password', confirmPassword: 'Confirm password', setup: 'Create and unlock', unlock: 'Unlock vault', minLength: 'At least 12 characters', mismatch: 'The passwords do not match' },
     settings: { title: 'Settings', general: 'General', security: 'Security', ai: 'AI / MCP', theme: 'Theme', defaultExport: 'Default export file', autoLock: 'Auto lock', requireAuth: 'Require verification before export', language: 'Display language', backup: 'Export encrypted backup', backupSaved: 'Encrypted backup written to the selected folder', on: 'On', off: 'Off' },
-    profile: { title: 'Profiles', name: 'Profile name', description: 'Profile description', create: 'New profile', save: 'Save profile', edit: 'Edit', delete: 'Delete', deleteConfirm: 'Delete this profile?', cancel: 'Cancel', apply: 'Apply profile', saved: 'Profile saved', empty: 'No profiles yet' },
+    profile: { title: 'Profiles', name: 'Profile name', description: 'Profile description', detailTitle: 'Edit profile details', selectCredentials: 'Choose credentials for this profile', addCredential: 'Add credential', removeCredential: 'Remove from profile', confirmSelection: 'Confirm selection', create: 'New profile', save: 'Save profile', edit: 'Edit', delete: 'Delete', deleteConfirm: 'Delete this profile?', cancel: 'Cancel', apply: 'Apply profile', saved: 'Profile saved', empty: 'No profiles yet' },
     project: { title: 'Project history', recent: 'Recently used projects', record: 'Record current project', empty: 'No project history yet' },
     auditPanel: { title: 'Audit log', operation: 'Operation', result: 'Result', empty: 'No audit events yet' },
     mcp: { title: 'AI request awaiting approval', description: 'MCP requested a project environment plan. Review the masked preview before writing.', confirm: 'Approve export', confirmed: 'Approved and exported' },

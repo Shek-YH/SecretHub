@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
-import { App } from './App';
+import { vi } from 'vitest';
+import { App, ProfileDetailModal } from './App';
+import { getTranslation } from './i18n/translations';
 
 describe('SecretHub desktop shell', () => {
   it('starts in Chinese and exposes the language switch', () => {
@@ -57,5 +59,20 @@ describe('SecretHub desktop shell', () => {
     await user.click(screen.getByRole('button', { name: '加入组合' }));
     expect(screen.getByRole('dialog', { name: '新建组合' })).toBeInTheDocument();
     expect(screen.getByLabelText('组合名称')).toBeInTheDocument();
+  });
+
+  it('edits profile membership in a draft and saves only from the detail view', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onSaved = vi.fn();
+    render(<ProfileDetailModal t={getTranslation('zh-CN')} profile={{ id: 'profile-1', name: 'AI', description: '', secret_ids: ['openai-main'] }} secrets={[{ id: 'openai-main', name: 'OpenAI Main', envKey: 'OPENAI_API_KEY', provider: 'openai', tags: [], status: 'unknown', updated: 'now' }, { id: 'deepseek', name: 'DeepSeek', envKey: 'DEEPSEEK_API_KEY', provider: 'deepseek', tags: [], status: 'unknown', updated: 'now' }]} onClose={() => undefined} onSaved={onSaved} />);
+    await user.click(screen.getByRole('button', { name: '增加凭据' }));
+    await user.click(screen.getByLabelText(/DeepSeek/));
+    await user.click(screen.getByRole('button', { name: '确定选择' }));
+    expect(screen.getByText('DeepSeek')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: '从组合移除' })[0]);
+    expect(screen.queryByText('OpenAI Main')).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '保存组合' }));
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 });
