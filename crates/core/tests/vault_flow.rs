@@ -160,3 +160,40 @@ fn allows_a_secret_without_an_environment_key() {
     assert_eq!(vault.read_secret(&id).unwrap(), "fixture-model-only");
     assert!(vault.list_metadata().unwrap()[0].env_key.is_empty());
 }
+
+#[test]
+fn updates_metadata_without_replacing_the_encrypted_value() {
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    let id = vault
+        .create_secret(NewSecretInput {
+            name: "Before edit".into(),
+            provider_id: "deepseek".into(),
+            env_key: "DEEPSEEK_API_KEY".into(),
+            description: "before".into(),
+            tags: vec!["old".into()],
+            value: "fixture-preserve-this-value".into(),
+        })
+        .unwrap();
+
+    vault
+        .update_metadata_with_attributes(
+            &id,
+            NewSecretInput {
+                name: "After edit".into(),
+                provider_id: "deepseek".into(),
+                env_key: "DEEPSEEK_API_KEY".into(),
+                description: "after".into(),
+                tags: vec!["new".into()],
+                value: String::new(),
+            },
+            secrethub_storage::SecretAttributes::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        vault.read_secret(&id).unwrap(),
+        "fixture-preserve-this-value"
+    );
+    assert_eq!(vault.list_metadata().unwrap()[0].name, "After edit");
+}

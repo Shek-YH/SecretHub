@@ -211,6 +211,39 @@ impl VaultService {
         Ok(())
     }
 
+    pub fn update_metadata_with_attributes(
+        &self,
+        id: &str,
+        input: NewSecretInput,
+        attributes: secrethub_storage::SecretAttributes,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        if input.name.trim().is_empty() {
+            return Err(VaultError::InvalidSecret);
+        }
+        if !self.database.update_metadata_with_attributes(
+            id,
+            secrethub_storage::SecretMetadataUpdate {
+                name: input.name,
+                provider_id: input.provider_id,
+                env_key: input.env_key,
+                description: input.description,
+                tags: input.tags,
+            },
+            attributes,
+        )? {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database.record_audit(
+            "update_secret_metadata",
+            Some(id),
+            None,
+            "success",
+            "{\"source\":\"desktop\",\"value_preserved\":true}",
+        )?;
+        Ok(())
+    }
+
     pub fn delete_secret(&self, id: &str) -> Result<bool, VaultError> {
         self.require_key()?;
         let deleted = self.database.delete_secret(id)?;

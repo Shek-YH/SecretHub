@@ -7,6 +7,8 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByText('SecretHub')).toBeInTheDocument();
     expect(screen.getByText('凭据')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'English' })).toBeInTheDocument();
+    expect(screen.getByText('复制 API Key')).toBeInTheDocument();
+    expect(screen.getByText('复制全部内容')).toBeInTheDocument();
   });
 
   it('opens provider templates before the secret form and makes env key optional', async () => {
@@ -35,5 +37,16 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByText('TOKEN / TOKEN')).toBeInTheDocument();
     expect(screen.queryByText('TEMPLATE CATALOG / PROVIDERS')).not.toBeInTheDocument();
     expect(screen.queryByText('API Base URL')).not.toBeInTheDocument();
+  });
+
+  it('loads editable metadata and permits saving without exposing the old value', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    expect(screen.getByDisplayValue('OpenAI Main')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('OPENAI_API_KEY')).toBeInTheDocument();
+    const value = screen.getByPlaceholderText('留空则保留原值');
+    expect(value).not.toBeRequired();
+    expect(screen.getByText('复制 API Key')).toBeInTheDocument();
   });
 });

@@ -53,6 +53,14 @@ pub struct UpdatedSecret {
     pub nonce: Vec<u8>,
 }
 
+pub struct SecretMetadataUpdate {
+    pub name: String,
+    pub provider_id: String,
+    pub env_key: String,
+    pub description: String,
+    pub tags: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecretAttributes {
     pub value_type: String,
@@ -370,6 +378,21 @@ impl Database {
             params![secret.ciphertext, secret.nonce, id],
         )?;
         Ok(true)
+    }
+
+    pub fn update_metadata_with_attributes(
+        &self,
+        id: &str,
+        metadata: SecretMetadataUpdate,
+        attributes: SecretAttributes,
+    ) -> Result<bool, StorageError> {
+        let now = unix_time();
+        let tags_json = serde_json::to_string(&metadata.tags)
+            .map_err(|error| StorageError::InvalidData(error.to_string()))?;
+        Ok(self.connection.execute(
+            "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, updated_at = ?13 WHERE id = ?14",
+            params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, now, id],
+        )? > 0)
     }
 
     pub fn record_audit(

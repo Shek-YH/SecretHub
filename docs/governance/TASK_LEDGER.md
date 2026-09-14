@@ -20,3 +20,4 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R14 | Classification | type/category/scope/favorite/archived metadata and filters | COMPLETED | storage/core tests + desktop filters |
 | R15 | Provider templates | provider-first add flow, model metadata and optional env key | COMPLETED | provider/model tests, E2E, Rust migration and Tauri package pass; real provider/manual acceptance remains separate |
 | R16 | Credential routing | type-first Add Secret flow with dedicated non-API-key forms | COMPLETED | App tests 3/3, Golden E2E and Tauri rebuild pass |
+| R17 | Reliability and quick actions | export feedback, edit persistence, system links and copy modes | COMPLETED | Rust workspace, desktop 7/7, MCP 4/4, E2E, security scan and Tauri package pass |

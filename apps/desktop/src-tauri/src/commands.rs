@@ -229,30 +229,36 @@ pub fn secret_update(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     touch_activity(&state)?;
-    vault_from_state(&state)?
+    let input = NewSecretInput {
+        name: request.name,
+        provider_id: request.provider_id,
+        env_key: request.env_key,
+        description: request.description,
+        tags: request.tags,
+        value: request.value,
+    };
+    let attributes = secrethub_storage::SecretAttributes {
+        value_type: request.value_type,
+        category: request.category,
+        scope: request.scope,
+        favorite: request.favorite,
+        archived: request.archived,
+        model_id: request.model_id,
+        model_env_key: request.model_env_key,
+    };
+    let vault = vault_from_state(&state)?;
+    let vault = vault
         .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?
-        .update_secret_with_attributes(
-            &id,
-            NewSecretInput {
-                name: request.name,
-                provider_id: request.provider_id,
-                env_key: request.env_key,
-                description: request.description,
-                tags: request.tags,
-                value: request.value,
-            },
-            secrethub_storage::SecretAttributes {
-                value_type: request.value_type,
-                category: request.category,
-                scope: request.scope,
-                favorite: request.favorite,
-                archived: request.archived,
-                model_id: request.model_id,
-                model_env_key: request.model_env_key,
-            },
-        )
-        .map_err(|error| error.to_string())
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    if input.value.trim().is_empty() {
+        vault
+            .update_metadata_with_attributes(&id, input, attributes)
+            .map_err(|error| error.to_string())
+    } else {
+        vault
+            .update_secret_with_attributes(&id, input, attributes)
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]
@@ -276,18 +282,23 @@ pub fn secret_copy(id: String, state: State<'_, AppState>) -> Result<(), String>
             .read_secret(&id)
             .map_err(|error| error.to_string())?
     };
-    let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-    clipboard
-        .set_text(&value)
-        .map_err(|error| error.to_string())?;
+    copy_to_clipboard(value, 30)?;
     vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
         .record_action("secret_copied", Some(&id), "{\"source\":\"desktop\"}")
         .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn copy_to_clipboard(value: String, timeout_seconds: u64) -> Result<(), String> {
+    let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
+    clipboard
+        .set_text(&value)
+        .map_err(|error| error.to_string())?;
     let value_hash = Sha256::digest(value.as_bytes()).to_vec();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(30));
+        std::thread::sleep(std::time::Duration::from_secs(timeout_seconds));
         let Ok(mut clipboard) = Clipboard::new() else {
             return;
         };
@@ -299,6 +310,54 @@ pub fn secret_copy(id: String, state: State<'_, AppState>) -> Result<(), String>
         }
     });
     Ok(())
+}
+
+#[tauri::command]
+pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    touch_activity(&state)?;
+    let (metadata, value) = {
+        let vault = vault_from_state(&state)?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        let metadata = vault
+            .list_metadata()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| "secret not found".to_owned())?;
+        let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
+        (metadata, value)
+    };
+    let copied = format!(
+        "Name: {}\nProvider: {}\nEnvironment Key: {}\nValue: {}\nModel: {}\nModel Environment Key: {}\nType: {}\nCategory: {}\nScope: {}\nTags: {}\nDescription: {}",
+        metadata.name,
+        metadata.provider_id,
+        metadata.env_key,
+        value,
+        metadata.model_id,
+        metadata.model_env_key,
+        metadata.value_type,
+        metadata.category,
+        metadata.scope,
+        metadata.tags.join(", "),
+        metadata.description,
+    );
+    copy_to_clipboard(copied, 30)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .record_action("secret_copied_all", Some(&id), "{\"source\":\"desktop\"}")
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|_| "invalid external URL".to_owned())?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return Err("only HTTPS external URLs are allowed".to_owned());
+    }
+    open::that(parsed.as_str()).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
