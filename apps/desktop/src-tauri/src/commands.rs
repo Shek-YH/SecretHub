@@ -92,6 +92,30 @@ pub struct PendingPlan {
     pub created_at: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ProjectEnvEntry {
+    pub original_key: String,
+    pub key: String,
+    pub value: String,
+    pub source: String,
+    pub secret_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectEnvSaveEntry {
+    pub original_key: String,
+    pub key: String,
+    pub value: String,
+    pub source: String,
+    pub secret_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectEnvSaveRequest {
+    pub directory: String,
+    pub entries: Vec<ProjectEnvSaveEntry>,
+}
+
 fn vault_from_state<'a>(
     state: &'a State<'_, AppState>,
 ) -> Result<MutexGuard<'a, Option<VaultService>>, String> {
@@ -741,16 +765,11 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
         )
         .map_err(|error| error.to_string())?;
     }
-    vault
-        .record_action(
-            "env_exported",
-            None,
-            &format!(
-                "{{\"source\":\"desktop\",\"count\":{}}}",
-                request.secret_ids.len()
-            ),
-        )
-        .map_err(|error| error.to_string())?;
+    for secret_id in &request.secret_ids {
+        vault
+            .record_action("env_exported", Some(secret_id), "{\"source\":\"desktop\"}")
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -824,6 +843,136 @@ pub fn project_record(
         .ok_or_else(|| "vault unavailable".to_owned())?
         .record_project(&path, &display_name)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn open_project_directory(path: String) -> Result<(), String> {
+    let directory =
+        validate_export_directory(Path::new(&path)).map_err(|error| error.to_string())?;
+    open::that(directory).map_err(|error| error.to_string())
+}
+
+fn metadata_for_env_key<'a>(
+    metadata: &'a [secrethub_storage::SecretMetadata],
+    key: &str,
+) -> Option<&'a secrethub_storage::SecretMetadata> {
+    metadata.iter().find(|item| {
+        item.env_key == key || safe_model_env_key(item) == key || safe_endpoint_env_key(item) == key
+    })
+}
+
+fn managed_env_value(
+    vault: &VaultService,
+    metadata: &secrethub_storage::SecretMetadata,
+    key: &str,
+) -> Result<Option<String>, String> {
+    if metadata.env_key == key {
+        return vault
+            .read_secret(&metadata.id)
+            .map(Some)
+            .map_err(|error| error.to_string());
+    }
+    if safe_model_env_key(metadata) == key && !metadata.model_id.trim().is_empty() {
+        return Ok(Some(metadata.model_id.clone()));
+    }
+    if safe_endpoint_env_key(metadata) == key && !metadata.endpoint_url.trim().is_empty() {
+        return Ok(Some(metadata.endpoint_url.clone()));
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+pub fn project_env_preview(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ProjectEnvEntry>, String> {
+    touch_activity(&state)?;
+    let directory =
+        validate_export_directory(Path::new(&path)).map_err(|error| error.to_string())?;
+    let contents = fs::read_to_string(directory.join(".env")).unwrap_or_default();
+    let parsed = parse_env_entries(&contents).map_err(|error| error.to_string())?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    let metadata = vault.list_metadata().map_err(|error| error.to_string())?;
+    parsed
+        .into_iter()
+        .map(|entry| {
+            if let Some(secret) = metadata_for_env_key(&metadata, &entry.key) {
+                return Ok(ProjectEnvEntry {
+                    original_key: entry.key.clone(),
+                    key: entry.key,
+                    value: "••••••••".to_owned(),
+                    source: "managed".to_owned(),
+                    secret_id: Some(secret.id.clone()),
+                });
+            }
+            Ok(ProjectEnvEntry {
+                original_key: entry.key.clone(),
+                key: entry.key,
+                value: entry.value,
+                source: "manual".to_owned(),
+                secret_id: None,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn project_env_save(
+    request: ProjectEnvSaveRequest,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    touch_activity(&state)?;
+    let directory = validate_export_directory(Path::new(&request.directory))
+        .map_err(|error| error.to_string())?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    let metadata = vault.list_metadata().map_err(|error| error.to_string())?;
+    let mut keys = std::collections::HashSet::new();
+    let mut entries = Vec::with_capacity(request.entries.len());
+    for item in request.entries {
+        let key = item.key.trim().to_owned();
+        if key.is_empty() {
+            return Err("environment variable key cannot be empty".to_owned());
+        }
+        if !keys.insert(key.clone()) {
+            return Err(format!("duplicate environment variable key: {key}"));
+        }
+        let value = if item.source == "managed" {
+            let secret_id = item
+                .secret_id
+                .as_deref()
+                .ok_or_else(|| "managed environment entry is missing its secret id".to_owned())?;
+            let secret = metadata
+                .iter()
+                .find(|candidate| candidate.id == secret_id)
+                .ok_or_else(|| {
+                    "managed environment entry references a missing secret".to_owned()
+                })?;
+            managed_env_value(vault, secret, &item.original_key)?
+                .ok_or_else(|| "managed environment entry is no longer available".to_owned())?
+        } else {
+            item.value
+        };
+        entries.push(EnvEntry::new(key, value));
+    }
+    let content = render_env(&entries).map_err(|error| error.to_string())?;
+    write_atomic(&directory.join(".env"), &content, true).map_err(|error| error.to_string())?;
+    let display_name = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("project");
+    vault
+        .record_project(directory.to_string_lossy().as_ref(), display_name)
+        .map_err(|error| error.to_string())?;
+    vault
+        .record_action("project_env_saved", None, "{\"source\":\"desktop\"}")
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
