@@ -20,6 +20,7 @@ export const backend = {
   copy: (id: string) => invoke<void>('secret_copy', { id }),
   copyAll: (id: string) => invoke<void>('secret_copy_all', { id }),
   reveal: (id: string) => invoke<void>('secret_reveal', { id }),
+  validate: (id: string) => invoke<string>('secret_validate', { id }),
   openExternalUrl: (url: string) => invoke<void>('open_external_url', { url }),
   preview: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<string>('export_preview', { request }),
   export: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<void>('export_env', { request }),

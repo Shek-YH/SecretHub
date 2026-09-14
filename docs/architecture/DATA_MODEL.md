@@ -25,3 +25,5 @@ The payload table is intentionally separated so metadata search never touches pl
 - `audit_events(id, operation, secret_id, project_id, value_hash, result, created_at, metadata_json)`
 
 Audit metadata is allowlisted and redacted; no value or payload is stored.
+
+Project export is intentionally a separate projection from the vault record: it emits Env key/value pairs and optional remark comments only. Management metadata remains local to SecretHub.

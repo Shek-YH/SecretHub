@@ -197,3 +197,24 @@ fn updates_metadata_without_replacing_the_encrypted_value() {
     );
     assert_eq!(vault.list_metadata().unwrap()[0].name, "After edit");
 }
+
+#[test]
+fn persists_provider_validation_status_without_storing_the_key() {
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    let id = vault
+        .create_secret(NewSecretInput {
+            name: "Validation".into(),
+            provider_id: "openai".into(),
+            env_key: "OPENAI_API_KEY".into(),
+            description: String::new(),
+            tags: vec![],
+            value: "fixture-validation-key".into(),
+        })
+        .unwrap();
+    vault.update_validation_status(&id, "unauthorized").unwrap();
+    let metadata = vault.list_metadata().unwrap().remove(0);
+    assert_eq!(metadata.status, "unauthorized");
+    assert_eq!(vault.read_secret(&id).unwrap(), "fixture-validation-key");
+}

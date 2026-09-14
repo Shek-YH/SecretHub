@@ -273,6 +273,20 @@ impl VaultService {
             .record_audit(operation, secret_id, None, "success", metadata_json)
             .map_err(Into::into)
     }
+    pub fn update_validation_status(&self, id: &str, status: &str) -> Result<(), VaultError> {
+        self.require_key()?;
+        if !self.database.update_status(id, status)? {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database.record_audit(
+            "validate_secret",
+            Some(id),
+            None,
+            "success",
+            &format!("{{\"source\":\"desktop\",\"status\":\"{status}\"}}"),
+        )?;
+        Ok(())
+    }
     pub fn save_profile(
         &self,
         profile: secrethub_storage::StoredProfile,

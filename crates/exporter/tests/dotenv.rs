@@ -30,6 +30,22 @@ fn renders_example_without_secret_values_and_reports_existing_key_conflicts() {
 }
 
 #[test]
+fn renders_notes_as_comments_without_exporting_secret_hub_metadata() {
+    let entries = vec![EnvEntry::with_comment(
+        "DEEPSEEK_API_KEY",
+        "fixture-value",
+        "local development only",
+    )];
+    let rendered = render_env(&entries).unwrap();
+    assert_eq!(
+        rendered,
+        "# local development only\nDEEPSEEK_API_KEY=\"fixture-value\"\n"
+    );
+    assert!(!rendered.contains("value_type"));
+    assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH"));
+}
+
+#[test]
 fn checks_and_explicitly_repairs_gitignore_without_touching_existing_rules() {
     let directory = tempfile::tempdir().unwrap();
     let gitignore = directory.path().join(".gitignore");

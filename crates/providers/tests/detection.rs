@@ -1,4 +1,6 @@
-use secrethub_providers::{default_registry, detect_provider, validate_endpoint};
+use secrethub_providers::{
+    default_registry, detect_provider, validate_endpoint, validation_endpoint,
+};
 
 #[test]
 fn detects_high_frequency_providers_locally_without_network_probing() {
@@ -42,4 +44,17 @@ fn validators_allow_only_fixed_https_origins_and_reject_ssrf_targets() {
         &default_registry()
     )
     .is_err());
+}
+
+#[test]
+fn exposes_fixed_low_cost_validation_endpoints_without_a_custom_url() {
+    assert_eq!(
+        validation_endpoint("openai"),
+        Some("https://api.openai.com/v1/models")
+    );
+    assert_eq!(
+        validation_endpoint("deepseek"),
+        Some("https://api.deepseek.com/models")
+    );
+    assert_eq!(validation_endpoint("custom"), None);
 }

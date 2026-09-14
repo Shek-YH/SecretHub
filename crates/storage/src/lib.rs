@@ -395,6 +395,13 @@ impl Database {
         )? > 0)
     }
 
+    pub fn update_status(&self, id: &str, status: &str) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "UPDATE secrets SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            params![status, unix_time(), id],
+        )? > 0)
+    }
+
     pub fn record_audit(
         &self,
         operation: &str,

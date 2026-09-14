@@ -10,7 +10,7 @@ type SecretMetadata = {
   provider: string;
   description?: string;
   tags: string[];
-  status: 'valid' | 'unknown';
+  status: string;
   updated: string;
   favorite?: boolean;
   valueType?: string;
@@ -45,10 +45,13 @@ export function App() {
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editingSecret, setEditingSecret] = useState<SecretMetadata | null>(null);
+  const [validationMessage, setValidationMessage] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
   const [activeNav, setActiveNav] = useState<'all' | 'profiles' | 'projects' | 'settings' | 'audit'>('all');
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
   const filtered = useMemo(() => secrets.filter((secret) => `${secret.name} ${secret.envKey} ${secret.provider} ${secret.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && (categoryFilter === 'all' || secret.category === categoryFilter) && (statusFilter === 'all' || secret.status === statusFilter) && (!favoriteOnly || Boolean(secret.favorite)) && (includeArchived || !secret.archived)), [categoryFilter, favoriteOnly, includeArchived, query, secrets, statusFilter]);
+  const allVisibleSelected = filtered.length > 0 && filtered.every((secret) => selectedIds.includes(secret.id));
 
   async function refreshSecrets() {
     if (!isTauriRuntime()) return;
@@ -72,8 +75,18 @@ export function App() {
     try { await backend.confirmPlan(plan.request_id, true); setPendingPlans((current) => current.filter((item) => item.request_id !== plan.request_id)); await refreshSecrets(); } catch (error) { setRuntimeError(String(error)); }
   }
 
-  function runBackendAction(action: () => Promise<unknown>) {
-    if (isTauriRuntime()) void action().catch((error) => setRuntimeError(String(error)));
+  function runBackendAction(action: () => Promise<unknown>, successMessage?: string) {
+    if (!isTauriRuntime()) return;
+    void action().then(() => { if (successMessage) setActionMessage(successMessage); }).catch((error) => setActionMessage(`${t.actions.operationFailed}: ${String(error)}`));
+  }
+
+  async function validateSecret(id: string) {
+    if (!isTauriRuntime()) { setValidationMessage('Validation is available in the desktop app.'); return; }
+    try {
+      const status = await backend.validate(id);
+      setSecrets((current) => current.map((secret) => secret.id === id ? { ...secret, status } : secret));
+      setValidationMessage(statusText(status, t));
+    } catch (error) { setValidationMessage(String(error)); }
   }
 
   function changeLocale(next: Locale) {
@@ -84,6 +97,11 @@ export function App() {
 
   function toggleSelected(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  function toggleSelectAllVisible() {
+    const visibleIds = filtered.map((secret) => secret.id);
+    setSelectedIds((current) => allVisibleSelected ? current.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...current, ...visibleIds])));
   }
 
   async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string }) {
@@ -152,7 +170,7 @@ export function App() {
         {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'profiles' ? <ProfilePanel t={t} selectedIds={selectedIds} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
-              <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="unknown">{t.list.unknown}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
+              <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
               {selectedIds.length > 0 && <div className="selection-actions"><span>{selectedIds.length} {t.list.selected}</span><button onClick={() => setShowExport(true)}>{t.actions.export}</button><button onClick={() => undefined}>{t.actions.profile}</button><button onClick={() => setSelectedIds([])}>×</button></div>}
             </div>
             <div className="workspace-grid">
@@ -166,9 +184,9 @@ export function App() {
               <section className="detail-panel" aria-label={t.detail.title}>
                 {selected ? <>
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {selected.provider.toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
-                  <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey}</strong><span className="masked-value">••••••••••••••••Km2</span></div><span className="valid-badge">{selected.status === 'valid' ? t.list.valid : t.list.unknown}</span></div>
-                  <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={selected.status === 'valid' ? t.list.valid : t.list.unknown} /><div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.'} /></div>
-                  <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id))}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id))}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => undefined}>{t.detail.validate}</button></div><button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
+                  <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value">••••••••••••••••Km2</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
+                  <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} /><div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
+                  <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
                   <div className="detail-note"><span className="lock-small">◆</span><span>{t.security.warning}</span></div>
                 </> : <div className="empty-detail">{t.detail.noSelection}</div>}
               </section>
@@ -200,6 +218,10 @@ function VaultGate({ status, t, onReady }: { status: VaultStatus; t: ReturnType<
 
 function NavItem({ label, active, count, dot, onClick }: { label: string; active?: boolean; count?: string; dot?: string; onClick: () => void }) {
   return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span className={dot ? `provider-dot ${dot}` : 'nav-glyph'}>{dot ? '' : '·'}</span>{label}{count && <span className="nav-count">{count}</span>}</button>;
+}
+
+function statusText(status: string, t: ReturnType<typeof getTranslation>): string {
+  return ({ valid: t.list.valid, invalid: t.list.invalid, unauthorized: t.list.unauthorized, rate_limited: t.list.rateLimited, network_error: t.list.networkError, unsupported: t.list.unsupported, unknown: t.list.unknown } as Record<string, string>)[status] ?? status;
 }
 
 function SecretRow({ secret, selected, checked, t, onClick, onToggle }: { secret: SecretMetadata; selected: boolean; checked: boolean; t: ReturnType<typeof getTranslation>; onClick: () => void; onToggle: () => void }) {

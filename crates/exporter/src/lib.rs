@@ -12,6 +12,7 @@ use thiserror::Error;
 pub struct EnvEntry {
     pub key: String,
     pub value: String,
+    pub comment: Option<String>,
 }
 
 impl EnvEntry {
@@ -19,6 +20,19 @@ impl EnvEntry {
         Self {
             key: key.into(),
             value: value.into(),
+            comment: None,
+        }
+    }
+
+    pub fn with_comment(
+        key: impl Into<String>,
+        value: impl Into<String>,
+        comment: impl Into<String>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            comment: Some(comment.into()),
         }
     }
 }
@@ -39,6 +53,13 @@ pub fn render_env(entries: &[EnvEntry]) -> Result<String, ExportError> {
     let mut output = String::new();
     for entry in entries {
         validate_key(&entry.key)?;
+        if let Some(comment) = &entry.comment {
+            for line in comment.lines() {
+                output.push_str("# ");
+                output.push_str(line.trim());
+                output.push('\n');
+            }
+        }
         output.push_str(&entry.key);
         output.push_str("=\"");
         output.push_str(&escape_value(&entry.value));

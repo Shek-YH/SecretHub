@@ -100,6 +100,27 @@ pub fn validate_endpoint(
     Ok(url)
 }
 
+pub fn validation_endpoint(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "openai" => Some("https://api.openai.com/v1/models"),
+        "anthropic" => Some("https://api.anthropic.com/v1/models"),
+        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta/models"),
+        "deepseek" => Some("https://api.deepseek.com/models"),
+        "xai" => Some("https://api.x.ai/v1/models"),
+        "openrouter" => Some("https://openrouter.ai/api/v1/models"),
+        "qwen" => Some("https://dashscope.aliyuncs.com/compatible-mode/v1/models"),
+        "glm" => Some("https://open.bigmodel.cn/api/paas/v4/models"),
+        "kimi" => Some("https://api.moonshot.cn/v1/models"),
+        "minimax" => Some("https://api.minimaxi.com/v1/models"),
+        "volcengine" => Some("https://ark.cn-beijing.volces.com/api/v3/models"),
+        "hunyuan" => Some("https://api.hunyuan.cloud.tencent.com/v1/models"),
+        "stepfun" => Some("https://api.stepfun.com/v1/models"),
+        "mistral" => Some("https://api.mistral.ai/v1/models"),
+        "groq" => Some("https://api.groq.com/openai/v1/models"),
+        _ => None,
+    }
+}
+
 fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(value) => {

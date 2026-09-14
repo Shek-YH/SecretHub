@@ -329,26 +329,74 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
         let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
         (metadata, value)
     };
-    let copied = format!(
-        "Name: {}\nProvider: {}\nEnvironment Key: {}\nValue: {}\nModel: {}\nModel Environment Key: {}\nType: {}\nCategory: {}\nScope: {}\nTags: {}\nDescription: {}",
-        metadata.name,
-        metadata.provider_id,
-        metadata.env_key,
-        value,
-        metadata.model_id,
-        metadata.model_env_key,
-        metadata.value_type,
-        metadata.category,
-        metadata.scope,
-        metadata.tags.join(", "),
-        metadata.description,
-    );
+    let entries = selected_entries_from_metadata(&metadata, value);
+    let copied = render_env(&entries).map_err(|error| error.to_string())?;
     copy_to_clipboard(copied, 30)?;
     vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
         .record_action("secret_copied_all", Some(&id), "{\"source\":\"desktop\"}")
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    touch_activity(&state)?;
+    let (provider_id, value) = {
+        let vault = vault_from_state(&state)?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        let metadata = vault
+            .list_metadata()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| "secret not found".to_owned())?;
+        (
+            metadata.provider_id,
+            vault.read_secret(&id).map_err(|error| error.to_string())?,
+        )
+    };
+    let Some(endpoint) = secrethub_providers::validation_endpoint(&provider_id) else {
+        vault_from_state(&state)?
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?
+            .update_validation_status(&id, "unsupported")
+            .map_err(|error| error.to_string())?;
+        return Ok("unsupported".to_owned());
+    };
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|_| "network_error".to_owned())?;
+    let mut request = client.get(endpoint);
+    if provider_id == "gemini" {
+        request = request.header("x-goog-api-key", &value);
+    } else if provider_id == "anthropic" {
+        request = request
+            .header("x-api-key", &value)
+            .header("anthropic-version", "2023-06-01");
+    } else {
+        request = request.bearer_auth(&value);
+    }
+    let status = match request.send() {
+        Ok(response) if response.status().is_success() => "valid",
+        Ok(response) if response.status().as_u16() == 401 || response.status().as_u16() == 403 => {
+            "unauthorized"
+        }
+        Ok(response) if response.status().as_u16() == 429 => "rate_limited",
+        Ok(response) if response.status().is_client_error() => "invalid",
+        Ok(_) | Err(_) => "network_error",
+    };
+    drop(value);
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .update_validation_status(&id, status)
+        .map_err(|error| error.to_string())?;
+    Ok(status.to_owned())
 }
 
 #[tauri::command]
@@ -394,13 +442,73 @@ fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry
             .ok_or_else(|| "secret not found".to_owned())?;
         let value = vault.read_secret(id).map_err(|error| error.to_string())?;
         if !item.env_key.trim().is_empty() {
-            entries.push(EnvEntry::new(&item.env_key, value.clone()));
+            entries.push(entry_with_optional_comment(
+                &item.env_key,
+                value.clone(),
+                &item.description,
+            ));
         }
-        if !item.model_id.trim().is_empty() && !item.model_env_key.trim().is_empty() {
-            entries.push(EnvEntry::new(&item.model_env_key, item.model_id.clone()));
+        if !item.model_id.trim().is_empty() {
+            entries.push(EnvEntry::new(
+                safe_model_env_key(item),
+                item.model_id.clone(),
+            ));
         }
     }
     Ok(entries)
+}
+
+fn selected_entries_from_metadata(
+    metadata: &secrethub_storage::SecretMetadata,
+    value: String,
+) -> Vec<EnvEntry> {
+    let mut entries = Vec::new();
+    if !metadata.env_key.trim().is_empty() {
+        entries.push(entry_with_optional_comment(
+            &metadata.env_key,
+            value,
+            &metadata.description,
+        ));
+    }
+    if !metadata.model_id.trim().is_empty() {
+        let model_env_key = safe_model_env_key(metadata);
+        entries.push(EnvEntry::new(model_env_key, metadata.model_id.clone()));
+    }
+    entries
+}
+
+fn safe_model_env_key(metadata: &secrethub_storage::SecretMetadata) -> String {
+    if is_env_key(&metadata.model_env_key) {
+        return metadata.model_env_key.clone();
+    }
+    let provider = metadata
+        .provider_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{}_MODEL", provider.trim_matches('_'))
+}
+
+fn is_env_key(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some('_' | 'A'..='Z'))
+        && characters.all(|character| {
+            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+        })
+}
+
+fn entry_with_optional_comment(key: &str, value: String, comment: &str) -> EnvEntry {
+    if comment.trim().is_empty() {
+        EnvEntry::new(key, value)
+    } else {
+        EnvEntry::with_comment(key, value, comment)
+    }
 }
 
 fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {
@@ -723,4 +831,47 @@ pub fn backup_export(path: String, state: State<'_, AppState>) -> Result<(), Str
     let directory = validate_export_directory(parent).map_err(|error| error.to_string())?;
     std::fs::write(directory.join("SecretHub.secrethub-backup"), bytes)
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_env_key, selected_entries_from_metadata};
+
+    #[test]
+    fn project_copy_contains_only_env_pairs_and_comment() {
+        let metadata = secrethub_storage::SecretMetadata {
+            id: "secret-test".into(),
+            name: "DeepSeek test".into(),
+            provider_id: "deepseek".into(),
+            env_key: "DEEPSEEK_API_KEY".into(),
+            description: "local project only".into(),
+            tags: vec!["ai".into()],
+            status: "unknown".into(),
+            created_at: 0,
+            updated_at: 0,
+            value_type: "api_key".into(),
+            category: "ai".into(),
+            scope: "global".into(),
+            favorite: false,
+            archived: false,
+            model_id: "deepseek-v4.1-flash".into(),
+            model_env_key: "DEEPSEEK-V4.1-FLASH".into(),
+        };
+        let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
+            &metadata,
+            "fixture-key".into(),
+        ))
+        .unwrap();
+        assert!(rendered.contains("# local project only"));
+        assert!(rendered.contains("DEEPSEEK_API_KEY=\"fixture-key\""));
+        assert!(rendered.contains("DEEPSEEK_MODEL=\"deepseek-v4.1-flash\""));
+        assert!(!rendered.contains("value_type"));
+        assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH=\""));
+    }
+
+    #[test]
+    fn accepts_only_uppercase_environment_keys() {
+        assert!(is_env_key("DEEPSEEK_MODEL"));
+        assert!(!is_env_key("DEEPSEEK-V4.1-FLASH"));
+    }
 }
