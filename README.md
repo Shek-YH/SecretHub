@@ -35,6 +35,8 @@ The MCP server exposes `secrethub_*` catalog/recommendation tools. It opens SQLi
 For runtime injection, copy `.secrethub.toml.example` to `.secrethub.toml` in a project and list only environment-key names. The file contains no Secret values and can be committed. Run `secrethub-cli run -- <program>` from that project.
 
 The V3.5 proxy policy foundation is in `crates/proxy`: it issues short-lived tokens and validates fixed provider origins without storing token plaintext. HTTP forwarding remains a separate implementation gate.
+
+For AI-driven project setup, the repository includes `skills/secrethub-project-env/SKILL.md`. Register this skill together with the local SecretHub MCP server in the AI coding client. The skill checks project requirements, SecretHub metadata, `hasValue`, and API-key validation status before it creates a confirmation-required project environment plan. Missing, unvalidated, invalid, or unauthorized credentials stop the workflow and ask the user to configure them locally before the AI retries; plaintext values never enter the AI context.
 The forwarding binary is documented in `apps/proxy/README.md`; real-provider smoke remains deliberately unconfigured unless a user enters a test credential locally.
 
 Add Secret is template-first: choose a mainstream domestic/global provider, then choose a curated model or `Custom model ID`. The provider's API-key page, default API-key environment key, model ID and model environment key are prefilled. The API-key environment key is optional; an empty key is retained as a local vault entry but is omitted from `.env` output. Provider templates are local and value-free in `apps/desktop/src/providers.ts`, so they can be reviewed or extended without touching encrypted payload handling.
