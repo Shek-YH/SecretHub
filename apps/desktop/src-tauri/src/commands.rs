@@ -374,8 +374,43 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
 #[tauri::command]
 pub fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String, String> {
     touch_activity(&state)?;
-    let (provider_id, value) = {
+    validate_secret_inner(&id, &state)
+}
+
+#[derive(Debug, Serialize)]
+pub struct ValidationResult {
+    pub id: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub fn secret_validate_many(state: State<'_, AppState>) -> Result<Vec<ValidationResult>, String> {
+    touch_activity(&state)?;
+    let ids = {
         let vault = vault_from_state(&state)?;
+        vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?
+            .list_metadata()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|item| item.value_type == "api_key")
+            .map(|item| item.id)
+            .collect::<Vec<_>>()
+    };
+    ids.iter()
+        .map(|id| {
+            validate_secret_inner(id, &state).map(|status| ValidationResult {
+                id: id.clone(),
+                status,
+            })
+        })
+        .collect()
+}
+
+fn validate_secret_inner(id: &str, state: &State<'_, AppState>) -> Result<String, String> {
+    let (provider_id, value) = {
+        let vault = vault_from_state(state)?;
         let vault = vault
             .as_ref()
             .ok_or_else(|| "vault unavailable".to_owned())?;
@@ -387,14 +422,14 @@ pub fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String,
             .ok_or_else(|| "secret not found".to_owned())?;
         (
             metadata.provider_id,
-            vault.read_secret(&id).map_err(|error| error.to_string())?,
+            vault.read_secret(id).map_err(|error| error.to_string())?,
         )
     };
     let Some(endpoint) = secrethub_providers::validation_endpoint(&provider_id) else {
-        vault_from_state(&state)?
+        vault_from_state(state)?
             .as_ref()
             .ok_or_else(|| "vault unavailable".to_owned())?
-            .update_validation_status(&id, "unsupported")
+            .update_validation_status(id, "unsupported")
             .map_err(|error| error.to_string())?;
         return Ok("unsupported".to_owned());
     };
@@ -423,10 +458,10 @@ pub fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String,
         Ok(_) | Err(_) => "network_error",
     };
     drop(value);
-    vault_from_state(&state)?
+    vault_from_state(state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
-        .update_validation_status(&id, status)
+        .update_validation_status(id, status)
         .map_err(|error| error.to_string())?;
     Ok(status.to_owned())
 }

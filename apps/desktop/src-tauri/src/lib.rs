@@ -56,6 +56,7 @@ pub fn run() {
             commands::secret_copy_all,
             commands::secret_reveal,
             commands::secret_validate,
+            commands::secret_validate_many,
             commands::open_external_url,
             commands::export_preview,
             commands::export_conflicts,

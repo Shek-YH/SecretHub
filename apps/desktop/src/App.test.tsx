@@ -35,6 +35,37 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByText('调用输出次数')).toBeInTheDocument();
   });
 
+  it('switches the provider directory between Chinese and English', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    await user.click(screen.getByRole('button', { name: 'English' }));
+    expect(screen.getByRole('heading', { name: 'Providers' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Configure' }).length).toBeGreaterThan(10);
+    await user.click(screen.getByRole('button', { name: '中文' }));
+    expect(screen.getByRole('heading', { name: '服务商' })).toBeInTheDocument();
+  });
+
+  it('shows batch API key validation only in the API key view', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: /API key/ }));
+    expect(screen.getByRole('button', { name: '一键检测 API Key' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /TOKEN/ }));
+    expect(screen.queryByRole('button', { name: '一键检测 API Key' })).not.toBeInTheDocument();
+  });
+
+  it('filters the provider picker when adding an API key', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    await user.click(screen.getByRole('button', { name: /^API KEY/ }));
+    const search = screen.getByPlaceholderText('搜索服务商');
+    await user.type(search, 'DeepSeek');
+    expect(screen.getByRole('button', { name: /DeepSeek/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /OpenAI/ })).not.toBeInTheDocument();
+  });
+
   it('opens provider templates before the secret form and makes env key optional', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
@@ -45,7 +76,7 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByRole('button', { name: /^Password/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Text/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^API KEY/ }));
-    await user.click(screen.getByRole('button', { name: /DeepSeek 3 models/ }));
+    await user.click(screen.getByRole('button', { name: /DeepSeek 3 个模型模板/ }));
     expect(screen.getAllByDisplayValue('DeepSeek').length).toBeGreaterThan(0);
     const envKey = screen.getByPlaceholderText('OPENAI_API_KEY');
     expect(envKey).not.toBeRequired();

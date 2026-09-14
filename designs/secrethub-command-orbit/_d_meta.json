@@ -1,0 +1,18 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Command Orbit interactive prototype": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-09-14T08:30:08.467Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-14T08:30:08.468Z",
+  "updatedAt": "2026-09-14T08:48:02.727Z"
+}
