@@ -39,7 +39,7 @@ The forwarding binary is documented in `apps/proxy/README.md`; real-provider smo
 
 Add Secret is template-first: choose a mainstream domestic/global provider, then choose a curated model or `Custom model ID`. The provider's API-key page, default API-key environment key, model ID and model environment key are prefilled. The API-key environment key is optional; an empty key is retained as a local vault entry but is omitted from `.env` output. Provider templates are local and value-free in `apps/desktop/src/providers.ts`, so they can be reviewed or extended without touching encrypted payload handling.
 
-For manual inspection after creating/unlocking the local vault, import the synthetic fixture `tests/fixtures/manual-test.env` through the Import button. It contains no usable credentials and is safe for local UI/export testing; the native vault is intentionally not pre-seeded silently.
+For manual inspection after creating/unlocking the local vault, import the synthetic fixture `tests/fixtures/manual-test-fixture.txt` through the Import button as `.env` content. It contains no usable credentials and is safe for local UI/export testing; the native vault is intentionally not pre-seeded silently.
 
 ## Security
 

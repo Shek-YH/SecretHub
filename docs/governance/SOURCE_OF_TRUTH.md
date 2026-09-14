@@ -1,6 +1,7 @@
 # SecretHub Source of Truth
 
 - 最新用户指令：从 PRD 从零开发 SecretHub；界面默认中文，支持中文/English 切换；持续执行至 PRD 要求完成。
+- 已确认的 Add Secret 交互：先选 API KEY/TOKEN/URL/Password/Text；只有 API KEY 进入 Provider/模型模板，其他类型进入各自专用表单。
 - 活跃 PRD：`SecretHub_Codex_PRD.md`。
 - 当前 UI 原型：暂无独立原型；按设计文档直接在 `apps/desktop/src` 实现并维护可交互 UI。
 - 架构决策：`docs/superpowers/specs/2026-09-13-secrethub-design.md`。

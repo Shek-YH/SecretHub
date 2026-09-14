@@ -21,6 +21,7 @@ def main() -> None:
         assert page.get_by_text("凭据中心").is_visible()
         page.get_by_role("button", name="添加凭据").first.click()
         dialog = page.get_by_role("dialog")
+        dialog.get_by_role("button", name="API KEY").click()
         dialog.get_by_role("button", name=re.compile("OpenAI")).click()
         dialog.get_by_label("名称").fill("Browser Fixture")
         assert dialog.get_by_label("环境变量名").get_attribute("required") is None

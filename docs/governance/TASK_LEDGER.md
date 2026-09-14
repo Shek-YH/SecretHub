@@ -19,3 +19,4 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R13 | Agent Proxy | short-lived token and fixed endpoint policy | WAITING_USER | HTTP forwarding and unauthorized tests pass; real-provider smoke needs local test credential |
 | R14 | Classification | type/category/scope/favorite/archived metadata and filters | COMPLETED | storage/core tests + desktop filters |
 | R15 | Provider templates | provider-first add flow, model metadata and optional env key | COMPLETED | provider/model tests, E2E, Rust migration and Tauri package pass; real provider/manual acceptance remains separate |
+| R16 | Credential routing | type-first Add Secret flow with dedicated non-API-key forms | COMPLETED | App tests 3/3, Golden E2E and Tauri rebuild pass |
