@@ -22,3 +22,4 @@ The machine-readable ledger in `.ai-ledger/` is authoritative for execution stat
 | R16 | Credential routing | type-first Add Secret flow with dedicated non-API-key forms | COMPLETED | App tests 3/3, Golden E2E and Tauri rebuild pass |
 | R17 | Reliability and quick actions | export feedback, edit persistence, system links and copy modes | COMPLETED | Rust workspace, desktop 7/7, MCP 4/4, E2E, security scan and Tauri package pass |
 | R18 | Export and validation semantics | Env-only copy/export, select all, fixed-provider validation | COMPLETED | native command tests 2/2, Core 7/7, provider endpoint tests, desktop 7/7 and package gates pass |
+| R19 | Request URL and profiles | request address Env projection and ID-backed profile CRUD | COMPLETED | Rust workspace, desktop 8/8, MCP 4/4 and Tauri package pass |

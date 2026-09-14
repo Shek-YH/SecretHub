@@ -46,6 +46,19 @@ fn renders_notes_as_comments_without_exporting_secret_hub_metadata() {
 }
 
 #[test]
+fn separates_each_credential_group_with_a_blank_line() {
+    let rendered = render_env(&[
+        EnvEntry::new("OPENAI_API_KEY", "fixture-openai"),
+        EnvEntry::new("DEEPSEEK_API_KEY", "fixture-deepseek").with_separator_before(),
+    ])
+    .unwrap();
+    assert_eq!(
+        rendered,
+        "OPENAI_API_KEY=\"fixture-openai\"\n\nDEEPSEEK_API_KEY=\"fixture-deepseek\"\n"
+    );
+}
+
+#[test]
 fn checks_and_explicitly_repairs_gitignore_without_touching_existing_rules() {
     let directory = tempfile::tempdir().unwrap();
     let gitignore = directory.path().join(".gitignore");

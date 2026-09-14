@@ -97,6 +97,8 @@ fn creates_secret_with_classification_attributes() {
                 archived: false,
                 model_id: "deepseek-chat".into(),
                 model_env_key: "DEEPSEEK_MODEL".into(),
+                endpoint_url: "https://api.deepseek.com".into(),
+                endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
             },
         )
         .unwrap();
@@ -110,6 +112,8 @@ fn creates_secret_with_classification_attributes() {
     assert!(metadata.favorite);
     assert_eq!(metadata.model_id, "deepseek-chat");
     assert_eq!(metadata.model_env_key, "DEEPSEEK_MODEL");
+    assert_eq!(metadata.endpoint_url, "https://api.deepseek.com");
+    assert_eq!(metadata.endpoint_env_key, "DEEPSEEK_BASE_URL");
 }
 
 #[test]

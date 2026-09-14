@@ -49,4 +49,13 @@ describe('SecretHub desktop shell', () => {
     expect(value).not.toBeRequired();
     expect(screen.getByText('复制 API Key')).toBeInTheDocument();
   });
+
+  it('opens a profile-name prompt from the multi-selection toolbar', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByLabelText('导出 OpenAI Main'));
+    await user.click(screen.getByRole('button', { name: '加入组合' }));
+    expect(screen.getByRole('dialog', { name: '新建组合' })).toBeInTheDocument();
+    expect(screen.getByLabelText('组合名称')).toBeInTheDocument();
+  });
 });

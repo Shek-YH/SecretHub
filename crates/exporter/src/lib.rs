@@ -13,6 +13,7 @@ pub struct EnvEntry {
     pub key: String,
     pub value: String,
     pub comment: Option<String>,
+    pub separator_before: bool,
 }
 
 impl EnvEntry {
@@ -21,6 +22,7 @@ impl EnvEntry {
             key: key.into(),
             value: value.into(),
             comment: None,
+            separator_before: false,
         }
     }
 
@@ -33,7 +35,13 @@ impl EnvEntry {
             key: key.into(),
             value: value.into(),
             comment: Some(comment.into()),
+            separator_before: false,
         }
+    }
+
+    pub fn with_separator_before(mut self) -> Self {
+        self.separator_before = true;
+        self
     }
 }
 
@@ -53,6 +61,9 @@ pub fn render_env(entries: &[EnvEntry]) -> Result<String, ExportError> {
     let mut output = String::new();
     for entry in entries {
         validate_key(&entry.key)?;
+        if entry.separator_before && !output.is_empty() && !output.ends_with("\n\n") {
+            output.push('\n');
+        }
         if let Some(comment) = &entry.comment {
             for line in comment.lines() {
                 output.push_str("# ");
@@ -72,7 +83,12 @@ pub fn render_example(entries: &[EnvEntry]) -> Result<String, ExportError> {
     render_env(
         &entries
             .iter()
-            .map(|entry| EnvEntry::new(&entry.key, ""))
+            .map(|entry| {
+                let mut example = EnvEntry::new(&entry.key, "");
+                example.comment = entry.comment.clone();
+                example.separator_before = entry.separator_before;
+                example
+            })
             .collect::<Vec<_>>(),
     )
 }

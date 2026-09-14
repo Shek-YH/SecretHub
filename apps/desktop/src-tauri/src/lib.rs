@@ -63,6 +63,7 @@ pub fn run() {
             commands::choose_project_directory,
             commands::profile_list,
             commands::profile_save,
+            commands::profile_delete,
             commands::project_list,
             commands::project_record,
             commands::audit_list,

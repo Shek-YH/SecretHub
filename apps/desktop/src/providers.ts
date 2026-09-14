@@ -48,3 +48,7 @@ const apiKeyEnvKeys: Record<string, string> = {
 export function defaultApiKeyEnvKey(providerId: string): string {
   return apiKeyEnvKeys[providerId] ?? '';
 }
+
+export function defaultEndpointEnvKey(providerId: string): string {
+  return providerId === 'qwen' ? 'DASHSCOPE_BASE_URL' : providerId === 'glm' ? 'ZHIPUAI_BASE_URL' : providerId === 'kimi' ? 'MOONSHOT_BASE_URL' : providerId === 'volcengine' ? 'ARK_BASE_URL' : providerId === 'hunyuan' ? 'HUNYUAN_BASE_URL' : providerId === 'stepfun' ? 'STEPFUN_BASE_URL' : `${providerId.toUpperCase()}_BASE_URL`;
+}

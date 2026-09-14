@@ -298,6 +298,10 @@ impl VaultService {
         self.require_key()?;
         self.database.list_profiles().map_err(Into::into)
     }
+    pub fn delete_profile(&self, id: &str) -> Result<bool, VaultError> {
+        self.require_key()?;
+        self.database.delete_profile(id).map_err(Into::into)
+    }
     pub fn record_project(
         &self,
         path: &str,

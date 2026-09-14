@@ -43,6 +43,10 @@ pub struct SecretCreateRequest {
     pub model_id: String,
     #[serde(default)]
     pub model_env_key: String,
+    #[serde(default)]
+    pub endpoint_url: String,
+    #[serde(default)]
+    pub endpoint_env_key: String,
 }
 
 fn default_value_type() -> String {
@@ -217,6 +221,8 @@ pub fn secret_create(
                 archived: request.archived,
                 model_id: request.model_id,
                 model_env_key: request.model_env_key,
+                endpoint_url: request.endpoint_url,
+                endpoint_env_key: request.endpoint_env_key,
             },
         )
         .map_err(|error| error.to_string())
@@ -245,6 +251,8 @@ pub fn secret_update(
         archived: request.archived,
         model_id: request.model_id,
         model_env_key: request.model_env_key,
+        endpoint_url: request.endpoint_url,
+        endpoint_env_key: request.endpoint_env_key,
     };
     let vault = vault_from_state(&state)?;
     let vault = vault
@@ -441,17 +449,28 @@ fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry
             .find(|item| item.id == *id)
             .ok_or_else(|| "secret not found".to_owned())?;
         let value = vault.read_secret(id).map_err(|error| error.to_string())?;
+        let group_start = entries.len();
+        let separator_before = group_start > 0;
         if !item.env_key.trim().is_empty() {
-            entries.push(entry_with_optional_comment(
-                &item.env_key,
-                value.clone(),
-                &item.description,
-            ));
+            let mut api_entry =
+                entry_with_optional_comment(&item.env_key, value.clone(), &item.description);
+            if separator_before {
+                api_entry = api_entry.with_separator_before();
+            }
+            entries.push(api_entry);
         }
         if !item.model_id.trim().is_empty() {
+            let model_entry = EnvEntry::new(safe_model_env_key(item), item.model_id.clone());
+            entries.push(if separator_before && entries.len() == group_start {
+                model_entry.with_separator_before()
+            } else {
+                model_entry
+            });
+        }
+        if !item.endpoint_url.trim().is_empty() {
             entries.push(EnvEntry::new(
-                safe_model_env_key(item),
-                item.model_id.clone(),
+                safe_endpoint_env_key(item),
+                item.endpoint_url.clone(),
             ));
         }
     }
@@ -464,17 +483,42 @@ fn selected_entries_from_metadata(
 ) -> Vec<EnvEntry> {
     let mut entries = Vec::new();
     if !metadata.env_key.trim().is_empty() {
-        entries.push(entry_with_optional_comment(
-            &metadata.env_key,
-            value,
-            &metadata.description,
-        ));
+        let mut api_entry =
+            entry_with_optional_comment(&metadata.env_key, value, &metadata.description);
+        if !entries.is_empty() {
+            api_entry = api_entry.with_separator_before();
+        }
+        entries.push(api_entry);
     }
     if !metadata.model_id.trim().is_empty() {
         let model_env_key = safe_model_env_key(metadata);
         entries.push(EnvEntry::new(model_env_key, metadata.model_id.clone()));
     }
+    if !metadata.endpoint_url.trim().is_empty() {
+        entries.push(EnvEntry::new(
+            safe_endpoint_env_key(metadata),
+            metadata.endpoint_url.clone(),
+        ));
+    }
     entries
+}
+
+fn safe_endpoint_env_key(metadata: &secrethub_storage::SecretMetadata) -> String {
+    if is_env_key(&metadata.endpoint_env_key) {
+        return metadata.endpoint_env_key.clone();
+    }
+    let provider = metadata
+        .provider_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{}_BASE_URL", provider.trim_matches('_'))
 }
 
 fn safe_model_env_key(metadata: &secrethub_storage::SecretMetadata) -> String {
@@ -749,6 +793,16 @@ pub fn profile_save(request: ProfileRequest, state: State<'_, AppState>) -> Resu
 }
 
 #[tauri::command]
+pub fn profile_delete(id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .delete_profile(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn project_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<secrethub_storage::ProjectRecord>, String> {
@@ -856,6 +910,8 @@ mod tests {
             archived: false,
             model_id: "deepseek-v4.1-flash".into(),
             model_env_key: "DEEPSEEK-V4.1-FLASH".into(),
+            endpoint_url: "https://api.deepseek.com".into(),
+            endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
         };
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
@@ -865,6 +921,7 @@ mod tests {
         assert!(rendered.contains("# local project only"));
         assert!(rendered.contains("DEEPSEEK_API_KEY=\"fixture-key\""));
         assert!(rendered.contains("DEEPSEEK_MODEL=\"deepseek-v4.1-flash\""));
+        assert!(rendered.contains("DEEPSEEK_BASE_URL=\"https://api.deepseek.com\""));
         assert!(!rendered.contains("value_type"));
         assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH=\""));
     }
