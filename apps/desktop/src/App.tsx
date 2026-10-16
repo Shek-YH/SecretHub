@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
-import { backend, isTauriRuntime, type PendingPlan, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { backend, isTauriRuntime, type BackendModel, type PendingPlan, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { defaultApiKeyEnvKey, defaultEndpointEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
 
 type SecretMetadata = {
@@ -21,6 +21,8 @@ type SecretMetadata = {
   modelEnvKey?: string;
   endpointUrl?: string;
   endpointEnvKey?: string;
+  modelsSyncedAt?: number;
+  modelsSyncStatus?: string;
 };
 type Profile = { id: string; name: string; description: string; secret_ids: string[] };
 type Navigation = 'all' | 'api_key' | 'token' | 'url' | 'password' | 'text' | 'providers' | 'profiles' | 'projects' | 'settings' | 'audit';
@@ -56,6 +58,9 @@ export function App() {
   const [editingSecret, setEditingSecret] = useState<SecretMetadata | null>(null);
   const [validationMessage, setValidationMessage] = useState('');
   const [validationRunning, setValidationRunning] = useState(false);
+  const [models, setModels] = useState<BackendModel[]>([]);
+  const [modelSyncing, setModelSyncing] = useState(false);
+  const [modelMessage, setModelMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [activeNav, setActiveNav] = useState<Navigation>('all');
   const [credentialPreset, setCredentialPreset] = useState<CredentialPreset | null>(null);
@@ -63,7 +68,14 @@ export function App() {
   const [usageCounts, setUsageCounts] = useState<Record<string, number>>(demoUsageCounts);
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
-  useEffect(() => { setActionMessage(''); setValidationMessage(''); }, [selectedId]);
+  useEffect(() => { setActionMessage(''); setValidationMessage(''); setModelMessage(''); }, [selectedId]);
+  const selectedSyncedAt = secrets.find((item) => item.id === selectedId)?.modelsSyncedAt;
+  useEffect(() => {
+    if (!isTauriRuntime()) { setModels([]); return; }
+    let cancelled = false;
+    backend.models(selectedId).then((items) => { if (!cancelled) setModels(items); }).catch(() => { if (!cancelled) setModels([]); });
+    return () => { cancelled = true; };
+  }, [selectedId, selectedSyncedAt]);
   const filtered = useMemo(() => {
     const result = secrets.filter((secret) => `${secret.name} ${secret.envKey} ${secret.provider} ${secret.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && (activeNav === 'all' || activeNav === 'api_key' || activeNav === 'token' || activeNav === 'url' || activeNav === 'password' || activeNav === 'text' ? (activeNav === 'all' || secret.valueType === activeNav) : true) && (categoryFilter === 'all' || secret.category === categoryFilter) && (statusFilter === 'all' || secret.status === statusFilter) && (!favoriteOnly || Boolean(secret.favorite)) && (includeArchived || !secret.archived));
     return [...result].sort((left, right) => sortMode === 'name' ? left.name.localeCompare(right.name) : sortMode === 'usage' ? (usageCounts[right.id] ?? 0) - (usageCounts[left.id] ?? 0) : 0);
@@ -76,7 +88,7 @@ export function App() {
       const [items, audit] = await Promise.all([backend.list(query), backend.audit()]);
       const counts = audit.reduce<Record<string, number>>((result, event) => { if (event.operation === 'env_exported' && event.secret_id) result[event.secret_id] = (result[event.secret_id] ?? 0) + 1; return result; }, {});
       setUsageCounts(counts);
-      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key })));
+      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status })));
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
   }
@@ -109,7 +121,19 @@ export function App() {
       const status = await backend.validate(id);
       setSecrets((current) => current.map((secret) => secret.id === id ? { ...secret, status } : secret));
       setValidationMessage(statusText(status, t));
+      void refreshSecrets();
     } catch (error) { setValidationMessage(String(error)); }
+  }
+
+  async function syncModels(id: string) {
+    if (!isTauriRuntime()) { setModelMessage(t.models.desktopOnly); return; }
+    setModelSyncing(true);
+    try {
+      const result = await backend.syncModels(id);
+      setModelMessage(result.status === 'ok' ? `${t.models.ok} · ${result.count}` : modelStatusText(result.status, t));
+      await refreshSecrets();
+    } catch (error) { setModelMessage(String(error)); }
+    finally { setModelSyncing(false); }
   }
 
   async function validateAllApiKeys() {
@@ -118,7 +142,8 @@ export function App() {
     setActionMessage(t.actions.validatingAll);
     try {
       const results = await backend.validateMany();
-      setSecrets((current) => current.map((secret) => { const result = results.find((item) => item.id === secret.id); return result ? { ...secret, status: result.status } : secret; }));
+      setSecrets((current) => current.map((secret) => { const result = results.find((item) => item.id === secret.id); return result ? { ...secret, status: result.status, modelsSyncStatus: result.models_sync_status || secret.modelsSyncStatus } : secret; }));
+      void refreshSecrets();
       setActionMessage(results.length > 0 ? `${t.actions.validateAllDone} · ${results.length}` : t.actions.validateAllEmpty);
     } catch (error) { setActionMessage(`${t.actions.operationFailed}: ${String(error)}`); }
     finally { setValidationRunning(false); }
@@ -219,7 +244,7 @@ export function App() {
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {selected.provider.toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
                   <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value">••••••••••••••••Km2</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
                   <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} />{selected.modelId && <Field label={t.form.model} value={selected.modelId} />}{selected.endpointUrl && <Field label={t.form.endpointUrl} value={selected.endpointUrl} />}<div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
-                  <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
+                  <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}{selected.valueType === 'api_key' && <ModelSyncSection t={t} locale={locale} status={selected.modelsSyncStatus ?? ''} syncedAt={selected.modelsSyncedAt ?? 0} models={models} syncing={modelSyncing} message={modelMessage} onSync={() => void syncModels(selected.id)} />}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
                   <div className="detail-note"><span className="lock-small">◆</span><span>{t.security.warning}</span></div>
                 </> : <div className="empty-detail">{t.detail.noSelection}</div>}
               </section>
@@ -257,6 +282,24 @@ function NavItem({ label, active, count, dot, onClick }: { label: string; active
 
 function statusText(status: string, t: ReturnType<typeof getTranslation>): string {
   return ({ valid: t.list.valid, invalid: t.list.invalid, unauthorized: t.list.unauthorized, rate_limited: t.list.rateLimited, network_error: t.list.networkError, unsupported: t.list.unsupported, unknown: t.list.unknown } as Record<string, string>)[status] ?? status;
+}
+
+const MODEL_DISPLAY_CAP = 200;
+
+function modelStatusText(status: string, t: ReturnType<typeof getTranslation>): string {
+  return ({ ok: t.models.ok, failed: t.models.failed, unsupported: t.models.unsupported } as Record<string, string>)[status] ?? t.models.never;
+}
+
+export function ModelSyncSection({ t, locale, status, syncedAt, models, syncing, message, onSync }: { t: ReturnType<typeof getTranslation>; locale: Locale; status: string; syncedAt: number; models: BackendModel[]; syncing: boolean; message: string; onSync: () => void }) {
+  const shown = models.slice(0, MODEL_DISPLAY_CAP);
+  const synced = syncedAt > 0 ? new Date(syncedAt * 1000).toLocaleString(locale) : '—';
+  return <section className="model-sync" aria-label={t.models.title}>
+    <div className="model-sync-head"><strong>{t.models.title}</strong><button className="secondary-button" disabled={syncing} onClick={onSync}>{syncing ? t.models.syncing : t.models.sync}</button></div>
+    <div className="model-sync-meta"><span>{modelStatusText(status, t)}</span><span>{t.models.syncedAt}: {synced}</span><span>{t.models.count}: {models.length}</span></div>
+    {message && <div className="form-success model-message">{message}</div>}
+    <ul className="model-list">{shown.length === 0 ? <li className="model-empty">{t.models.empty}</li> : shown.map((model) => <li key={model.model_id}><code>{model.model_id}</code>{model.capabilities.map((cap) => <span className="tag" key={cap}>{cap}</span>)}<span className="model-source">{t.models.sourceLabel}: {model.capability_source}</span></li>)}</ul>
+    {models.length > MODEL_DISPLAY_CAP && <div className="model-more">+{models.length - MODEL_DISPLAY_CAP} {t.models.more}</div>}
+  </section>;
 }
 
 function SecretRow({ secret, selected, checked, t, onClick, onToggle }: { secret: SecretMetadata; selected: boolean; checked: boolean; t: ReturnType<typeof getTranslation>; onClick: () => void; onToggle: () => void }) {

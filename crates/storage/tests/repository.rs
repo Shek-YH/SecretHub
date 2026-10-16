@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use secrethub_storage::{Database, NewSecret};
+use secrethub_storage::{Database, NewSecret, ProviderModelRow};
 
 fn temp_database() -> (std::path::PathBuf, Database) {
     let path = std::env::temp_dir().join(format!("secrethub-test-{}.sqlite", uuid::Uuid::new_v4()));
@@ -171,4 +171,191 @@ fn persists_secret_classification_scope_and_flags() {
     );
     assert!(metadata.favorite);
     assert!(!metadata.archived);
+}
+
+fn new_key(database: &Database, provider: &str) -> String {
+    database
+        .create_secret(NewSecret {
+            name: format!("{provider} key"),
+            provider_id: provider.into(),
+            env_key: "FIXTURE_KEY".into(),
+            description: String::new(),
+            tags: vec![],
+            ciphertext: vec![1, 2, 3],
+            nonce: vec![0; 12],
+        })
+        .unwrap()
+}
+
+fn model_row(id: &str, caps: &[&str], source: &str) -> ProviderModelRow {
+    ProviderModelRow {
+        model_id: id.into(),
+        display_name: String::new(),
+        input: vec!["text".into()],
+        output: vec!["text".into()],
+        capabilities: caps.iter().map(|item| item.to_string()).collect(),
+        capability_source: source.into(),
+        synced_at: 0,
+    }
+}
+
+#[test]
+fn migrates_an_existing_database_without_model_sync_columns() {
+    let path = std::env::temp_dir().join(format!("secrethub-old-{}.sqlite", uuid::Uuid::new_v4()));
+    {
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE secrets (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, provider_id TEXT NOT NULL,
+                env_key TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'unknown',
+                created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+             INSERT INTO secrets(id, name, provider_id, env_key, created_at, updated_at)
+             VALUES ('old-1', 'Old', 'openai', 'OPENAI_API_KEY', 1, 1);",
+        )
+        .unwrap();
+    }
+    let database = Database::open(&path).unwrap();
+    let metadata = database.get_metadata("old-1").unwrap().unwrap();
+    assert_eq!(metadata.models_synced_at, 0);
+    assert_eq!(metadata.models_sync_status, "");
+    assert!(database.list_provider_models("old-1").unwrap().is_empty());
+    drop(database);
+    // Re-opening is idempotent.
+    Database::open(&path).unwrap();
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn replaces_models_in_one_transaction_and_keeps_rows_on_failed_status() {
+    let (_path, database) = temp_database();
+    let id = new_key(&database, "openrouter");
+    database
+        .replace_provider_models(
+            &id,
+            &[
+                model_row("a", &["chat"], "heuristic"),
+                model_row("b", &[], "unknown"),
+            ],
+            100,
+            "ok",
+        )
+        .unwrap();
+    let metadata = database.get_metadata(&id).unwrap().unwrap();
+    assert_eq!(
+        (
+            metadata.models_synced_at,
+            metadata.models_sync_status.as_str()
+        ),
+        (100, "ok")
+    );
+    assert_eq!(database.list_provider_models(&id).unwrap().len(), 2);
+
+    // Replacing again drops rows from the previous sync.
+    database
+        .replace_provider_models(&id, &[model_row("c", &[], "unknown")], 200, "ok")
+        .unwrap();
+    let result =
+        database.replace_provider_models(&id, &[model_row("x", &[], "unknown")], 300, "ok");
+    assert!(result.is_ok());
+    assert_eq!(database.list_provider_models(&id).unwrap()[0].model_id, "x");
+
+    // Failed sync updates only the status columns.
+    assert!(database.set_models_sync_status(&id, "failed", 400).unwrap());
+    let metadata = database.get_metadata(&id).unwrap().unwrap();
+    assert_eq!(
+        (
+            metadata.models_synced_at,
+            metadata.models_sync_status.as_str()
+        ),
+        (400, "failed")
+    );
+    assert_eq!(database.list_provider_models(&id).unwrap().len(), 1);
+    assert!(!database
+        .set_models_sync_status("missing", "failed", 1)
+        .unwrap());
+}
+
+#[test]
+fn replace_rolls_back_when_the_secret_status_update_fails() {
+    let (path, database) = temp_database();
+    let id = new_key(&database, "openai");
+    database
+        .replace_provider_models(&id, &[model_row("keep", &[], "unknown")], 1, "ok")
+        .unwrap();
+    // Force the final UPDATE inside the transaction to fail via a trigger.
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER block_sync BEFORE UPDATE OF models_sync_status ON secrets
+             BEGIN SELECT RAISE(ABORT, 'blocked'); END;",
+        )
+        .unwrap();
+    assert!(database
+        .replace_provider_models(&id, &[model_row("new", &[], "unknown")], 2, "ok")
+        .is_err());
+    let rows = database.list_provider_models(&id).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].model_id, "keep");
+}
+
+#[test]
+fn deleting_a_secret_cascades_to_its_models() {
+    let (path, database) = temp_database();
+    let id = new_key(&database, "openai");
+    database
+        .replace_provider_models(&id, &[model_row("a", &[], "unknown")], 1, "ok")
+        .unwrap();
+    database.delete_secret(&id).unwrap();
+    let count: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM provider_models", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn overrides_win_per_provider_and_model_and_survive_resync() {
+    let (_path, database) = temp_database();
+    let first = new_key(&database, "openrouter");
+    let second = new_key(&database, "openrouter");
+    let other = new_key(&database, "openai");
+    let rows = [model_row("m1", &["chat"], "heuristic")];
+    for id in [&first, &second, &other] {
+        database
+            .replace_provider_models(id, &rows, 1, "ok")
+            .unwrap();
+    }
+    database
+        .upsert_capability_override("openrouter", "m1", &["image_gen".to_owned()], "user")
+        .unwrap();
+    for id in [&first, &second] {
+        let listed = database.list_provider_models(id).unwrap();
+        assert_eq!(listed[0].capabilities, vec!["image_gen"]);
+        assert_eq!(listed[0].capability_source, "user");
+    }
+    // Same model id under another provider is untouched.
+    let untouched = database.list_provider_models(&other).unwrap();
+    assert_eq!(untouched[0].capabilities, vec!["chat"]);
+    assert_eq!(untouched[0].capability_source, "heuristic");
+    // Re-sync does not drop the override.
+    database
+        .replace_provider_models(&first, &rows, 2, "ok")
+        .unwrap();
+    assert_eq!(
+        database.list_provider_models(&first).unwrap()[0].capability_source,
+        "user"
+    );
+    // Upsert replaces.
+    database
+        .upsert_capability_override("openrouter", "m1", &["tts".to_owned()], "ai")
+        .unwrap();
+    let listed = database.list_provider_models(&first).unwrap();
+    assert_eq!(
+        (
+            listed[0].capabilities.clone(),
+            listed[0].capability_source.as_str()
+        ),
+        (vec!["tts".to_owned()], "ai")
+    );
 }

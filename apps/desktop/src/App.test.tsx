@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
-import { App, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { App, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
 import { getTranslation } from './i18n/translations';
 
 describe('SecretHub desktop shell', () => {
@@ -136,5 +136,28 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByDisplayValue('••••••••')).toHaveAttribute('readonly');
     await user.click(screen.getByRole('button', { name: '增加环境变量' }));
     expect(screen.getAllByRole('textbox')).toHaveLength(6);
+  });
+
+  it('renders model sync status, count, capability tags and the sync action', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onSync = vi.fn();
+    const models = [{ model_id: 'qwen3-coder', display_name: '', input: [], output: [], capabilities: ['code'], capability_source: 'heuristic', synced_at: 1 }];
+    render(<ModelSyncSection t={getTranslation('zh-CN')} locale="zh-CN" status="ok" syncedAt={1760600000} models={models} syncing={false} message="" onSync={onSync} />);
+    expect(screen.getByText('已同步')).toBeInTheDocument();
+    expect(screen.getByText('qwen3-coder')).toBeInTheDocument();
+    expect(screen.getByText('code')).toBeInTheDocument();
+    expect(screen.getByText('模型数: 1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '同步模型' }));
+    expect(onSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the never-synced state and caps long model lists', () => {
+    const many = Array.from({ length: 205 }, (_, index) => ({ model_id: `m-${index}`, display_name: '', input: [], output: [], capabilities: [], capability_source: 'unknown', synced_at: 1 }));
+    const { rerender } = render(<ModelSyncSection t={getTranslation('en-US')} locale="en-US" status="" syncedAt={0} models={[]} syncing={false} message="" onSync={() => undefined} />);
+    expect(screen.getByText('Not synced yet')).toBeInTheDocument();
+    rerender(<ModelSyncSection t={getTranslation('en-US')} locale="en-US" status="failed" syncedAt={5} models={many} syncing={false} message="" onSync={() => undefined} />);
+    expect(screen.getByText('+5 more')).toBeInTheDocument();
+    expect(screen.queryByText('m-204')).not.toBeInTheDocument();
+    expect(screen.getByText('Sync failed (previous list kept)')).toBeInTheDocument();
   });
 });

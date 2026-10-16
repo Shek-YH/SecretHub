@@ -4,6 +4,7 @@ use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
 mod commands;
+mod model_sync;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
@@ -57,6 +58,8 @@ pub fn run() {
             commands::secret_reveal,
             commands::secret_validate,
             commands::secret_validate_many,
+            commands::secret_sync_models,
+            commands::secret_models,
             commands::open_external_url,
             commands::export_preview,
             commands::export_conflicts,

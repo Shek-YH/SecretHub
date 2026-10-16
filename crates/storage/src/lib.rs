@@ -33,6 +33,23 @@ pub struct SecretMetadata {
     pub model_env_key: String,
     pub endpoint_url: String,
     pub endpoint_env_key: String,
+    /// Unix seconds of the last model-list sync attempt; 0 means never.
+    pub models_synced_at: i64,
+    /// `""` (never), `ok`, `failed` or `unsupported`.
+    pub models_sync_status: String,
+}
+
+/// One synced model of one key, with any capability override already applied.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderModelRow {
+    pub model_id: String,
+    pub display_name: String,
+    pub input: Vec<String>,
+    pub output: Vec<String>,
+    pub capabilities: Vec<String>,
+    /// provider|catalog|heuristic|unknown, or the override source (user|ai).
+    pub capability_source: String,
+    pub synced_at: i64,
 }
 
 pub struct NewSecret {
@@ -208,6 +225,25 @@ impl Database {
                 display_name TEXT NOT NULL,
                 last_used_at INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS provider_models (
+                secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                input_json TEXT NOT NULL DEFAULT '[]',
+                output_json TEXT NOT NULL DEFAULT '[]',
+                capabilities_json TEXT NOT NULL DEFAULT '[]',
+                capability_source TEXT NOT NULL DEFAULT 'unknown',
+                synced_at INTEGER NOT NULL,
+                PRIMARY KEY (secret_id, model_id)
+             );
+             CREATE TABLE IF NOT EXISTS model_capability_overrides (
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                capabilities_json TEXT NOT NULL,
+                source TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (provider_id, model_id)
+             );
              CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 locale TEXT NOT NULL DEFAULT 'zh-CN',
@@ -272,6 +308,18 @@ impl Database {
             "archived",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "models_synced_at",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "models_sync_status",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
         Ok(Self {
             connection,
             database_path,
@@ -335,14 +383,14 @@ impl Database {
 
     pub fn get_metadata(&self, id: &str) -> Result<Option<SecretMetadata>, StorageError> {
         self.connection.query_row(
-            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key FROM secrets WHERE id = ?1",
+            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets WHERE id = ?1",
             params![id],
             metadata_from_row,
         ).optional().map_err(Into::into)
     }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, StorageError> {
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key FROM secrets ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map([], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -351,7 +399,7 @@ impl Database {
 
     pub fn search_metadata(&self, query: &str) -> Result<Vec<SecretMetadata>, StorageError> {
         let pattern = format!("%{}%", query);
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map(params![pattern], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -413,6 +461,122 @@ impl Database {
             "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, updated_at = ?15 WHERE id = ?16",
             params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, now, id],
         )? > 0)
+    }
+
+    /// Replaces all synced models of one key and records the sync outcome atomically.
+    pub fn replace_provider_models(
+        &self,
+        secret_id: &str,
+        rows: &[ProviderModelRow],
+        synced_at: i64,
+        status: &str,
+    ) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM provider_models WHERE secret_id = ?1",
+            params![secret_id],
+        )?;
+        {
+            let mut insert = transaction.prepare(
+                "INSERT OR REPLACE INTO provider_models(secret_id, model_id, display_name, input_json, output_json, capabilities_json, capability_source, synced_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for row in rows {
+                insert.execute(params![
+                    secret_id,
+                    row.model_id,
+                    row.display_name,
+                    to_json(&row.input)?,
+                    to_json(&row.output)?,
+                    to_json(&row.capabilities)?,
+                    row.capability_source,
+                    synced_at,
+                ])?;
+            }
+        }
+        transaction.execute(
+            "UPDATE secrets SET models_synced_at = ?1, models_sync_status = ?2 WHERE id = ?3",
+            params![synced_at, status, secret_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Records a failed/unsupported sync without touching stored model rows.
+    pub fn set_models_sync_status(
+        &self,
+        secret_id: &str,
+        status: &str,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "UPDATE secrets SET models_synced_at = ?1, models_sync_status = ?2 WHERE id = ?3",
+            params![at, status, secret_id],
+        )? > 0)
+    }
+
+    /// Lists a key's synced models; an override for (provider, model) wins over inferred tags.
+    pub fn list_provider_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<ProviderModelRow>, StorageError> {
+        type Raw = (String, String, String, String, String, String, i64);
+        let mut statement = self.connection.prepare(
+            "SELECT m.model_id, m.display_name, m.input_json, m.output_json,
+                    COALESCE(o.capabilities_json, m.capabilities_json),
+                    COALESCE(o.source, m.capability_source), m.synced_at
+             FROM provider_models m
+             JOIN secrets s ON s.id = m.secret_id
+             LEFT JOIN model_capability_overrides o
+               ON o.provider_id = s.provider_id AND o.model_id = m.model_id
+             WHERE m.secret_id = ?1
+             ORDER BY m.model_id",
+        )?;
+        let raw = statement
+            .query_map(params![secret_id], |row| -> rusqlite::Result<Raw> {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        raw.into_iter()
+            .map(
+                |(model_id, display_name, input, output, caps, source, synced_at)| {
+                    Ok(ProviderModelRow {
+                        model_id,
+                        display_name,
+                        input: from_json(&input)?,
+                        output: from_json(&output)?,
+                        capabilities: from_json(&caps)?,
+                        capability_source: source,
+                        synced_at,
+                    })
+                },
+            )
+            .collect()
+    }
+
+    /// Stores a confirmed capability override; syncing never touches this table.
+    pub fn upsert_capability_override(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        capabilities: &[String],
+        source: &str,
+    ) -> Result<(), StorageError> {
+        self.connection.execute(
+            "INSERT INTO model_capability_overrides(provider_id, model_id, capabilities_json, source, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider_id, model_id) DO UPDATE SET capabilities_json = excluded.capabilities_json, source = excluded.source, updated_at = excluded.updated_at",
+            params![provider_id, model_id, to_json(capabilities)?, source, unix_time()],
+        )?;
+        Ok(())
     }
 
     pub fn update_status(&self, id: &str, status: &str) -> Result<bool, StorageError> {
@@ -586,7 +750,17 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         model_env_key: row.get(15)?,
         endpoint_url: row.get(16)?,
         endpoint_env_key: row.get(17)?,
+        models_synced_at: row.get(18)?,
+        models_sync_status: row.get(19)?,
     })
+}
+
+fn to_json(values: &[String]) -> Result<String, StorageError> {
+    serde_json::to_string(values).map_err(|error| StorageError::InvalidData(error.to_string()))
+}
+
+fn from_json(text: &str) -> Result<Vec<String>, StorageError> {
+    serde_json::from_str(text).map_err(|error| StorageError::InvalidData(error.to_string()))
 }
 
 fn add_column_if_missing(

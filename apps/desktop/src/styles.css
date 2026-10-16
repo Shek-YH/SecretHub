@@ -101,3 +101,11 @@ body { background: #071126; color: #eef4ff; }
 .profile-row span, .project-row span, .audit-row span { color: #7189b6; }
 .conflict-box { border-color: #785f43; background: #2b2418; color: #d8b27c; }
 @media (max-width: 1100px) { .provider-directory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.model-sync { margin: 8px 23px 0; padding: 12px; border: 1px solid #2b3a35; border-radius: 8px; display: grid; gap: 8px; }
+.model-sync-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.model-sync-meta { display: flex; gap: 12px; flex-wrap: wrap; color: #7d918a; font-size: 10px; }
+.model-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; display: grid; gap: 4px; }
+.model-list li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 10px; }
+.model-list code { color: #c2d2cd; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.model-source, .model-more, .model-empty { color: #6e817b; font-size: 10px; }

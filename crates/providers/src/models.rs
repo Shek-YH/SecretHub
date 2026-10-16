@@ -61,6 +61,17 @@ pub enum CapabilitySource {
     Unknown,
 }
 
+impl CapabilitySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CapabilitySource::Provider => "provider",
+            CapabilitySource::Catalog => "catalog",
+            CapabilitySource::Heuristic => "heuristic",
+            CapabilitySource::Unknown => "unknown",
+        }
+    }
+}
+
 fn truncate(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
 }

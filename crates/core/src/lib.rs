@@ -1,7 +1,9 @@
 //! Vault use cases and policy boundary.
 
 use secrethub_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError, VaultKey};
-use secrethub_storage::{Database, NewSecret, SecretMetadata, StorageError, UpdatedSecret};
+use secrethub_storage::{
+    Database, NewSecret, ProviderModelRow, SecretMetadata, StorageError, UpdatedSecret,
+};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -273,6 +275,47 @@ impl VaultService {
             .record_audit(operation, secret_id, None, "success", metadata_json)
             .map_err(Into::into)
     }
+    /// Replaces a key's synced model list and records the sync outcome in one transaction.
+    pub fn replace_provider_models(
+        &self,
+        secret_id: &str,
+        rows: &[ProviderModelRow],
+        synced_at: i64,
+        status: &str,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        self.database
+            .replace_provider_models(secret_id, rows, synced_at, status)
+            .map_err(Into::into)
+    }
+
+    /// Records a failed/unsupported sync; stored model rows are kept.
+    pub fn set_models_sync_status(
+        &self,
+        secret_id: &str,
+        status: &str,
+        at: i64,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        if !self
+            .database
+            .set_models_sync_status(secret_id, status, at)?
+        {
+            return Err(VaultError::InvalidSecret);
+        }
+        Ok(())
+    }
+
+    pub fn list_provider_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<ProviderModelRow>, VaultError> {
+        self.require_key()?;
+        self.database
+            .list_provider_models(secret_id)
+            .map_err(Into::into)
+    }
+
     pub fn update_validation_status(&self, id: &str, status: &str) -> Result<(), VaultError> {
         self.require_key()?;
         if !self.database.update_status(id, status)? {

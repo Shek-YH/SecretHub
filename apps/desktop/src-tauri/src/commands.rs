@@ -375,19 +375,23 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String, String> {
     touch_activity(&state)?;
-    validate_secret_inner(&id, &state)
+    let report = check_secret(&id, &state, true).await?;
+    Ok(report.validation.unwrap_or_default())
 }
 
 #[derive(Debug, Serialize)]
 pub struct ValidationResult {
     pub id: String,
     pub status: String,
+    pub models_sync_status: String,
 }
 
 #[tauri::command]
-pub fn secret_validate_many(state: State<'_, AppState>) -> Result<Vec<ValidationResult>, String> {
+pub async fn secret_validate_many(
+    state: State<'_, AppState>,
+) -> Result<Vec<ValidationResult>, String> {
     touch_activity(&state)?;
     let ids = {
         let vault = vault_from_state(&state)?;
@@ -401,17 +405,74 @@ pub fn secret_validate_many(state: State<'_, AppState>) -> Result<Vec<Validation
             .map(|item| item.id)
             .collect::<Vec<_>>()
     };
-    ids.iter()
-        .map(|id| {
-            validate_secret_inner(id, &state).map(|status| ValidationResult {
-                id: id.clone(),
-                status,
-            })
-        })
-        .collect()
+    let mut results = Vec::with_capacity(ids.len());
+    for id in ids {
+        let report = check_secret(&id, &state, true).await?;
+        results.push(ValidationResult {
+            id,
+            status: report.validation.unwrap_or_default(),
+            models_sync_status: report.models_status,
+        });
+    }
+    Ok(results)
 }
 
-fn validate_secret_inner(id: &str, state: &State<'_, AppState>) -> Result<String, String> {
+#[derive(Debug, Serialize)]
+pub struct ModelSyncResult {
+    pub id: String,
+    pub status: String,
+    pub count: usize,
+}
+
+/// Re-fetches only the model list ("Sync models"); the validation status is left as is.
+#[tauri::command]
+pub async fn secret_sync_models(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<ModelSyncResult, String> {
+    touch_activity(&state)?;
+    let report = check_secret(&id, &state, false).await?;
+    Ok(ModelSyncResult {
+        id,
+        status: report.models_status,
+        count: report.count,
+    })
+}
+
+/// Stored model metadata of one key (no secret values), overrides applied.
+#[tauri::command]
+pub fn secret_models(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<secrethub_storage::ProviderModelRow>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .list_provider_models(&id)
+        .map_err(|error| error.to_string())
+}
+
+struct CheckReport {
+    validation: Option<String>,
+    models_status: String,
+    count: usize,
+}
+
+/// What to store for the model list after a check.
+enum ModelsWrite {
+    Rows(Vec<secrethub_storage::ProviderModelRow>),
+    Status(&'static str),
+    Keep,
+}
+
+/// Validates the key and syncs its model list with one request path.
+/// The vault lock is never held across an `.await`.
+async fn check_secret(
+    id: &str,
+    state: &State<'_, AppState>,
+    update_validation: bool,
+) -> Result<CheckReport, String> {
     let (provider_id, value) = {
         let vault = vault_from_state(state)?;
         let vault = vault
@@ -428,45 +489,90 @@ fn validate_secret_inner(id: &str, state: &State<'_, AppState>) -> Result<String
             vault.read_secret(id).map_err(|error| error.to_string())?,
         )
     };
-    let Some(endpoint) = secrethub_providers::validation_endpoint(&provider_id) else {
-        vault_from_state(state)?
-            .as_ref()
-            .ok_or_else(|| "vault unavailable".to_owned())?
-            .update_validation_status(id, "unsupported")
-            .map_err(|error| error.to_string())?;
-        return Ok("unsupported".to_owned());
-    };
-    let client = reqwest::blocking::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|_| "network_error".to_owned())?;
-    let mut request = client.get(endpoint);
-    if provider_id == "gemini" {
-        request = request.header("x-goog-api-key", &value);
-    } else if provider_id == "anthropic" {
-        request = request
-            .header("x-api-key", &value)
-            .header("anthropic-version", "2023-06-01");
-    } else {
-        request = request.bearer_auth(&value);
-    }
-    let status = match request.send() {
-        Ok(response) if response.status().is_success() => "valid",
-        Ok(response) if response.status().as_u16() == 401 || response.status().as_u16() == 403 => {
-            "unauthorized"
+    let endpoint = secrethub_providers::models_endpoint(&provider_id);
+    let (validation, write) = match &endpoint {
+        None => {
+            drop(value);
+            ("unsupported", ModelsWrite::Status("unsupported"))
         }
-        Ok(response) if response.status().as_u16() == 429 => "rate_limited",
-        Ok(response) if response.status().is_client_error() => "invalid",
-        Ok(_) | Err(_) => "network_error",
+        Some(endpoint) => {
+            let fetched = crate::model_sync::fetch(endpoint, &value, endpoint.lists_models).await;
+            drop(value);
+            plan_writes(endpoint, &provider_id, fetched, update_validation)
+        }
     };
-    drop(value);
-    vault_from_state(state)?
-        .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?
-        .update_validation_status(id, status)
-        .map_err(|error| error.to_string())?;
-    Ok(status.to_owned())
+    let now = super::now_seconds() as i64;
+    let (models_status, count) = {
+        let guard = vault_from_state(state)?;
+        let vault = guard
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        if update_validation {
+            vault
+                .update_validation_status(id, validation)
+                .map_err(|error| error.to_string())?;
+        }
+        let (status, count) = match write {
+            ModelsWrite::Rows(rows) => {
+                vault
+                    .replace_provider_models(id, &rows, now, "ok")
+                    .map_err(|error| error.to_string())?;
+                ("ok", rows.len())
+            }
+            ModelsWrite::Status(status) => {
+                vault
+                    .set_models_sync_status(id, status, now)
+                    .map_err(|error| error.to_string())?;
+                (status, 0)
+            }
+            ModelsWrite::Keep => ("", 0),
+        };
+        if !status.is_empty() {
+            vault
+                .record_action(
+                    "models_synced",
+                    Some(id),
+                    &serde_json::json!({"source": "desktop", "status": status, "count": count})
+                        .to_string(),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        (status.to_owned(), count)
+    };
+    Ok(CheckReport {
+        validation: update_validation.then(|| validation.to_owned()),
+        models_status,
+        count,
+    })
+}
+
+/// Pure mapping from a fetch result to the validation status and model-list write.
+fn plan_writes(
+    endpoint: &secrethub_providers::ModelsEndpoint,
+    provider_id: &str,
+    fetched: crate::model_sync::Fetched,
+    update_validation: bool,
+) -> (&'static str, ModelsWrite) {
+    let outcome = fetched
+        .http_status
+        .map(|status| secrethub_providers::map_validation_status(status, endpoint.is_fallback));
+    let validation = outcome.map_or("network_error", |outcome| outcome.status);
+    let write = match (outcome, fetched.models) {
+        (Some(outcome), _) if outcome.models_unsupported => ModelsWrite::Status("unsupported"),
+        (Some(outcome), models) if outcome.status == "valid" => {
+            if !endpoint.lists_models {
+                ModelsWrite::Status("unsupported")
+            } else if let Some(models) = models {
+                ModelsWrite::Rows(crate::model_sync::build_rows(provider_id, &models))
+            } else {
+                ModelsWrite::Status("failed")
+            }
+        }
+        // Key rejected or network trouble: a plain validation run keeps the last sync result.
+        _ if update_validation => ModelsWrite::Keep,
+        _ => ModelsWrite::Status("failed"),
+    };
+    (validation, write)
 }
 
 #[tauri::command]
@@ -1100,7 +1206,55 @@ pub fn backup_export(path: String, state: State<'_, AppState>) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use super::{is_env_key, selected_entries_from_metadata};
+    use super::{is_env_key, plan_writes, selected_entries_from_metadata, ModelsWrite};
+    use crate::model_sync::Fetched;
+    use secrethub_providers::{DiscoveredModel, ModelsEndpoint, Protocol};
+
+    fn endpoint(is_fallback: bool) -> ModelsEndpoint {
+        ModelsEndpoint {
+            url: "https://example.com/v1/models".into(),
+            protocol: Protocol::Openai,
+            is_fallback,
+            lists_models: true,
+        }
+    }
+
+    fn fetched(status: Option<u16>, models: bool) -> Fetched {
+        Fetched {
+            http_status: status,
+            models: models.then(|| {
+                vec![DiscoveredModel {
+                    id: "m1".into(),
+                    ..Default::default()
+                }]
+            }),
+        }
+    }
+
+    #[test]
+    fn plans_validation_and_model_writes_from_fetch_results() {
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(Some(200), true), true);
+        assert_eq!(status, "valid");
+        assert!(matches!(write, ModelsWrite::Rows(rows) if rows.len() == 1));
+        // Parse/read failure after 2xx: still valid, sync failed.
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(Some(200), false), true);
+        assert_eq!(status, "valid");
+        assert!(matches!(write, ModelsWrite::Status("failed")));
+        // Fallback 404 is unsupported for both.
+        let (status, write) = plan_writes(&endpoint(true), "x", fetched(Some(404), false), true);
+        assert_eq!(status, "unsupported");
+        assert!(matches!(write, ModelsWrite::Status("unsupported")));
+        // Explicit URL 404 stays invalid and keeps the last sync result.
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(Some(404), false), true);
+        assert_eq!(status, "invalid");
+        assert!(matches!(write, ModelsWrite::Keep));
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(None, false), true);
+        assert_eq!(status, "network_error");
+        assert!(matches!(write, ModelsWrite::Keep));
+        // Sync-only run marks failure instead.
+        let (_, write) = plan_writes(&endpoint(false), "x", fetched(Some(401), false), false);
+        assert!(matches!(write, ModelsWrite::Status("failed")));
+    }
 
     #[test]
     fn project_copy_contains_only_env_pairs_and_comment() {
@@ -1123,6 +1277,8 @@ mod tests {
             model_env_key: "DEEPSEEK-V4.1-FLASH".into(),
             endpoint_url: "https://api.deepseek.com".into(),
             endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
+            models_synced_at: 0,
+            models_sync_status: String::new(),
         };
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
