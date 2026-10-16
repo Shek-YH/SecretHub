@@ -40,7 +40,11 @@
       },
       {
         "id": "deepseek-v4-flash-vision-exp",
-        "label": "DeepSeek V4 Flash Vision"
+        "label": "DeepSeek V4 Flash Vision",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       }
     ]
   },
@@ -174,10 +178,18 @@
         "id": "kimi-k3"
       },
       {
-        "id": "kimi-k2.7-code"
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
-        "id": "kimi-k2.7-code-highspeed"
+        "id": "kimi-k2.7-code-highspeed",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
         "id": "kimi-k2.6"
@@ -199,10 +211,18 @@
         "id": "kimi-k3"
       },
       {
-        "id": "kimi-k2.7-code"
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
-        "id": "kimi-k2.7-code-highspeed"
+        "id": "kimi-k2.7-code-highspeed",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
         "id": "kimi-k2.6"
@@ -262,6 +282,7 @@
     "name": "Google Gemini",
     "keyUrl": "https://aistudio.google.com/apikey",
     "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "protocol": "gemini",
     "envKeys": [
       "GEMINI_API_KEY"
     ],
@@ -306,6 +327,7 @@
     "name": "BytePlus",
     "keyUrl": "https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey",
     "baseUrl": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+    "kind": "aggregator",
     "envKeys": [
       "BYTEPLUS_API_KEY"
     ],
@@ -313,10 +335,18 @@
     "modelEnvKey": "BYTEPLUS_MODEL",
     "models": [
       {
-        "id": "ark-code-latest"
+        "id": "ark-code-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
-        "id": "doubao-seed-2.0-code"
+        "id": "doubao-seed-2.0-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
         "id": "doubao-seed-2.0-pro"
@@ -331,7 +361,11 @@
         "id": "glm-5.3"
       },
       {
-        "id": "kimi-k2.7-code"
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
         "id": "deepseek-v4-pro"
@@ -340,7 +374,11 @@
         "id": "deepseek-v4-flash"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       },
       {
         "id": "minimax-m3"
@@ -358,6 +396,7 @@
     "name": "ERNIE 百度千帆",
     "keyUrl": "https://console.bce.baidu.com/qianfan/ais/console/apiKey",
     "baseUrl": "https://qianfan.baidubce.com/v2/coding",
+    "kind": "aggregator",
     "envKeys": [
       "QIANFAN_API_KEY"
     ],
@@ -371,7 +410,11 @@
         "id": "deepseek-v4-flash"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       },
       {
         "id": "glm-5.3"
@@ -392,6 +435,7 @@
     "name": "OpenCode Zen",
     "keyUrl": "https://opencode.ai/zen",
     "baseUrl": "https://opencode.ai/zen/v1",
+    "kind": "aggregator",
     "envKeys": [
       "OPENCODE_API_KEY"
     ],
@@ -420,7 +464,11 @@
         "id": "deepseek-v4-flash"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       },
       {
         "id": "glm-5.3"
@@ -444,6 +492,7 @@
     "name": "OpenCode Go",
     "keyUrl": "https://opencode.ai/go",
     "baseUrl": "https://opencode.ai/zen/go/v1",
+    "kind": "aggregator",
     "envKeys": [
       "OPENCODE_API_KEY"
     ],
@@ -457,7 +506,11 @@
         "id": "deepseek-v4-flash"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       },
       {
         "id": "glm-5.3"
@@ -541,7 +594,10 @@
         "id": "qwen3.6-flash"
       },
       {
-        "id": "qwen-audio-3.0-tts-plus"
+        "id": "qwen-audio-3.0-tts-plus",
+        "capabilities": [
+          "tts"
+        ]
       },
       {
         "id": "glm-5.3"
@@ -553,7 +609,11 @@
         "id": "deepseek-v4-flash-0731"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       }
     ]
   },
@@ -562,6 +622,7 @@
     "name": "Anthropic",
     "keyUrl": "https://console.anthropic.com/settings/keys",
     "baseUrl": "https://api.anthropic.com",
+    "protocol": "anthropic",
     "envKeys": [
       "ANTHROPIC_API_KEY"
     ],
@@ -626,6 +687,7 @@
     "name": "Hunyuan 腾讯混元 TokenHub",
     "keyUrl": "https://console.cloud.tencent.com/tokenhub/codingplan",
     "baseUrl": "https://api.lkeap.cloud.tencent.com/plan/v3",
+    "kind": "aggregator",
     "envKeys": [
       "HUNYUAN_API_KEY"
     ],
@@ -748,10 +810,18 @@
         "id": "mistral-large-latest"
       },
       {
-        "id": "codestral-latest"
+        "id": "codestral-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
-        "id": "devstral-small-latest"
+        "id": "devstral-small-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       }
     ]
   },
@@ -883,6 +953,7 @@
     "name": "火山引擎 / 豆包",
     "keyUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
     "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "kind": "aggregator",
     "envKeys": [
       "ARK_API_KEY"
     ],
@@ -891,10 +962,18 @@
     "validationUrl": "https://ark.cn-beijing.volces.com/api/v3/models",
     "models": [
       {
-        "id": "ark-code-latest"
+        "id": "ark-code-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
-        "id": "doubao-seed-2.0-code"
+        "id": "doubao-seed-2.0-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
         "id": "doubao-seed-2.0-pro"
@@ -909,7 +988,11 @@
         "id": "glm-5.3"
       },
       {
-        "id": "kimi-k2.7-code"
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
       },
       {
         "id": "deepseek-v4-pro"
@@ -918,7 +1001,11 @@
         "id": "deepseek-v4-flash"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       },
       {
         "id": "minimax-m3"
@@ -936,6 +1023,7 @@
     "name": "OpenRouter",
     "keyUrl": "https://openrouter.ai/settings/keys",
     "baseUrl": "https://openrouter.ai/api/v1",
+    "kind": "aggregator",
     "envKeys": [
       "OPENROUTER_API_KEY"
     ],
@@ -971,6 +1059,7 @@
     "name": "CC Vibe",
     "keyUrl": "https://cc-vibe.com/",
     "baseUrl": "https://cc-vibe.com/v1",
+    "kind": "aggregator",
     "envKeys": [
       "CC_VIBE_API_KEY"
     ],
@@ -1020,6 +1109,7 @@
     "name": "APIMart",
     "keyUrl": "https://go.apimart.ai/gh-echobird",
     "baseUrl": "https://api.apimart.ai/v1",
+    "kind": "aggregator",
     "envKeys": [
       "APIMART_API_KEY"
     ],
@@ -1066,7 +1156,11 @@
         "id": "deepseek-v4-flash"
       },
       {
-        "id": "deepseek-v4-flash-vision-exp"
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
       }
     ]
   },
@@ -1075,6 +1169,7 @@
     "name": "88API",
     "keyUrl": "https://88api.ai/sign-up?aff=knFS",
     "baseUrl": "https://88api.ai/v1",
+    "kind": "aggregator",
     "envKeys": [
       "API88_API_KEY"
     ],
@@ -1121,6 +1216,7 @@
     "name": "GrooRoute",
     "keyUrl": "https://grooroute.com/register?aff=FWGVPMYENJQ8",
     "baseUrl": "https://grooroute.com/v1",
+    "kind": "aggregator",
     "envKeys": [
       "GROOROUTE_API_KEY"
     ],

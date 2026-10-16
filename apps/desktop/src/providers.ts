@@ -22,7 +22,9 @@ type ProviderDefinition = {
   envKeys: string[];
   baseUrlEnvKey?: string;
   modelEnvKey?: string;
-  models: Array<{ id: string; label?: string }>;
+  kind?: string;
+  protocol?: string;
+  models: Array<{ id: string; label?: string; capabilities?: string[] }>;
 };
 
 const definitions: ProviderDefinition[] = providerDefinitions;

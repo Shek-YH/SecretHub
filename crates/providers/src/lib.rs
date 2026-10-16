@@ -1,8 +1,46 @@
 //! Deterministic provider registry and local format detection.
 
+mod models;
+
+pub use models::{
+    default_rules, infer_capabilities, load_rules, parse_model_list, CapabilityRule,
+    CapabilitySource, DiscoveredModel, ModelPage, ParseError, CAPABILITY_VOCABULARY,
+};
+
 use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, sync::LazyLock};
 use url::Url;
+
+/// Whether one key reaches a single vendor's models or many vendors' models.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderKind {
+    #[default]
+    Direct,
+    Aggregator,
+}
+
+/// Wire format of the provider's model-list endpoint (`validationUrl`).
+/// This is about the models-list response and request headers, not `baseUrl`:
+/// Gemini's `baseUrl` is the OpenAI-compatible path, but its list endpoint is native.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Protocol {
+    #[default]
+    Openai,
+    Anthropic,
+    Gemini,
+}
+
+/// Hand-annotated catalog model; `capabilities` empty means "not annotated".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogModel {
+    pub id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +53,12 @@ pub struct ProviderDefinition {
     pub base_url: String,
     #[serde(default)]
     pub validation_url: Option<String>,
+    #[serde(default)]
+    pub kind: ProviderKind,
+    #[serde(default)]
+    pub protocol: Protocol,
+    #[serde(default)]
+    pub models: Vec<CatalogModel>,
 }
 
 /// Shared with the desktop UI and MCP server; edit the JSON, not this crate.
