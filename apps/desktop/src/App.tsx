@@ -353,7 +353,9 @@ function AuditPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
 }
 
 function McpPlanBanner({ plan, t, onConfirm }: { plan: PendingPlan; t: ReturnType<typeof getTranslation>; onConfirm: () => void }) {
-  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{plan.secret_ids.length} {t.nav.secrets}</small></div><button className="primary-button" onClick={onConfirm}>{t.mcp.confirm}</button></section>;
+  const [conflicts, setConflicts] = useState<string[]>([]);
+  useEffect(() => { if (isTauriRuntime()) void backend.conflicts({ directory: plan.project_path, secret_ids: plan.secret_ids, write_example: true, replace_existing: false, ensure_gitignore: true }).then(setConflicts).catch(() => setConflicts([])); }, [plan.request_id]); // plans are immutable per request id; avoid re-reading on every poll
+  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{plan.secret_ids.length} {t.nav.secrets}</small>{conflicts.length > 0 && <div className="conflict-box">{t.mcp.overwrite}{conflicts.join(', ')}</div>}</div><button className="primary-button" onClick={onConfirm}>{t.mcp.confirm}</button></section>;
 }
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }

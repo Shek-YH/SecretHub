@@ -1,55 +1,32 @@
 //! Deterministic provider registry and local format detection.
 
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::{net::IpAddr, sync::LazyLock};
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderDefinition {
     pub id: String,
     pub name: String,
     pub env_keys: Vec<String>,
+    #[serde(rename = "keyPrefixes", default)]
     pub prefixes: Vec<String>,
+    pub base_url: String,
+    #[serde(default)]
+    pub validation_url: Option<String>,
 }
 
+/// Shared with the desktop UI and MCP server; edit the JSON, not this crate.
+static REGISTRY: LazyLock<Vec<ProviderDefinition>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!(
+        "../../../packages/provider-definitions/providers.json"
+    ))
+    .expect("packages/provider-definitions/providers.json is valid")
+});
+
 pub fn default_registry() -> Vec<ProviderDefinition> {
-    vec![
-        provider("openai", "OpenAI", &["OPENAI_API_KEY"], &["sk-"]),
-        provider(
-            "anthropic",
-            "Anthropic",
-            &["ANTHROPIC_API_KEY"],
-            &["sk-ant-"],
-        ),
-        provider("gemini", "Google Gemini", &["GEMINI_API_KEY"], &["AIza"]),
-        provider("deepseek", "DeepSeek", &["DEEPSEEK_API_KEY"], &["sk-deep-"]),
-        provider("xai", "xAI", &["XAI_API_KEY"], &["xai-"]),
-        provider(
-            "openrouter",
-            "OpenRouter",
-            &["OPENROUTER_API_KEY"],
-            &["sk-or-"],
-        ),
-        provider(
-            "github",
-            "GitHub",
-            &["GITHUB_TOKEN"],
-            &["ghp_", "github_pat_"],
-        ),
-        provider(
-            "supabase",
-            "Supabase",
-            &["SUPABASE_URL", "SUPABASE_ANON_KEY"],
-            &["sbp_"],
-        ),
-        provider(
-            "cloudflare",
-            "Cloudflare",
-            &["CLOUDFLARE_API_TOKEN"],
-            &["cf_"],
-        ),
-        provider("generic", "Generic API Key", &["API_KEY"], &[]),
-    ]
+    REGISTRY.clone()
 }
 
 pub fn detect_provider(value: &str, registry: &[ProviderDefinition]) -> Option<ProviderDefinition> {
@@ -70,7 +47,7 @@ pub fn detect_provider(value: &str, registry: &[ProviderDefinition]) -> Option<P
 pub fn validate_endpoint(
     provider_id: &str,
     endpoint: &str,
-    _registry: &[ProviderDefinition],
+    registry: &[ProviderDefinition],
 ) -> Result<Url, String> {
     let url = Url::parse(endpoint).map_err(|_| "invalid endpoint URL".to_owned())?;
     if url.scheme() != "https" {
@@ -79,18 +56,12 @@ pub fn validate_endpoint(
     let host = url
         .host_str()
         .ok_or_else(|| "endpoint host is required".to_owned())?;
-    let expected = match provider_id {
-        "openai" => "api.openai.com",
-        "anthropic" => "api.anthropic.com",
-        "gemini" => "generativelanguage.googleapis.com",
-        "deepseek" => "api.deepseek.com",
-        "xai" => "api.x.ai",
-        "openrouter" => "openrouter.ai",
-        "github" => "api.github.com",
-        "supabase" => "api.supabase.com",
-        "cloudflare" => "api.cloudflare.com",
-        _ => return Err("provider has no network validator".to_owned()),
-    };
+    let expected = registry
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .and_then(|provider| Url::parse(&provider.base_url).ok())
+        .and_then(|base| base.host_str().map(ToOwned::to_owned))
+        .ok_or_else(|| "provider has no network validator".to_owned())?;
     if host != expected || url.port().is_some() {
         return Err("endpoint is outside the fixed provider origin".to_owned());
     }
@@ -101,24 +72,10 @@ pub fn validate_endpoint(
 }
 
 pub fn validation_endpoint(provider_id: &str) -> Option<&'static str> {
-    match provider_id {
-        "openai" => Some("https://api.openai.com/v1/models"),
-        "anthropic" => Some("https://api.anthropic.com/v1/models"),
-        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta/models"),
-        "deepseek" => Some("https://api.deepseek.com/models"),
-        "xai" => Some("https://api.x.ai/v1/models"),
-        "openrouter" => Some("https://openrouter.ai/api/v1/models"),
-        "qwen" => Some("https://dashscope.aliyuncs.com/compatible-mode/v1/models"),
-        "glm" => Some("https://open.bigmodel.cn/api/paas/v4/models"),
-        "kimi" => Some("https://api.moonshot.cn/v1/models"),
-        "minimax" => Some("https://api.minimaxi.com/v1/models"),
-        "volcengine" => Some("https://ark.cn-beijing.volces.com/api/v3/models"),
-        "hunyuan" => Some("https://api.hunyuan.cloud.tencent.com/v1/models"),
-        "stepfun" => Some("https://api.stepfun.com/v1/models"),
-        "mistral" => Some("https://api.mistral.ai/v1/models"),
-        "groq" => Some("https://api.groq.com/openai/v1/models"),
-        _ => None,
-    }
+    REGISTRY
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .and_then(|provider| provider.validation_url.as_deref())
 }
 
 fn is_private_ip(ip: IpAddr) -> bool {
@@ -135,14 +92,5 @@ fn is_private_ip(ip: IpAddr) -> bool {
                 || value.is_unicast_link_local()
                 || value.is_unspecified()
         }
-    }
-}
-
-fn provider(id: &str, name: &str, env_keys: &[&str], prefixes: &[&str]) -> ProviderDefinition {
-    ProviderDefinition {
-        id: id.into(),
-        name: name.into(),
-        env_keys: env_keys.iter().map(|value| (*value).into()).collect(),
-        prefixes: prefixes.iter().map(|value| (*value).into()).collect(),
     }
 }

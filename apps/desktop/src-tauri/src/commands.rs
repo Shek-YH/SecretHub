@@ -2,9 +2,9 @@ use super::AppState;
 use arboard::Clipboard;
 use secrethub_core::{NewSecretInput, VaultService};
 use secrethub_exporter::{
-    detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, parse_env_entries,
-    parse_json_entries, render_env, render_example, validate_export_directory, write_atomic,
-    EnvEntry,
+    detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, merge_env,
+    merge_example, parse_env_entries, parse_json_entries, render_env, render_example,
+    validate_export_directory, write_atomic, EnvEntry,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -66,6 +66,9 @@ pub struct ExportRequest {
     pub write_example: bool,
     pub replace_existing: bool,
     pub ensure_gitignore: bool,
+    /// Upsert into existing `.env`/`.env.example` instead of writing fresh files.
+    #[serde(default)]
+    pub merge_existing: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -721,6 +724,7 @@ pub fn mcp_confirm_plan(
             write_example: true,
             replace_existing: false,
             ensure_gitignore: true,
+            merge_existing: true,
         },
         state,
     )?;
@@ -788,17 +792,32 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
         }
     }
     let entries = selected_entries(vault, &request.secret_ids)?;
-    let content = render_env(&entries).map_err(|error| error.to_string())?;
-    write_atomic(&directory.join(".env"), &content, request.replace_existing)
-        .map_err(|error| error.to_string())?;
-    if request.write_example {
-        let example = render_example(&entries).map_err(|error| error.to_string())?;
-        write_atomic(
-            &directory.join(".env.example"),
-            &example,
-            request.replace_existing,
-        )
-        .map_err(|error| error.to_string())?;
+    let env_path = directory.join(".env");
+    let example_path = directory.join(".env.example");
+    if request.merge_existing {
+        let content =
+            merge_env(&read_optional(&env_path)?, &entries).map_err(|error| error.to_string())?;
+        let example = if request.write_example {
+            Some(
+                merge_example(&read_optional(&example_path)?, &entries)
+                    .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
+        write_atomic(&env_path, &content, true).map_err(|error| error.to_string())?;
+        if let Some(example) = example {
+            write_atomic(&example_path, &example, true).map_err(|error| error.to_string())?;
+        }
+    } else {
+        let content = render_env(&entries).map_err(|error| error.to_string())?;
+        write_atomic(&env_path, &content, request.replace_existing)
+            .map_err(|error| error.to_string())?;
+        if request.write_example {
+            let example = render_example(&entries).map_err(|error| error.to_string())?;
+            write_atomic(&example_path, &example, request.replace_existing)
+                .map_err(|error| error.to_string())?;
+        }
     }
     for secret_id in &request.secret_ids {
         vault
@@ -806,6 +825,14 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+fn read_optional(path: &Path) -> Result<String, String> {
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[tauri::command]
