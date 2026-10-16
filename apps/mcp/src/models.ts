@@ -62,7 +62,8 @@ export function findModels(input: FindModelsInput, snapshot: ModelSnapshot, prov
   const limit = input.limit ?? 20;
   const capabilities = [...new Set(input.capabilities)];
   const providerById = new Map(providers.map((provider) => [provider.id, provider]));
-  const eligible = (key: KeyRow) => key.hasValue && !key.archived && key.valueType === 'api_key' && (!input.provider || key.providerId === input.provider) && (input.includeUnverified || key.keyStatus === 'valid');
+  const usable = (key: KeyRow) => key.hasValue && !key.archived && key.valueType === 'api_key' && (!input.provider || key.providerId === input.provider);
+  const eligible = (key: KeyRow) => usable(key) && (input.includeUnverified || key.keyStatus === 'valid');
   const keys = new Map(snapshot.keys.filter(eligible).map((key) => [key.secretId, key]));
   const rows = snapshot.models.filter((row) => keys.has(row.secretId));
 
@@ -118,7 +119,8 @@ export function findModels(input: FindModelsInput, snapshot: ModelSnapshot, prov
     return { capability, candidates: candidates.slice(0, limit).map(({ cover: _cover, ...rest }) => rest) };
   });
 
-  const unsyncedKeys = [...keys.values()]
+  // Listed regardless of key status: an unchecked key is exactly what the user must validate/sync.
+  const unsyncedKeys = snapshot.keys.filter(usable)
     .filter((key) => key.modelsSyncStatus !== 'unsupported' && (key.modelsSyncedAt === 0 || key.modelsSyncStatus === 'failed'))
     .filter((key) => Boolean(key.endpointUrl || providerById.get(key.providerId)?.baseUrl))
     .slice(0, UNSYNCED_LIMIT)

@@ -121,6 +121,13 @@ describe('findModels filters and fields', () => {
     expect(result.unsyncedKeys[1]).toEqual({ secretId: 'failed', secretName: 'Name failed', providerId: 'direct', keyStatus: 'valid', modelsSyncStatus: 'failed' });
   });
 
+  it('lists never-checked keys as unsynced even when unverified keys are excluded from candidates', () => {
+    const snapshot = { keys: [key('fresh', { keyStatus: 'unknown', modelsSyncedAt: 0, modelsSyncStatus: '' })], models: [] };
+    const result = findModels({ capabilities: ['chat'] }, snapshot, providers);
+    expect(result.results[0].candidates).toEqual([]);
+    expect(result.unsyncedKeys).toEqual([expect.objectContaining({ secretId: 'fresh', keyStatus: 'unknown' })]);
+  });
+
   it('trims candidates evenly and flags truncation', () => {
     const many = Array.from({ length: 100 }, (_, i) => model('a', `model-${String(i).padStart(3, '0')}`, ['chat', 'vision']));
     const full = findModels({ capabilities: ['chat', 'vision'], limit: 100 }, { keys: [key('a')], models: many }, providers);
