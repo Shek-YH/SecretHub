@@ -1,4 +1,20 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+
+/** Dispatched on window whenever a backend call fails because the vault auto-locked. */
+export const AUTO_LOCK_EVENT = 'secrethub:auto-locked';
+
+export function isAutoLockError(error: unknown): boolean {
+  return String(error).includes('auto-locked');
+}
+
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await tauriInvoke<T>(command, args);
+  } catch (error) {
+    if (isAutoLockError(error)) window.dispatchEvent(new Event(AUTO_LOCK_EVENT));
+    throw error;
+  }
+}
 
 export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number };
 export type VaultStatus = { initialized: boolean; unlocked: boolean };
@@ -20,6 +36,7 @@ export const backend = {
   setupMaster: (password: string) => invoke<void>('setup_master', { password }),
   unlock: (password: string) => invoke<void>('unlock', { password }),
   lock: () => invoke<void>('lock'),
+  touch: () => invoke<void>('vault_touch'),
   list: (query?: string) => invoke<BackendSecret[]>('secret_list', { query }),
   create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<string>('secret_create', { request }),
   update: (id: string, request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<void>('secret_update', { id, request }),

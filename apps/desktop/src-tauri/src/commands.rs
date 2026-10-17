@@ -157,6 +157,13 @@ pub fn vault_status(state: State<'_, AppState>) -> Result<VaultStatus, String> {
     })
 }
 
+/// Records user activity (typing/clicking in the UI) so idle auto-lock measures
+/// real inactivity rather than the time since the last backend call.
+#[tauri::command]
+pub fn vault_touch(state: State<'_, AppState>) -> Result<(), String> {
+    touch_activity(&state)
+}
+
 #[tauri::command]
 pub fn setup_master(password: String, state: State<'_, AppState>) -> Result<(), String> {
     vault_from_state(&state)?

@@ -1,10 +1,24 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { App, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
-import { backend } from './lib/backend';
+import { AUTO_LOCK_EVENT, backend, isAutoLockError } from './lib/backend';
 import { getTranslation } from './i18n/translations';
 
 describe('SecretHub desktop shell', () => {
+  it('drops to the unlock screen with a notice and closes open forms when the vault auto-locks', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    await user.click(screen.getAllByRole('button', { name: '配置' })[0]);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    act(() => { window.dispatchEvent(new Event(AUTO_LOCK_EVENT)); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '解锁 SecretHub' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('自动锁定');
+    expect(isAutoLockError('vault auto-locked after inactivity')).toBe(true);
+    expect(isAutoLockError('invalid master password')).toBe(false);
+  });
+
   it('starts in Chinese and exposes the language switch', () => {
     render(<App />);
     expect(screen.getByText('SecretHub')).toBeInTheDocument();

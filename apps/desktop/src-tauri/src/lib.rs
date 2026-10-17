@@ -44,6 +44,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
+            commands::vault_touch,
             commands::setup_master,
             commands::unlock,
             commands::lock,
