@@ -12,6 +12,9 @@
     "mcp:build": "npm --prefix apps/mcp run build",
     "mcp:smoke": "npm --prefix apps/mcp run smoke",
     "catalog:check": "node scripts/catalog-check.mjs",
+    "catalog:keygen": "node scripts/catalog-keygen.mjs",
+    "catalog:sign": "node scripts/catalog-sign.mjs",
+    "catalog:bake": "node scripts/catalog-bake.mjs",
     "catalog:test": "node --test \"scripts/**/*.test.mjs\""
   }
 }

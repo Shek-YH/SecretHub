@@ -33,7 +33,8 @@ type ProviderDefinition = {
   modelEnvKey?: string;
   kind?: string;
   protocol?: string;
-  models: Array<{ id: string; label?: string; capabilities?: string[] }>;
+  defaultModel?: string;
+  models: Array<{ id: string; label?: string; capabilities?: string[]; deprecated?: boolean }>;
 };
 
 const definitions: ProviderDefinition[] = providerDefinitions;
@@ -47,9 +48,10 @@ function buildTemplates(effective?: EffectiveModels): ProviderTemplate[] {
   return definitions
     .map((provider) => {
       const override = effective?.providers[provider.id];
-      const models = (override ? override.models.filter((model) => !model.deprecated) : provider.models)
+      const defaultModel = override ? override.defaultModel : provider.defaultModel;
+      const models = (override ? override.models : provider.models).filter((model) => !model.deprecated)
         .map((model) => ({ id: model.id, label: model.label ?? model.id, envKey: provider.modelEnvKey ?? 'MODEL_NAME' }));
-      return { id: provider.id, name: provider.name, keyUrl: provider.keyUrl, baseUrl: provider.baseUrl, models, ...(override?.defaultModel ? { defaultModel: override.defaultModel } : {}) };
+      return { id: provider.id, name: provider.name, keyUrl: provider.keyUrl, baseUrl: provider.baseUrl, models, ...(defaultModel ? { defaultModel } : {}) };
     })
     .filter((provider) => provider.models.length > 0);
 }
