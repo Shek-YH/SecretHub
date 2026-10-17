@@ -30,6 +30,9 @@ url.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 secrethub-providers = { path = "../../../crates/providers" }
+tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 tempfile = "3.27"
+base64.workspace = true
+ed25519-dalek.workspace = true

@@ -1,0 +1,3 @@
+# DEVELOPMENT KEY ONLY: its private key was discarded, so no remote catalog can be signed for it.
+# Before release run `npm run catalog:keygen` to replace this file with your own public key.
+01TdVVS+kLkjpac+9cMkDX4siMq0QLkmAADjIfbeZts=

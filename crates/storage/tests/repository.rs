@@ -394,3 +394,18 @@ fn tag_library_unions_dedupes_and_validates() {
     assert!(!database.delete_tag("ai").unwrap());
     assert!(database.list_tags().unwrap().contains(&"ai".to_owned()));
 }
+
+#[test]
+fn catalog_auto_update_defaults_on_and_is_independent_of_other_settings() {
+    let (path, database) = temp_database();
+    assert!(database.catalog_auto_update().unwrap());
+    database.set_catalog_auto_update(false).unwrap();
+    assert!(!database.catalog_auto_update().unwrap());
+    let settings = database.get_settings().unwrap();
+    database.update_settings(&settings).unwrap();
+    assert!(!database.catalog_auto_update().unwrap());
+    drop(database);
+    // Persisted across reopen.
+    let reopened = Database::open(&path).unwrap();
+    assert!(!reopened.catalog_auto_update().unwrap());
+}

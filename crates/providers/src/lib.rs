@@ -2,11 +2,16 @@
 
 mod catalog;
 mod models;
+mod verify;
 
 pub use catalog::{
     bundled_serial, effective_catalog, effective_models, parse_overlay, BundledSerial,
     CatalogError, CatalogOrigin, EffectiveCatalog, EffectiveModels, EffectiveProviderModels,
     Overlay, OverlayModel, OverlayProvider, MAX_CATALOG_BYTES, MAX_MODELS_PER_PROVIDER,
+};
+
+pub use verify::{
+    check_serial, embedded_public_key, evaluate_remote, verify_signature, SerialCheck, Verdict,
 };
 
 pub use models::{

@@ -32,7 +32,6 @@ impl CatalogState {
     }
 
     /// Replaces the effective catalog; returns whether the models view changed.
-    #[allow(dead_code)] // called by the remote-update path (C3)
     pub fn apply(&self, overlay: Option<&Overlay>) -> bool {
         let next = Arc::new(effective_catalog(&default_registry(), overlay));
         let previous = self.current();
@@ -47,7 +46,6 @@ impl CatalogState {
 
 static STATE: LazyLock<CatalogState> = LazyLock::new(CatalogState::new);
 
-#[allow(dead_code)] // used by the remote-update path (C3)
 pub fn state() -> &'static CatalogState {
     &STATE
 }
@@ -58,7 +56,11 @@ pub fn effective_registry() -> Vec<ProviderDefinition> {
 }
 
 pub fn current_models() -> EffectiveModels {
-    effective_models(&STATE.current())
+    models_view(&STATE)
+}
+
+pub fn models_view(state: &CatalogState) -> EffectiveModels {
+    effective_models(&state.current())
 }
 
 pub fn models_path(data_dir: &Path) -> PathBuf {

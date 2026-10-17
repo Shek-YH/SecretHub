@@ -324,6 +324,12 @@ impl Database {
             "models_sync_status",
             "TEXT NOT NULL DEFAULT ''",
         )?;
+        add_column_if_missing(
+            &connection,
+            "settings",
+            "catalog_auto_update",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         Ok(Self {
             connection,
             database_path,
@@ -767,6 +773,27 @@ impl Database {
         self.connection
             .execute("INSERT OR IGNORE INTO settings(id) VALUES (1)", [])?;
         self.connection.query_row("SELECT locale, theme, auto_lock_minutes, clipboard_timeout_seconds, require_auth_before_export, require_auth_before_reveal FROM settings WHERE id = 1", [], |row| Ok(Settings { locale: row.get(0)?, theme: row.get(1)?, auto_lock_minutes: row.get(2)?, clipboard_timeout_seconds: row.get(3)?, require_auth_before_export: row.get::<_, i64>(4)? != 0, require_auth_before_reveal: row.get::<_, i64>(5)? != 0 })).map_err(Into::into)
+    }
+
+    /// Whether the remote model catalog is fetched automatically (default on).
+    pub fn catalog_auto_update(&self) -> Result<bool, StorageError> {
+        self.connection
+            .execute("INSERT OR IGNORE INTO settings(id) VALUES (1)", [])?;
+        Ok(self.connection.query_row(
+            "SELECT catalog_auto_update FROM settings WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? != 0)
+    }
+
+    pub fn set_catalog_auto_update(&self, enabled: bool) -> Result<(), StorageError> {
+        self.connection
+            .execute("INSERT OR IGNORE INTO settings(id) VALUES (1)", [])?;
+        self.connection.execute(
+            "UPDATE settings SET catalog_auto_update = ?1 WHERE id = 1",
+            params![enabled as i64],
+        )?;
+        Ok(())
     }
 
     pub fn update_settings(&self, settings: &Settings) -> Result<(), StorageError> {

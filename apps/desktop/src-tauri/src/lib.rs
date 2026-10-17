@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager};
 
 mod caps;
 mod catalog;
+mod catalog_update;
 mod commands;
 mod model_sync;
 mod plan;
@@ -48,6 +49,7 @@ pub fn run() {
                     now_seconds(),
                 )),
             });
+            catalog_update::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -92,6 +94,9 @@ pub fn run() {
             commands::project_env_save,
             commands::audit_list,
             commands::catalog_effective,
+            catalog_update::catalog_status,
+            catalog_update::catalog_set_auto_update,
+            catalog_update::catalog_check_now,
             commands::settings_get,
             commands::settings_update,
             commands::backup_export

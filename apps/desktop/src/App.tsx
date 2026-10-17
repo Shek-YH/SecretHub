@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal } from './McpReview';
 import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilitySuggestionBatch, type PendingPlan, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { TagField } from './TagPicker';
+import { CatalogSettings } from './CatalogSettings';
 import { buildModelOptions } from './modelOptions';
 import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
 
@@ -103,9 +104,14 @@ export function App() {
   }
 
   // Provider templates come from the effective catalog in the desktop app; demo/test mode keeps the static import.
+  const appliedCatalogSerial = useRef<number | null>(null);
+  const reloadCatalog = () => { backend.catalogEffective().then((effective) => { if (appliedCatalogSerial.current === effective.serial) return; appliedCatalogSerial.current = effective.serial; applyEffectiveCatalog(effective); setCatalogRevision((value) => value + 1); }).catch(() => undefined); };
+  // The backend may apply a verified remote catalog in the background; a cheap local poll picks it up.
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    backend.catalogEffective().then((effective) => { applyEffectiveCatalog(effective); setCatalogRevision((value) => value + 1); }).catch(() => undefined);
+    reloadCatalog();
+    const timer = window.setInterval(reloadCatalog, 30_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -281,7 +287,7 @@ export function App() {
         {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}
         {reviewCaps && <CapabilitySuggestionModal batch={reviewCaps} t={t} onClose={() => setReviewCaps(null)} onDone={capsReviewed} />}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'providers' ? <ProviderPanel t={t} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
               <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><select aria-label={t.list.sort} value={sortMode} onChange={(event) => setSortMode(event.target.value as 'updated' | 'usage' | 'name')}><option value="updated">{t.list.sortUpdated}</option><option value="usage">{t.list.sortUsage}</option><option value="name">{t.list.sortName}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
@@ -373,7 +379,7 @@ function ProviderPanel({ t, onConfigure }: { t: ReturnType<typeof getTranslation
   return <section className="settings-panel provider-panel"><div className="settings-heading"><span className="section-kicker">{t.providerPanel.kicker}</span><h2>{t.nav.providers}</h2><p>{t.providerPanel.subtitle}</p></div><div className="provider-directory-grid">{providerTemplates.map((provider) => <article className="provider-directory-card" key={provider.id}><div className="provider-directory-heading"><div><strong>{provider.name}</strong><span>{provider.models.length} {t.providerPanel.templates}</span></div><span className="provider-dot green" /></div><div className="provider-models">{provider.models.slice(0, 4).map((model) => <span key={model.id}>{model.label}</span>)}{provider.models.length > 4 && <span>+ {provider.models.length - 4}</span>}</div><div className="provider-directory-url">{provider.baseUrl || t.providerPanel.endpoint}</div><div className="provider-card-actions"><button className="secondary-button" onClick={() => configure(provider)}>{t.providerPanel.configure}</button>{provider.keyUrl && <button className="inline-link" onClick={() => void openWebsite(provider.keyUrl)}>{t.providerPanel.officialKey}</button>}</div></article>)}</div><div className="form-security"><span>◆</span>{t.providerPanel.security}</div></section>;
 }
 
-function SettingsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
+function SettingsPanel({ t, locale, onCatalogUpdated }: { t: ReturnType<typeof getTranslation>; locale: Locale; onCatalogUpdated: () => void }) {
   const [message, setMessage] = useState('');
   async function exportBackup() {
     const folder = isTauriRuntime() ? await backend.chooseFolder() : '.';
@@ -381,7 +387,7 @@ function SettingsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
     if (isTauriRuntime()) await backend.backup(`${folder}/SecretHub.secrethub-backup`);
     setMessage(t.settings.backupSaved);
   }
-  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
+  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><CatalogSettings t={t} locale={locale} onUpdated={onCatalogUpdated} /><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
 }
 
 function ProfilePrompt({ t, selectedIds, onClose, onSaved }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void; onSaved: () => void }) {

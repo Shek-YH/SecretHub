@@ -30,6 +30,10 @@ export type BackendModel = { model_id: string; display_name: string; input: stri
 export type BackendModelSync = { id: string; status: string; count: number };
 export type ProjectEnvEntry = { original_key: string; key: string; value: string; source: 'managed' | 'manual'; secret_id?: string | null };
 
+export type CatalogLastCheck = { at: number; result: 'updated' | 'up_to_date' | 'failed'; code?: string | null; detail: string };
+export type CatalogStatus = { serial: number; publishedAt: string; source: 'bundled' | 'remote'; urlConfigured: boolean; autoUpdate: boolean; lastCheck?: CatalogLastCheck | null };
+export type CatalogCheckResult = { result: 'updated' | 'up_to_date' | 'not_configured' | 'failed'; detail: string; status: CatalogStatus };
+
 export function isTauriRuntime() { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window; }
 
 export const backend = {
@@ -68,6 +72,9 @@ export const backend = {
   tagCreate: (name: string) => invoke<string>('tag_create', { name }),
   tagDelete: (name: string) => invoke<boolean>('tag_delete', { name }),
   catalogEffective: () => invoke<EffectiveModels>('catalog_effective'),
+  catalogStatus: () => invoke<CatalogStatus>('catalog_status'),
+  catalogSetAutoUpdate: (enabled: boolean) => invoke<CatalogStatus>('catalog_set_auto_update', { enabled }),
+  catalogCheckNow: () => invoke<CatalogCheckResult>('catalog_check_now'),
   audit: () => invoke<BackendAuditEvent[]>('audit_list'),
   backup: (path: string) => invoke<void>('backup_export', { path }),
   pendingPlans: () => invoke<PendingPlan[]>('mcp_pending_plans'),

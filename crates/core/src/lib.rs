@@ -404,6 +404,14 @@ impl VaultService {
     pub fn update_settings(&self, settings: secrethub_storage::Settings) -> Result<(), VaultError> {
         self.database.update_settings(&settings).map_err(Into::into)
     }
+    pub fn catalog_auto_update(&self) -> Result<bool, VaultError> {
+        self.database.catalog_auto_update().map_err(Into::into)
+    }
+    pub fn set_catalog_auto_update(&self, enabled: bool) -> Result<(), VaultError> {
+        self.database
+            .set_catalog_auto_update(enabled)
+            .map_err(Into::into)
+    }
     pub fn encrypted_backup(&self) -> Result<Vec<u8>, VaultError> {
         let key = self.require_key()?;
         self.database.checkpoint()?;
