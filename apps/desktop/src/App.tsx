@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
-import { backend, isTauriRuntime, type BackendModel, type PendingPlan, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { backend, isTauriRuntime, type BackendModel, type PendingPlan, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { defaultApiKeyEnvKey, defaultEndpointEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
 
 type SecretMetadata = {
@@ -108,6 +108,10 @@ export function App() {
 
   async function confirmPlan(plan: PendingPlan) {
     try { await backend.confirmPlan(plan.request_id, true); setPendingPlans((current) => current.filter((item) => item.request_id !== plan.request_id)); await refreshSecrets(); } catch (error) { setRuntimeError(String(error)); }
+  }
+
+  async function declinePlan(plan: PendingPlan) {
+    try { await backend.confirmPlan(plan.request_id, false); setPendingPlans((current) => current.filter((item) => item.request_id !== plan.request_id)); } catch (error) { setRuntimeError(String(error)); }
   }
 
   function runBackendAction(action: () => Promise<unknown>, successMessage?: string) {
@@ -223,7 +227,7 @@ export function App() {
         <section className="security-strip" aria-label="Security status">
           <span className="shield-icon" aria-hidden="true">◆</span><span>{t.security.localOnly}</span><span className="strip-divider" /><span>{t.security.encrypted}</span><span className="strip-divider" /><span>{t.security.audit}</span>
         </section>
-        {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onConfirm={() => void confirmPlan(plan)} />)}
+        {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onConfirm={() => void confirmPlan(plan)} onDecline={() => void declinePlan(plan)} />)}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
         {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'providers' ? <ProviderPanel t={t} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
@@ -395,10 +399,14 @@ function AuditPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
   return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">SECURITY / TRACEABLE</span><h2>{t.auditPanel.title}</h2><p>{t.security.audit}</p></div><div className="audit-list">{events.length === 0 ? <div className="empty-state"><strong>{t.auditPanel.empty}</strong></div> : events.map((event) => <div className="audit-row" key={event.id}><strong>{event.operation}</strong><span>{event.result}</span></div>)}</div></section>;
 }
 
-function McpPlanBanner({ plan, t, onConfirm }: { plan: PendingPlan; t: ReturnType<typeof getTranslation>; onConfirm: () => void }) {
-  const [conflicts, setConflicts] = useState<string[]>([]);
-  useEffect(() => { if (isTauriRuntime()) void backend.conflicts({ directory: plan.project_path, secret_ids: plan.secret_ids, write_example: true, replace_existing: false, ensure_gitignore: true }).then(setConflicts).catch(() => setConflicts([])); }, [plan.request_id]); // plans are immutable per request id; avoid re-reading on every poll
-  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{plan.secret_ids.length} {t.nav.secrets}</small>{conflicts.length > 0 && <div className="conflict-box">{t.mcp.overwrite}{conflicts.join(', ')}</div>}</div><button className="primary-button" onClick={onConfirm}>{t.mcp.confirm}</button></section>;
+export function McpPlanBanner({ plan, t, onConfirm, onDecline }: { plan: PendingPlan; t: ReturnType<typeof getTranslation>; onConfirm: () => void; onDecline: () => void }) {
+  const [preview, setPreview] = useState<PlanPreview | null>(null);
+  useEffect(() => { if (isTauriRuntime()) void backend.planPreview(plan.request_id).then(setPreview).catch(() => setPreview(null)); }, [plan.request_id]); // plans are immutable per request id; avoid re-reading on every poll
+  const conflicts = preview?.entries.filter((entry) => entry.conflict).map((entry) => entry.key) ?? [];
+  const warningCount = preview?.entries.reduce((total, entry) => total + entry.warnings.length, 0) ?? 0;
+  const errors = preview?.errors ?? [];
+  const keyCount = preview ? preview.entries.length : plan.secret_ids.length;
+  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{keyCount} {t.nav.secrets}</small>{preview && preview.entries.length > 0 && <small>{preview.entries.map((entry) => entry.key).join(', ')}</small>}{conflicts.length > 0 && <div className="conflict-box">{t.mcp.overwrite}{conflicts.join(', ')}</div>}{warningCount > 0 && <div className="conflict-box">{warningCount} {t.mcp.warnings}</div>}{errors.length > 0 && <div className="form-error" role="alert">{t.mcp.errors}{errors.map((error) => error.code).join(', ')}</div>}</div><div className="mcp-plan-actions"><button className="secondary-button" onClick={onDecline}>{t.mcp.decline}</button><button className="primary-button" onClick={onConfirm} disabled={errors.length > 0}>{t.mcp.confirm}</button></div></section>;
 }
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }

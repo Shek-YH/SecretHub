@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 const directory = mkdtempSync(join(tmpdir(), 'secrethub-mcp-'));
 const databasePath = join(directory, 'vault.sqlite');
 const planDirectory = join(directory, 'plans');
+const resultDirectory = join(directory, 'results');
 const database = new DatabaseSync(databasePath);
 database.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, value_type TEXT, category TEXT, scope TEXT, favorite INTEGER, archived INTEGER, model_id TEXT, model_env_key TEXT, endpoint_url TEXT, endpoint_env_key TEXT, updated_at INTEGER); CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB); CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER); CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER); CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER); INSERT INTO secrets VALUES ('secret-fixture', 'Fixture Metadata', 'generic', 'FIXTURE_KEY', 'unknown', '["test"]', 'token', 'other', 'global', 0, 0, '', '', 'https://example.invalid', 'GENERIC_BASE_URL', 1); INSERT INTO secret_payloads VALUES ('secret-fixture', X'010203'); CREATE TABLE provider_models (secret_id TEXT, model_id TEXT, display_name TEXT, input_json TEXT, output_json TEXT, capabilities_json TEXT, capability_source TEXT, synced_at INTEGER); INSERT INTO secrets VALUES ('secret-model', 'Model Key', 'deepseek', 'DEEPSEEK_API_KEY', 'valid', '[]', 'api_key', 'ai', 'global', 0, 0, '', '', '', '', 0); INSERT INTO secret_payloads VALUES ('secret-model', X'0A0B0C'); INSERT INTO provider_models VALUES ('secret-model', 'plain-model', '', '[]', '[]', '[]', 'unknown', 5), ('secret-model', 'vision-model', '', '[]', '[]', '["chat","vision"]', 'provider', 5);`);
 database.close();
@@ -17,9 +18,11 @@ const messages = [
   { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
   { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'secrethub_list_secret_catalog', arguments: { response_format: 'json', limit: 20, offset: 0 } } },
   { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'secrethub_find_models', arguments: { capabilities: ['chat', 'vision', 'video_gen'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\Projects\fixture', bindings: [{ secret_id: 'secret-model', capability: 'chat', model_id: 'vision-model', env: { api_key: 'DEEPSEEK_API_KEY', base_url: 'DEEPSEEK_BASE_URL', model: 'LLM_MODEL' } }, { secret_id: 'secret-model', capability: 'vision', model_id: 'vision-model', env: { api_key: 'DEEPSEEK_API_KEY', model: 'VISION_MODEL' } }], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\Projects\fixture', bindings: [{ secret_id: 'missing', capability: 'chat', env: { api_key: 'K' } }], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\\Projects\\fixture', secret_ids: ['secret-fixture'], response_format: 'json' } } },
 ];
-const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory } });
+const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
   assert.equal(result.status, 0, result.stderr);
   const responses = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
@@ -44,6 +47,31 @@ try {
   const plan = JSON.parse(readFileSync(`${planDirectory}/${requestId}.json`, 'utf8'));
   assert.deepEqual(plan.secretIds, ['secret-fixture']);
   assert.equal(JSON.stringify(plan).includes('010203'), false);
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_get_plan_status'));
+  const v2Response = responses.find((response) => response.id === 6).result.structuredContent;
+  const v2 = JSON.parse(readFileSync(`${planDirectory}/${v2Response.requestId}.json`, 'utf8'));
+  assert.equal(v2.version, 2);
+  assert.equal(v2.bindings.length, 2);
+  assert.equal(JSON.stringify(v2).includes('0A0B0C'), false);
+  assert.equal(Object.hasOwn(v2.bindings[0], 'value'), false);
+  const rejected = responses.find((response) => response.id === 7).result;
+  assert.equal(rejected.isError, true);
+  assert.match(rejected.structuredContent.error, /Unknown secret id/);
+  mkdirSync(resultDirectory, { recursive: true });
+  writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
+  const statusCalls = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
+    { jsonrpc: '2.0', method: 'notifications/initialized', params: {} },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'secrethub_get_plan_status', arguments: { request_id: v2Response.requestId, response_format: 'json' } } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'secrethub_get_plan_status', arguments: { request_id: requestId, response_format: 'json' } } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'secrethub_get_plan_status', arguments: { request_id: 'plan-../x', response_format: 'json' } } },
+  ];
+  const statusRun = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${statusCalls.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
+  assert.equal(statusRun.status, 0, statusRun.stderr);
+  const statuses = statusRun.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  assert.deepEqual(statuses.find((r) => r.id === 2).result.structuredContent, { status: 'written', requestId: v2Response.requestId, writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [] });
+  assert.equal(statuses.find((r) => r.id === 3).result.structuredContent.status, 'pending');
+  assert.equal(statuses.find((r) => r.id === 4).result.isError, true);
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

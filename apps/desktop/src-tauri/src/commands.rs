@@ -1,10 +1,10 @@
+use super::plan::{self, PendingPlan, PlanError, PlanPreview, PlanResult, WriteOptions};
 use super::AppState;
 use arboard::Clipboard;
 use secrethub_core::{NewSecretInput, VaultService};
 use secrethub_exporter::{
-    detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, merge_env,
-    merge_example, parse_env_entries, parse_json_entries, render_env, render_example,
-    validate_export_directory, write_atomic, EnvEntry,
+    detect_conflicts, parse_env_entries, parse_json_entries, render_env, validate_export_directory,
+    write_atomic, EnvEntry,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -84,15 +84,6 @@ pub struct ImportRequest {
     pub format: String,
     pub contents: String,
     pub confirmed: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PendingPlan {
-    pub request_id: String,
-    pub kind: String,
-    pub project_path: String,
-    pub secret_ids: Vec<String>,
-    pub created_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -608,7 +599,10 @@ pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), Strin
     Ok(())
 }
 
-fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>, String> {
+pub(crate) fn selected_entries(
+    vault: &VaultService,
+    ids: &[String],
+) -> Result<Vec<EnvEntry>, String> {
     let metadata = vault.list_metadata().map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
     for id in ids {
@@ -645,7 +639,7 @@ fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry
     Ok(entries)
 }
 
-fn selected_entries_from_metadata(
+pub(crate) fn selected_entries_from_metadata(
     metadata: &secrethub_storage::SecretMetadata,
     value: String,
 ) -> Vec<EnvEntry> {
@@ -800,42 +794,93 @@ pub fn mcp_pending_plans(app: AppHandle) -> Result<Vec<PendingPlan>, String> {
     Ok(plans)
 }
 
+fn result_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("mcp-results"))
+}
+
+fn pending_plan_path(app: &AppHandle, request_id: &str) -> Result<PathBuf, String> {
+    if !plan::valid_request_id(request_id) {
+        return Err("invalid pending plan id".to_owned());
+    }
+    Ok(plan_directory(app)?.join(format!("{request_id}.json")))
+}
+
+fn read_pending_plan(path: &Path, request_id: &str) -> Result<PendingPlan, String> {
+    let contents = fs::read_to_string(path).map_err(|_| "pending plan not found".to_owned())?;
+    let plan = serde_json::from_str::<PendingPlan>(&contents)
+        .map_err(|_| "pending plan is invalid".to_owned())?;
+    if plan.request_id != request_id {
+        return Err("pending plan is invalid".to_owned());
+    }
+    Ok(plan)
+}
+
+/// Read-only review data for a pending plan; API keys are masked and never decrypted.
+#[tauri::command]
+pub fn mcp_plan_preview(
+    request_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlanPreview, String> {
+    touch_activity(&state)?;
+    let plan = read_pending_plan(&pending_plan_path(&app, &request_id)?, &request_id)?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    Ok(plan::preview_plan(&plan, vault))
+}
+
+/// Approves (`confirmed`) or declines a pending plan, records the outcome in
+/// `mcp-results/<requestId>.json` and removes the pending file. A locked vault
+/// leaves the plan pending so it can be retried after unlocking.
 #[tauri::command]
 pub fn mcp_confirm_plan(
     request_id: String,
     confirmed: bool,
+    skip_keys: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let path = pending_plan_path(&app, &request_id)?;
+    let results = result_directory(&app)?;
+    let finish = |result: PlanResult| -> Result<(), String> {
+        plan::write_result(&results, &result).map_err(|error| error.to_string())?;
+        fs::remove_file(&path).map_err(|error| error.to_string())
+    };
+    let plan = match read_pending_plan(&path, &request_id) {
+        Ok(plan) => plan,
+        Err(message) if path.exists() => {
+            let error = PlanError::new("invalid_plan", message.clone());
+            finish(PlanResult::failed(&request_id, &error))?;
+            return Err(message);
+        }
+        Err(message) => return Err(message),
+    };
     if !confirmed {
-        return Err("plan confirmation was declined".to_owned());
+        return finish(PlanResult::declined(&request_id));
     }
-    if !request_id.starts_with("plan-") || request_id.contains(['/', '\\', '.']) {
-        return Err("invalid pending plan id".to_owned());
+    touch_activity(&state)?;
+    let skip = skip_keys.unwrap_or_default().into_iter().collect();
+    let outcome = {
+        let vault = vault_from_state(&state)?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        plan::process_plan(&plan, &skip, vault)
+    };
+    match outcome {
+        Ok(outcome) => finish(PlanResult::written(&request_id, outcome)),
+        Err(error) if error.code == "vault_locked" => Err(error.to_string()),
+        Err(error) => {
+            finish(PlanResult::failed(&request_id, &error))?;
+            Err(error.to_string())
+        }
     }
-    let path = plan_directory(&app)?.join(format!("{request_id}.json"));
-    let contents = fs::read_to_string(&path).map_err(|_| "pending plan not found".to_owned())?;
-    let plan: PendingPlan =
-        serde_json::from_str(&contents).map_err(|_| "pending plan is invalid".to_owned())?;
-    if plan.request_id != request_id
-        || plan.secret_ids.is_empty()
-        || plan.project_path.trim().is_empty()
-    {
-        return Err("pending plan is invalid".to_owned());
-    }
-    export_env(
-        ExportRequest {
-            directory: plan.project_path,
-            secret_ids: plan.secret_ids,
-            write_example: true,
-            replace_existing: false,
-            ensure_gitignore: true,
-            merge_existing: true,
-        },
-        state,
-    )?;
-    fs::remove_file(path).map_err(|error| error.to_string())?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -880,65 +925,24 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
     let vault = vault
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?;
-    let directory = validate_export_directory(Path::new(&request.directory))
-        .map_err(|error| error.to_string())?;
-    if env_is_tracked(&directory).map_err(|error| error.to_string())? {
-        return Err(
-            ".env is already tracked by Git; remediation required before export".to_owned(),
-        );
-    }
-    let gitignore = directory.join(".gitignore");
-    if !gitignore_has_env(&gitignore).map_err(|error| error.to_string())? {
-        if request.ensure_gitignore {
-            ensure_gitignore_env(&gitignore).map_err(|error| error.to_string())?;
-        } else {
-            return Err(
-                ".env is not protected by .gitignore; explicit remediation required".to_owned(),
-            );
-        }
-    }
     let entries = selected_entries(vault, &request.secret_ids)?;
-    let env_path = directory.join(".env");
-    let example_path = directory.join(".env.example");
-    if request.merge_existing {
-        let content =
-            merge_env(&read_optional(&env_path)?, &entries).map_err(|error| error.to_string())?;
-        let example = if request.write_example {
-            Some(
-                merge_example(&read_optional(&example_path)?, &entries)
-                    .map_err(|error| error.to_string())?,
-            )
-        } else {
-            None
-        };
-        write_atomic(&env_path, &content, true).map_err(|error| error.to_string())?;
-        if let Some(example) = example {
-            write_atomic(&example_path, &example, true).map_err(|error| error.to_string())?;
-        }
-    } else {
-        let content = render_env(&entries).map_err(|error| error.to_string())?;
-        write_atomic(&env_path, &content, request.replace_existing)
-            .map_err(|error| error.to_string())?;
-        if request.write_example {
-            let example = render_example(&entries).map_err(|error| error.to_string())?;
-            write_atomic(&example_path, &example, request.replace_existing)
-                .map_err(|error| error.to_string())?;
-        }
-    }
+    plan::write_project_env(
+        Path::new(&request.directory),
+        &entries,
+        &WriteOptions {
+            ensure_gitignore: request.ensure_gitignore,
+            write_example: request.write_example,
+            merge_existing: request.merge_existing,
+            replace_existing: request.replace_existing,
+        },
+    )
+    .map_err(|error| error.message)?;
     for secret_id in &request.secret_ids {
         vault
             .record_action("env_exported", Some(secret_id), "{\"source\":\"desktop\"}")
             .map_err(|error| error.to_string())?;
     }
     Ok(())
-}
-
-fn read_optional(path: &Path) -> Result<String, String> {
-    match fs::read_to_string(path) {
-        Ok(contents) => Ok(contents),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error.to_string()),
-    }
 }
 
 #[tauri::command]

@@ -15,7 +15,7 @@ export type Translation = {
   project: { title: string; recent: string; record: string; open: string; opened: string; editEnv: string; envTitle: string; addEnv: string; removeEnv: string; saveEnv: string; envKey: string; envValue: string; envSource: string; envManaged: string; envManual: string; envWarning: string; envSaved: string; empty: string };
   providerPanel: { kicker: string; subtitle: string; templates: string; configure: string; officialKey: string; endpoint: string; selected: string; configured: string; pending: string; security: string; model: string; requestUrl: string };
   auditPanel: { title: string; operation: string; result: string; empty: string };
-  mcp: { title: string; description: string; confirm: string; confirmed: string; overwrite: string };
+  mcp: { title: string; description: string; confirm: string; confirmed: string; overwrite: string; decline: string; warnings: string; errors: string };
   footer: { version: string; vault: string; synced: string };
 };
 
@@ -35,7 +35,7 @@ export const translations: Record<Locale, Translation> = {
     project: { title: '项目历史', recent: '最近使用的项目', record: '记录当前项目', open: '打开文件夹', opened: '已尝试打开项目文件夹', editEnv: '编辑 .env', envTitle: '编辑项目 .env', addEnv: '增加环境变量', removeEnv: '删除', saveEnv: '保存 .env', envKey: '变量名', envValue: '变量值', envSource: '来源', envManaged: 'SecretHub 管理', envManual: '手动添加', envWarning: '手动条目会保留；SecretHub 管理项保存时会重新读取最新凭据值。', envSaved: '项目 .env 已保存', empty: '还没有项目记录' },
     providerPanel: { kicker: '服务商目录 / 模板中心', subtitle: '集中查看全部服务商、可用模型和请求地址；每张卡片都可以直接进入预填配置表单。', templates: '个模型模板', configure: '配置', officialKey: 'API Key 官网 ↗', endpoint: '请求地址', selected: '当前服务商', configured: '已配置', pending: '待配置', security: 'API Key 只会进入加密 Vault；配置表单仍可修改模型和请求地址。', model: '模型', requestUrl: '请求地址' },
     auditPanel: { title: '操作审计', operation: '操作', result: '结果', empty: '还没有审计事件' },
-    mcp: { title: 'AI 请求待确认', description: 'MCP 请求准备项目环境。请确认遮罩预览后再写入项目。', confirm: '确认导出', confirmed: '已确认并导出', overwrite: '将覆盖项目 .env 中已有的变量：' },
+    mcp: { title: 'AI 请求待确认', description: 'MCP 请求准备项目环境。请确认遮罩预览后再写入项目。', confirm: '确认导出', confirmed: '已确认并导出', overwrite: '将覆盖项目 .env 中已有的变量：', decline: '拒绝', warnings: '项警告（模型可能不在该 Key 的清单中）', errors: '计划无法执行：' },
     footer: { version: 'V1.0 MVP', vault: '本地保险库', synced: '已保护' },
   },
   'en-US': {
@@ -53,7 +53,7 @@ export const translations: Record<Locale, Translation> = {
     project: { title: 'Project history', recent: 'Recently used projects', record: 'Record current project', open: 'Open folder', opened: 'Project folder open requested', editEnv: 'Edit .env', envTitle: 'Edit project .env', addEnv: 'Add environment variable', removeEnv: 'Remove', saveEnv: 'Save .env', envKey: 'Variable', envValue: 'Value', envSource: 'Source', envManaged: 'SecretHub managed', envManual: 'Manual', envWarning: 'Manual entries are preserved; managed entries reload their latest vault value on save.', envSaved: 'Project .env saved', empty: 'No project history yet' },
     providerPanel: { kicker: 'PROVIDER DIRECTORY / TEMPLATE CENTER', subtitle: 'Browse every provider, available model and request URL. Each card opens a prefilled configuration form.', templates: 'model templates', configure: 'Configure', officialKey: 'API Key website ↗', endpoint: 'Request URL', selected: 'Selected provider', configured: 'Configured', pending: 'Needs setup', security: 'API keys only enter the encrypted Vault; model and request URL remain editable in the form.', model: 'Model', requestUrl: 'Request URL' },
     auditPanel: { title: 'Audit log', operation: 'Operation', result: 'Result', empty: 'No audit events yet' },
-    mcp: { title: 'AI request awaiting approval', description: 'MCP requested a project environment plan. Review the masked preview before writing.', confirm: 'Approve export', confirmed: 'Approved and exported', overwrite: 'Existing project .env keys that will be overwritten: ' },
+    mcp: { title: 'AI request awaiting approval', description: 'MCP requested a project environment plan. Review the masked preview before writing.', confirm: 'Approve export', confirmed: 'Approved and exported', overwrite: 'Existing project .env keys that will be overwritten: ', decline: 'Decline', warnings: 'warning(s): a model may not be in the synced list of its key', errors: 'Plan cannot be applied: ' },
     footer: { version: 'V1.0 MVP', vault: 'Local vault', synced: 'Protected' },
   },
 };

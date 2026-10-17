@@ -109,3 +109,4 @@ body { background: #071126; color: #eef4ff; }
 .model-list li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 10px; }
 .model-list code { color: #c2d2cd; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .model-source, .model-more, .model-empty { color: #6e817b; font-size: 10px; }
+.mcp-plan-actions { display: flex; gap: 8px; flex-shrink: 0; }

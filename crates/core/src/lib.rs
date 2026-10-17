@@ -147,6 +147,12 @@ impl VaultService {
         Ok(id)
     }
 
+    /// Whether an encrypted payload exists for `id`; never decrypts.
+    pub fn has_secret_value(&self, id: &str) -> Result<bool, VaultError> {
+        self.require_key()?;
+        Ok(self.database.get_payload(id)?.is_some())
+    }
+
     pub fn read_secret(&self, id: &str) -> Result<String, VaultError> {
         let key = self.require_key()?;
         let Some((ciphertext, nonce)) = self.database.get_payload(id)? else {

@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
-import { App, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { App, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { backend } from './lib/backend';
 import { getTranslation } from './i18n/translations';
 
 describe('SecretHub desktop shell', () => {
@@ -159,5 +160,36 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByText('+5 more')).toBeInTheDocument();
     expect(screen.queryByText('m-204')).not.toBeInTheDocument();
     expect(screen.getByText('Sync failed (previous list kept)')).toBeInTheDocument();
+  });
+});
+
+describe('McpPlanBanner', () => {
+  const plan = { request_id: 'plan-1', kind: 'prepare_project_env', project_path: 'C:/demo', secret_ids: [], version: 2, created_at: 't' };
+  afterEach(() => { vi.restoreAllMocks(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
+
+  it('shows v2 preview keys, conflicts and warnings without any secret value, and can decline', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    vi.spyOn(backend, 'planPreview').mockResolvedValue({ requestId: 'plan-1', projectPath: 'C:/demo', version: 2, errors: [], entries: [
+      { key: 'API_KEY', kind: 'api_key', display: '••••••••', conflict: true, warnings: [] },
+      { key: 'LLM_MODEL', kind: 'model', display: 'm1', capability: 'chat', conflict: false, warnings: ['model_not_in_synced_list'] },
+    ] });
+    const onConfirm = vi.fn();
+    const onDecline = vi.fn();
+    render(<McpPlanBanner plan={plan} t={getTranslation('en-US')} onConfirm={onConfirm} onDecline={onDecline} />);
+    expect(await screen.findByText('API_KEY, LLM_MODEL')).toBeInTheDocument();
+    expect(screen.getByText(/Existing project .env keys that will be overwritten: API_KEY/)).toBeInTheDocument();
+    expect(screen.getByText(/^1 warning\(s\)/)).toBeInTheDocument();
+    (await import('@testing-library/user-event')).default.setup();
+    screen.getByRole('button', { name: 'Decline' }).click();
+    expect(onDecline).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Approve export' })).toBeEnabled();
+  });
+
+  it('blocks approval when the preview reports errors', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    vi.spyOn(backend, 'planPreview').mockResolvedValue({ requestId: 'plan-1', projectPath: 'C:/demo', version: 2, entries: [], errors: [{ code: 'env_conflict', message: 'x' }] });
+    render(<McpPlanBanner plan={plan} t={getTranslation('en-US')} onConfirm={() => undefined} onDecline={() => undefined} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('env_conflict'));
+    expect(screen.getByRole('button', { name: 'Approve export' })).toBeDisabled();
   });
 });

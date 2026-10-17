@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager};
 
 mod commands;
 mod model_sync;
+mod plan;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
@@ -53,6 +54,7 @@ pub fn run() {
             commands::secret_import,
             commands::mcp_pending_plans,
             commands::mcp_confirm_plan,
+            commands::mcp_plan_preview,
             commands::secret_copy,
             commands::secret_copy_all,
             commands::secret_reveal,
