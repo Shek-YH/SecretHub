@@ -1,3 +1,4 @@
+use super::caps;
 use super::plan::{self, PendingPlan, PlanError, PlanPreview, PlanResult, WriteOptions};
 use super::AppState;
 use arboard::Clipboard;
@@ -784,6 +785,14 @@ pub fn mcp_pending_plans(app: AppHandle) -> Result<Vec<PendingPlan>, String> {
         if path.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
+        // Only `plan-*` files; capability suggestions (`caps-*`) have their own reader.
+        let is_plan = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(plan::valid_request_id);
+        if !is_plan {
+            continue;
+        }
         if let Ok(contents) = fs::read_to_string(path) {
             if let Ok(plan) = serde_json::from_str::<PendingPlan>(&contents) {
                 plans.push(plan);
@@ -881,6 +890,35 @@ pub fn mcp_confirm_plan(
             Err(error.to_string())
         }
     }
+}
+
+/// Pending AI capability suggestions (`caps-*.json`), enriched with the stored capabilities.
+/// Works while the vault is locked, just without the "current" column.
+#[tauri::command]
+pub fn mcp_pending_capability_suggestions(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<caps::SuggestionBatch>, String> {
+    let directory = plan_directory(&app)?;
+    let vault = vault_from_state(&state)?;
+    Ok(caps::enriched_pending(&directory, vault.as_ref()))
+}
+
+/// Applies the accepted model ids as `ai` overrides and discards the rest. Needs an unlocked vault.
+#[tauri::command]
+pub fn mcp_resolve_capability_suggestions(
+    request_id: String,
+    accepted_model_ids: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    touch_activity(&state)?;
+    let directory = plan_directory(&app)?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    caps::resolve(&directory, &request_id, &accepted_model_ids, vault).map(|_| ())
 }
 
 #[tauri::command]

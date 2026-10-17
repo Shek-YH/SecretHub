@@ -3,8 +3,10 @@ import { invoke } from '@tauri-apps/api/core';
 export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number };
 export type VaultStatus = { initialized: boolean; unlocked: boolean };
 export type PendingPlan = { request_id: string; kind: string; project_path: string; secret_ids: string[]; version?: number; bindings?: unknown[]; created_at: string };
-export type PlanPreviewEntry = { key: string; kind: 'api_key' | 'base_url' | 'model' | 'v1'; display: string; capability?: string; conflict: boolean; warnings: string[] };
+export type PlanPreviewEntry = { key: string; secretName?: string; kind: 'api_key' | 'base_url' | 'model' | 'v1'; display: string; capability?: string; conflict: boolean; warnings: string[] };
 export type PlanPreview = { requestId: string; projectPath: string; version: number; entries: PlanPreviewEntry[]; errors: Array<{ code: string; message: string }> };
+export type CapabilitySuggestion = { modelId: string; capabilities: string[]; evidenceUrl?: string; current?: { capabilities: string[]; source: string } };
+export type CapabilitySuggestionBatch = { requestId: string; providerId: string; createdAt: string; suggestions: CapabilitySuggestion[] };
 export type BackendAuditEvent = { id: string; operation: string; secret_id?: string | null; result: string; created_at: number };
 export type BackendValidationResult = { id: string; status: string; models_sync_status: string };
 export type BackendModel = { model_id: string; display_name: string; input: string[]; output: string[]; capabilities: string[]; capability_source: string; synced_at: number };
@@ -48,5 +50,7 @@ export const backend = {
   backup: (path: string) => invoke<void>('backup_export', { path }),
   pendingPlans: () => invoke<PendingPlan[]>('mcp_pending_plans'),
   planPreview: (request_id: string) => invoke<PlanPreview>('mcp_plan_preview', { requestId: request_id }),
+  pendingCapabilitySuggestions: () => invoke<CapabilitySuggestionBatch[]>('mcp_pending_capability_suggestions'),
+  resolveCapabilitySuggestions: (request_id: string, accepted_model_ids: string[]) => invoke<void>('mcp_resolve_capability_suggestions', { requestId: request_id, acceptedModelIds: accepted_model_ids }),
   confirmPlan: (request_id: string, confirmed: boolean, skip_keys?: string[]) => invoke<void>('mcp_confirm_plan', { requestId: request_id, confirmed, skipKeys: skip_keys }),
 };

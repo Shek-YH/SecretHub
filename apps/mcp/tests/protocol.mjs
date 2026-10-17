@@ -21,6 +21,9 @@ const messages = [
   { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\Projects\fixture', bindings: [{ secret_id: 'secret-model', capability: 'chat', model_id: 'vision-model', env: { api_key: 'DEEPSEEK_API_KEY', base_url: 'DEEPSEEK_BASE_URL', model: 'LLM_MODEL' } }, { secret_id: 'secret-model', capability: 'vision', model_id: 'vision-model', env: { api_key: 'DEEPSEEK_API_KEY', model: 'VISION_MODEL' } }], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\Projects\fixture', bindings: [{ secret_id: 'missing', capability: 'chat', env: { api_key: 'K' } }], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\\Projects\\fixture', secret_ids: ['secret-fixture'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'secrethub_suggest_model_capabilities', arguments: { provider_id: 'deepseek', suggestions: [{ model_id: 'plain-model', capabilities: ['chat', 'code'], evidence_url: 'https://docs.example/plain-model' }], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'secrethub_suggest_model_capabilities', arguments: { provider_id: 'no-such-provider', suggestions: [{ model_id: 'plain-model', capabilities: ['chat'] }], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'secrethub_suggest_model_capabilities', arguments: { provider_id: 'deepseek', suggestions: [{ model_id: 'a', capabilities: ['chat'] }, { model_id: 'a', capabilities: ['code'] }], response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -57,6 +60,15 @@ try {
   const rejected = responses.find((response) => response.id === 7).result;
   assert.equal(rejected.isError, true);
   assert.match(rejected.structuredContent.error, /Unknown secret id/);
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_suggest_model_capabilities'));
+  const suggested = responses.find((response) => response.id === 8).result.structuredContent;
+  assert.match(suggested.requestId, /^caps-/);
+  assert.equal(suggested.requiresUserConfirmation, true);
+  const caps = JSON.parse(readFileSync(`${planDirectory}/${suggested.requestId}.json`, 'utf8'));
+  assert.equal(caps.kind, 'suggest_model_capabilities');
+  assert.deepEqual(caps.suggestions, [{ modelId: 'plain-model', capabilities: ['chat', 'code'], evidenceUrl: 'https://docs.example/plain-model' }]);
+  assert.equal(responses.find((response) => response.id === 9).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 10).result.isError, true);
   mkdirSync(resultDirectory, { recursive: true });
   writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
   const statusCalls = [

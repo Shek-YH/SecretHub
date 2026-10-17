@@ -322,6 +322,27 @@ impl VaultService {
             .map_err(Into::into)
     }
 
+    /// Stores a user-confirmed capability override for (provider, model). Metadata only.
+    pub fn set_capability_override(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        capabilities: &[String],
+        source: &str,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        if provider_id.is_empty()
+            || model_id.is_empty()
+            || capabilities.is_empty()
+            || !matches!(source, "user" | "ai")
+        {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database
+            .upsert_capability_override(provider_id, model_id, capabilities, source)
+            .map_err(Into::into)
+    }
+
     pub fn update_validation_status(&self, id: &str, status: &str) -> Result<(), VaultError> {
         self.require_key()?;
         if !self.database.update_status(id, status)? {

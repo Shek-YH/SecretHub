@@ -3,6 +3,7 @@ use secrethub_storage::Database;
 use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
+mod caps;
 mod commands;
 mod model_sync;
 mod plan;
@@ -55,6 +56,8 @@ pub fn run() {
             commands::mcp_pending_plans,
             commands::mcp_confirm_plan,
             commands::mcp_plan_preview,
+            commands::mcp_pending_capability_suggestions,
+            commands::mcp_resolve_capability_suggestions,
             commands::secret_copy,
             commands::secret_copy_all,
             commands::secret_reveal,

@@ -174,6 +174,8 @@ pub enum Source {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedEntry {
     pub key: String,
+    /// The secret the first binding for this variable came from (metadata, for review only).
+    pub secret_id: String,
     pub source: Source,
     pub warning: Option<String>,
 }
@@ -205,7 +207,11 @@ pub fn expand_bindings(
     }
     let mut planned: Vec<PlannedEntry> = Vec::new();
     let mut by_key: HashMap<String, usize> = HashMap::new();
-    let mut add = |key: &str, source: Source, warning: Option<String>| -> Result<(), PlanError> {
+    let mut add = |key: &str,
+                   secret_id: &str,
+                   source: Source,
+                   warning: Option<String>|
+     -> Result<(), PlanError> {
         match by_key.get(key) {
             Some(&index) if planned[index].source == source => Ok(()),
             Some(_) => Err(PlanError::new(
@@ -216,6 +222,7 @@ pub fn expand_bindings(
                 by_key.insert(key.to_owned(), planned.len());
                 planned.push(PlannedEntry {
                     key: key.to_owned(),
+                    secret_id: secret_id.to_owned(),
                     source,
                     warning,
                 });
@@ -254,6 +261,7 @@ pub fn expand_bindings(
         if let Some(name) = &env.api_key {
             add(
                 name,
+                &binding.secret_id,
                 Source::ApiKey {
                     secret_id: binding.secret_id.clone(),
                 },
@@ -278,6 +286,7 @@ pub fn expand_bindings(
             }
             add(
                 name,
+                &binding.secret_id,
                 Source::BaseUrl {
                     value: value.to_owned(),
                 },
@@ -304,6 +313,7 @@ pub fn expand_bindings(
             };
             add(
                 name,
+                &binding.secret_id,
                 Source::Model {
                     value: model_id.to_owned(),
                     capability: binding.capability.clone(),
@@ -477,11 +487,12 @@ fn expand_for_plan(
     )
 }
 
-/// v1 keys of the plan from metadata only (no decryption); a missing secret is an error.
+/// v1 `(key, secret_id)` pairs of the plan from metadata only (no decryption); a missing
+/// secret is an error.
 fn legacy_keys(
     plan: &PendingPlan,
     metadata: &[secrethub_storage::SecretMetadata],
-) -> Result<Vec<String>, PlanError> {
+) -> Result<Vec<(String, String)>, PlanError> {
     let mut keys = Vec::new();
     for id in &plan.secret_ids {
         let item = metadata
@@ -491,14 +502,17 @@ fn legacy_keys(
         keys.extend(
             selected_entries_from_metadata(item, String::new())
                 .into_iter()
-                .map(|entry| entry.key),
+                .map(|entry| (entry.key, item.id.clone())),
         );
     }
     Ok(keys)
 }
 
-fn reject_overlap(legacy: &[String], planned: &[PlannedEntry]) -> Result<(), PlanError> {
-    match planned.iter().find(|entry| legacy.contains(&entry.key)) {
+fn reject_overlap(legacy: &[(String, String)], planned: &[PlannedEntry]) -> Result<(), PlanError> {
+    match planned
+        .iter()
+        .find(|entry| legacy.iter().any(|(key, _)| *key == entry.key))
+    {
         Some(entry) => Err(PlanError::new(
             "env_conflict",
             format!(
@@ -584,6 +598,9 @@ pub fn process_plan(
 #[serde(rename_all = "camelCase")]
 pub struct PreviewEntry {
     pub key: String,
+    /// Name of the secret this entry comes from (metadata); untrusted text for display only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_name: Option<String>,
     /// `api_key` | `base_url` | `model` | `v1`
     pub kind: &'static str,
     /// Masked for API keys and v1 entries; plain for base URLs and model ids.
@@ -606,14 +623,16 @@ pub struct PlanPreview {
 }
 
 pub fn preview_entries(
-    legacy: &[String],
+    legacy: &[(String, String)],
     planned: &[PlannedEntry],
     existing_env: &str,
+    secret_names: &HashMap<String, String>,
 ) -> Result<Vec<PreviewEntry>, PlanError> {
     let mut entries = legacy
         .iter()
-        .map(|key| PreviewEntry {
+        .map(|(key, secret_id)| PreviewEntry {
             key: key.clone(),
+            secret_name: secret_names.get(secret_id).cloned(),
             kind: "v1",
             display: MASK.to_owned(),
             capability: None,
@@ -631,6 +650,7 @@ pub fn preview_entries(
         };
         entries.push(PreviewEntry {
             key: entry.key.clone(),
+            secret_name: secret_names.get(&entry.secret_id).cloned(),
             kind,
             display,
             capability,
@@ -661,7 +681,11 @@ pub fn preview_plan(plan: &PendingPlan, vault: &VaultService) -> PlanPreview {
         let legacy = legacy_keys(plan, &metadata)?;
         reject_overlap(&legacy, &planned)?;
         let existing = read_optional(&Path::new(&plan.project_path).join(".env"))?;
-        preview_entries(&legacy, &planned, &existing)
+        let names = metadata
+            .iter()
+            .map(|item| (item.id.clone(), item.name.clone()))
+            .collect::<HashMap<_, _>>();
+        preview_entries(&legacy, &planned, &existing, &names)
     };
     let (entries, errors) = match build() {
         Ok(entries) => (entries, Vec::new()),
@@ -1028,6 +1052,7 @@ mod tests {
     fn skip_keys_drop_entries_without_reading_their_secret() {
         let planned = vec![
             PlannedEntry {
+                secret_id: "s1".to_owned(),
                 key: "API_KEY".to_owned(),
                 source: Source::ApiKey {
                     secret_id: "s1".to_owned(),
@@ -1035,6 +1060,7 @@ mod tests {
                 warning: None,
             },
             PlannedEntry {
+                secret_id: "s1".to_owned(),
                 key: "LLM_MODEL".to_owned(),
                 source: Source::Model {
                     value: "m".to_owned(),
@@ -1043,6 +1069,7 @@ mod tests {
                 warning: Some(WARN_MODEL_NOT_IN_LIST.to_owned()),
             },
             PlannedEntry {
+                secret_id: "s1".to_owned(),
                 key: "OTHER_MODEL".to_owned(),
                 source: Source::Model {
                     value: "n".to_owned(),
@@ -1068,6 +1095,7 @@ mod tests {
     fn preview_masks_keys_marks_conflicts_and_never_holds_values() {
         let planned = vec![
             PlannedEntry {
+                secret_id: "s1".to_owned(),
                 key: "API_KEY".to_owned(),
                 source: Source::ApiKey {
                     secret_id: "s1".to_owned(),
@@ -1075,6 +1103,7 @@ mod tests {
                 warning: None,
             },
             PlannedEntry {
+                secret_id: "s1".to_owned(),
                 key: "BASE_URL".to_owned(),
                 source: Source::BaseUrl {
                     value: "https://x.example".to_owned(),
@@ -1082,6 +1111,7 @@ mod tests {
                 warning: None,
             },
             PlannedEntry {
+                secret_id: "s1".to_owned(),
                 key: "LLM_MODEL".to_owned(),
                 source: Source::Model {
                     value: "m".to_owned(),
@@ -1091,9 +1121,13 @@ mod tests {
             },
         ];
         let entries = preview_entries(
-            &["LEGACY_KEY".to_owned()],
+            &[("LEGACY_KEY".to_owned(), "s0".to_owned())],
             &planned,
             "API_KEY=old\nUNRELATED=1\n",
+            &HashMap::from([
+                ("s0".to_owned(), "Legacy secret".to_owned()),
+                ("s1".to_owned(), "Main key".to_owned()),
+            ]),
         )
         .unwrap();
         let summary = entries
@@ -1116,6 +1150,8 @@ mod tests {
                 ("LLM_MODEL", "model", "m", false),
             ]
         );
+        assert_eq!(entries[0].secret_name.as_deref(), Some("Legacy secret"));
+        assert_eq!(entries[1].secret_name.as_deref(), Some("Main key"));
         assert_eq!(entries[3].capability.as_deref(), Some("chat"));
         assert_eq!(entries[3].warnings, [WARN_MODEL_NOT_IN_LIST]);
         assert!(!serde_json::to_string(&entries).unwrap().contains("old"));
