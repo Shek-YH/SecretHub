@@ -222,3 +222,13 @@ fn persists_provider_validation_status_without_storing_the_key() {
     assert_eq!(metadata.status, "unauthorized");
     assert_eq!(vault.read_secret(&id).unwrap(), "fixture-validation-key");
 }
+
+#[test]
+fn master_password_requires_at_least_nine_characters() {
+    let (path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    assert!(vault.setup_master("eightchr").is_err());
+    vault.setup_master("ninechars").unwrap();
+    drop(vault);
+    let _ = std::fs::remove_file(path);
+}

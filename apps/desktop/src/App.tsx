@@ -288,7 +288,7 @@ function VaultGate({ status, t, onReady }: { status: VaultStatus; t: ReturnType<
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (setup && password !== confirmation) { setError(t.auth.mismatch); return; }
-    if (password.length < 12) { setError(t.auth.minLength); return; }
+    if (password.length < 9) { setError(t.auth.minLength); return; }
     try { if (setup) await backend.setupMaster(password); else await backend.unlock(password); onReady(); } catch (reason) { setError(String(reason)); }
   }
   return <section className="vault-gate"><div className="gate-orb"><span /></div><span className="section-kicker">LOCAL VAULT / {setup ? 'FIRST RUN' : 'LOCKED'}</span><h2>{setup ? t.auth.setupTitle : t.auth.unlockTitle}</h2><p>{t.auth.subtitle}</p><form onSubmit={submit}><label>{t.auth.password}<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={setup ? 'new-password' : 'current-password'} /></label>{setup && <label>{t.auth.confirmPassword}<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>}{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" type="submit">{setup ? t.auth.setup : t.auth.unlock}</button></form></section>;

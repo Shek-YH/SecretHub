@@ -68,7 +68,7 @@ impl VaultService {
         if self.is_initialized()? {
             return Err(VaultError::AlreadyInitialized);
         }
-        if password.len() < 12 {
+        if password.len() < 9 {
             return Err(VaultError::InvalidPassword);
         }
         let salt = generate_salt();
