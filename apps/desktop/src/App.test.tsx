@@ -177,6 +177,60 @@ describe('SecretHub desktop shell', () => {
   });
 });
 
+describe('model choice from synced models', () => {
+  afterEach(() => { vi.restoreAllMocks(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
+  const synced = (id: string, capabilities: string[] = ['chat']) => ({ model_id: id, display_name: '', input: [], output: [], capabilities, capability_source: 'provider', synced_at: 1 });
+  const keyInitial = { id: 's1', name: 'DS', envKey: 'DEEPSEEK_API_KEY', provider: 'deepseek', tags: [], status: 'valid', updated: 'now', valueType: 'api_key', modelId: 'deepseek-v4-pro', modelEnvKey: 'DEEPSEEK_MODEL', endpointUrl: 'https://api.deepseek.com', endpointEnvKey: 'DEEPSEEK_BASE_URL' };
+
+  it('groups synced models first, then catalog leftovers, then custom', () => {
+    render(<SecretForm t={getTranslation('zh-CN')} knownTags={[]} initial={keyInitial} syncedModels={[synced('zz-new', ['chat', 'vision']), synced('deepseek-v4-flash')]} onClose={() => undefined} onSave={vi.fn()} />);
+    const select = screen.getByLabelText('模型') as HTMLSelectElement;
+    const groups = Array.from(select.querySelectorAll('optgroup')).map((group) => [group.label, Array.from(group.querySelectorAll('option')).map((option) => option.value)]);
+    expect(groups).toEqual([
+      ['此 Key 可用的模型', ['deepseek-v4-flash', 'zz-new']],
+      ['目录推荐（未在此 Key 清单中）', ['deepseek-v4-pro', 'deepseek-v4-flash-vision-exp']],
+    ]);
+    expect(within(select).getByText(/zz-new \[chat, vision\]/)).toBeInTheDocument();
+    expect(select.value).toBe('deepseek-v4-pro');
+    expect(select.lastElementChild).toHaveValue('__custom__');
+  });
+
+  it('keeps the flat catalog list when the key has no synced models', () => {
+    render(<SecretForm t={getTranslation('zh-CN')} knownTags={[]} initial={keyInitial} onClose={() => undefined} onSave={vi.fn()} />);
+    expect((screen.getByLabelText('模型') as HTMLSelectElement).querySelectorAll('optgroup')).toHaveLength(0);
+  });
+
+  it('offers a set-default button per row that does not re-enter the secret value', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onSetDefault = vi.fn();
+    render(<ModelSyncSection t={getTranslation('zh-CN')} locale="zh-CN" status="ok" syncedAt={1} models={[synced('a'), synced('b')]} syncing={false} message="" onSync={() => undefined} currentModelId="a" onSetDefault={onSetDefault} />);
+    expect(screen.getByText('当前默认')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '设为默认模型 b' }));
+    expect(onSetDefault).toHaveBeenCalledWith('b');
+  });
+
+  it('updates the secret model_id through a metadata-only update in the app', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    const row = { id: 's1', name: 'DS', provider_id: 'deepseek', env_key: 'DEEPSEEK_API_KEY', description: '', tags: [], status: 'valid', value_type: 'api_key', category: 'ai', scope: 'global', favorite: false, archived: false, model_id: 'deepseek-v4-pro', model_env_key: 'DEEPSEEK_MODEL', endpoint_url: 'https://api.deepseek.com', endpoint_env_key: 'DEEPSEEK_BASE_URL', models_synced_at: 5, models_sync_status: 'ok', created_at: 1, updated_at: 1 };
+    vi.spyOn(backend, 'status').mockResolvedValue({ initialized: true, unlocked: true });
+    vi.spyOn(backend, 'list').mockResolvedValue([row]);
+    vi.spyOn(backend, 'audit').mockResolvedValue([]);
+    vi.spyOn(backend, 'validateMany').mockResolvedValue([]);
+    vi.spyOn(backend, 'pendingPlans').mockResolvedValue([]);
+    vi.spyOn(backend, 'pendingCapabilitySuggestions').mockResolvedValue([]);
+    vi.spyOn(backend, 'touch').mockResolvedValue(undefined);
+    vi.spyOn(backend, 'models').mockResolvedValue([synced('deepseek-v4-flash'), synced('deepseek-v4-pro')]);
+    const update = vi.spyOn(backend, 'update').mockResolvedValue(undefined);
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(await screen.findByText('DS'));
+    await user.click(await screen.findByRole('button', { name: '设为默认模型 deepseek-v4-flash' }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith('s1', expect.objectContaining({ value: '', model_id: 'deepseek-v4-flash', model_env_key: 'DEEPSEEK_MODEL', provider_id: 'deepseek' }));
+    expect(await screen.findByRole('button', { name: '设为默认模型 deepseek-v4-pro' })).toBeInTheDocument();
+  });
+});
+
 describe('McpPlanBanner', () => {
   const plan = { request_id: 'plan-1', kind: 'prepare_project_env', project_path: 'C:/demo', secret_ids: [], version: 2, created_at: 't' };
   afterEach(() => { vi.restoreAllMocks(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
