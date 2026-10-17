@@ -4,6 +4,7 @@ use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
 mod caps;
+mod catalog;
 mod commands;
 mod model_sync;
 mod plan;
@@ -26,6 +27,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let path = database_path(app.handle()).map_err(Box::<dyn std::error::Error>::from)?;
+            if let Some(data_dir) = path.parent() {
+                // Best effort: MCP falls back to the bundled catalog when this file is missing.
+                let _ = catalog::write_effective_models(
+                    &catalog::models_path(data_dir),
+                    &catalog::current_models(),
+                );
+            }
             let database = Database::open(path)
                 .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
             let vault = VaultService::open(database)
@@ -83,6 +91,7 @@ pub fn run() {
             commands::project_env_preview,
             commands::project_env_save,
             commands::audit_list,
+            commands::catalog_effective,
             commands::settings_get,
             commands::settings_update,
             commands::backup_export

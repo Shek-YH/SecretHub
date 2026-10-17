@@ -1,0 +1,901 @@
+{
+  "schema": 1,
+  "serial": 2026101601,
+  "publishedAt": "2026-10-16T12:00:00Z",
+  "providers": {
+    "xiaomi": {
+      "models": [
+        {
+          "id": "mimo-v2.5-pro"
+        }
+      ]
+    },
+    "deepseek": {
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "label": "DeepSeek V4 Flash"
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "label": "DeepSeek V4 Pro"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "label": "DeepSeek V4 Flash Vision",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        }
+      ]
+    },
+    "minimax-global": {
+      "models": [
+        {
+          "id": "MiniMax-M2.7"
+        },
+        {
+          "id": "MiniMax-M2.7-highspeed"
+        },
+        {
+          "id": "MiniMax-M2.5"
+        },
+        {
+          "id": "MiniMax-M2.5-highspeed"
+        },
+        {
+          "id": "MiniMax-M2.1"
+        },
+        {
+          "id": "MiniMax-M2.1-highspeed"
+        },
+        {
+          "id": "MiniMax-M2"
+        }
+      ]
+    },
+    "minimax": {
+      "models": [
+        {
+          "id": "MiniMax-M2.7"
+        },
+        {
+          "id": "MiniMax-M2.7-highspeed"
+        },
+        {
+          "id": "MiniMax-M2.5"
+        },
+        {
+          "id": "MiniMax-M2.5-highspeed"
+        },
+        {
+          "id": "MiniMax-M2.1"
+        },
+        {
+          "id": "MiniMax-M2.1-highspeed"
+        },
+        {
+          "id": "MiniMax-M2"
+        }
+      ]
+    },
+    "glm": {
+      "models": [
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "glm-5.1"
+        },
+        {
+          "id": "glm-5"
+        }
+      ]
+    },
+    "zai": {
+      "models": [
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "glm-5.1"
+        },
+        {
+          "id": "glm-5"
+        }
+      ]
+    },
+    "kimi": {
+      "models": [
+        {
+          "id": "kimi-k3"
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code-highspeed",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "kimi-k2.6"
+        }
+      ]
+    },
+    "kimi-global": {
+      "models": [
+        {
+          "id": "kimi-k3"
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code-highspeed",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "kimi-k2.6"
+        }
+      ]
+    },
+    "longcat": {
+      "models": [
+        {
+          "id": "LongCat-2.0"
+        }
+      ]
+    },
+    "openai": {
+      "models": [
+        {
+          "id": "gpt-5.6-sol"
+        },
+        {
+          "id": "gpt-5.6-terra"
+        },
+        {
+          "id": "gpt-5.6-luna"
+        },
+        {
+          "id": "gpt-5.5"
+        },
+        {
+          "id": "gpt-4.1"
+        }
+      ]
+    },
+    "gemini": {
+      "models": [
+        {
+          "id": "gemini-3.8-flash"
+        },
+        {
+          "id": "gemini-3.7-flash"
+        },
+        {
+          "id": "gemini-3.6-flash"
+        },
+        {
+          "id": "gemini-3.5-flash"
+        },
+        {
+          "id": "gemini-3.5-flash-lite"
+        },
+        {
+          "id": "gemini-3.1-flash-lite"
+        },
+        {
+          "id": "gemini-3.1-pro-preview"
+        },
+        {
+          "id": "gemini-3-flash-preview"
+        }
+      ]
+    },
+    "byteplus": {
+      "models": [
+        {
+          "id": "ark-code-latest",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "doubao-seed-2.0-code",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "doubao-seed-2.0-pro"
+        },
+        {
+          "id": "doubao-seed-2.0-lite"
+        },
+        {
+          "id": "doubao-seed-2.0-mini"
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        },
+        {
+          "id": "minimax-m3"
+        },
+        {
+          "id": "minimax-m2.7"
+        },
+        {
+          "id": "kimi-k2.6"
+        }
+      ]
+    },
+    "ernie": {
+      "models": [
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "glm-5.1"
+        },
+        {
+          "id": "kimi-k2.6"
+        },
+        {
+          "id": "ernie-5.1"
+        }
+      ]
+    },
+    "opencode-zen": {
+      "models": [
+        {
+          "id": "claude-opus-5"
+        },
+        {
+          "id": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-haiku-4-5"
+        },
+        {
+          "id": "gpt-5.5"
+        },
+        {
+          "id": "gemini-3.7-flash"
+        },
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "kimi-k3"
+        },
+        {
+          "id": "qwen3.8-max"
+        },
+        {
+          "id": "minimax-m3"
+        },
+        {
+          "id": "grok-4.5"
+        }
+      ]
+    },
+    "opencode-go": {
+      "models": [
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "gpt-5.6-luna"
+        },
+        {
+          "id": "grok-4.5"
+        },
+        {
+          "id": "hy3"
+        },
+        {
+          "id": "kimi-k3"
+        },
+        {
+          "id": "mimo-v2.5-pro"
+        },
+        {
+          "id": "minimax-m3"
+        },
+        {
+          "id": "qwen3.8-max"
+        }
+      ]
+    },
+    "qwen": {
+      "models": [
+        {
+          "id": "qwen3.8-max"
+        },
+        {
+          "id": "qwen3.7-max"
+        },
+        {
+          "id": "qwen3.7-plus"
+        },
+        {
+          "id": "qwen3.6-flash"
+        },
+        {
+          "id": "qwen3.5-plus"
+        }
+      ]
+    },
+    "qianwen-platform": {
+      "models": [
+        {
+          "id": "qwen3.8-max"
+        },
+        {
+          "id": "qwen3.8-max-preview"
+        },
+        {
+          "id": "qwen3.7-max"
+        },
+        {
+          "id": "qwen3.7-plus"
+        },
+        {
+          "id": "qwen3.6-flash"
+        },
+        {
+          "id": "qwen-audio-3.0-tts-plus",
+          "capabilities": [
+            "tts"
+          ]
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash-0731"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        }
+      ]
+    },
+    "anthropic": {
+      "models": [
+        {
+          "id": "claude-fable-5-1"
+        },
+        {
+          "id": "claude-opus-5"
+        },
+        {
+          "id": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-haiku-4-5-20251001"
+        }
+      ]
+    },
+    "xai": {
+      "models": [
+        {
+          "id": "grok-4.6"
+        },
+        {
+          "id": "grok-4.5"
+        },
+        {
+          "id": "grok-4.3"
+        },
+        {
+          "id": "grok-4"
+        }
+      ]
+    },
+    "hunyuan": {
+      "models": [
+        {
+          "id": "hy4-preview"
+        },
+        {
+          "id": "hy3"
+        },
+        {
+          "id": "hy-mt2-pro"
+        },
+        {
+          "id": "hy-mt2-plus"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "minimax-m2.7"
+        },
+        {
+          "id": "glm-5.1"
+        },
+        {
+          "id": "kimi-k2.6"
+        }
+      ]
+    },
+    "meta": {
+      "models": [
+        {
+          "id": "Llama-4-Maverick-17B-128E-Instruct"
+        },
+        {
+          "id": "Llama-4-Scout-17B-16E-Instruct"
+        }
+      ]
+    },
+    "perplexity": {
+      "models": [
+        {
+          "id": "sonar-pro"
+        },
+        {
+          "id": "sonar"
+        },
+        {
+          "id": "sonar-reasoning-pro"
+        },
+        {
+          "id": "sonar-reasoning"
+        }
+      ]
+    },
+    "stepfun": {
+      "models": [
+        {
+          "id": "step-3.5-flash-2603"
+        },
+        {
+          "id": "step-3.5-flash"
+        }
+      ]
+    },
+    "mistral": {
+      "models": [
+        {
+          "id": "mistral-medium-latest"
+        },
+        {
+          "id": "mistral-small-latest"
+        },
+        {
+          "id": "mistral-large-latest"
+        },
+        {
+          "id": "codestral-latest",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "devstral-small-latest",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        }
+      ]
+    },
+    "cohere": {
+      "models": [
+        {
+          "id": "command-a-03-2025"
+        },
+        {
+          "id": "command-r-plus"
+        },
+        {
+          "id": "command-r"
+        },
+        {
+          "id": "c4ai-aya-expanse-32b"
+        }
+      ]
+    },
+    "groq": {
+      "models": [
+        {
+          "id": "openai/gpt-oss-120b"
+        },
+        {
+          "id": "openai/gpt-oss-20b"
+        },
+        {
+          "id": "qwen/qwen3.8-27b"
+        },
+        {
+          "id": "qwen/qwen3.6-27b"
+        },
+        {
+          "id": "minimaxai/minimax-m2.7"
+        },
+        {
+          "id": "groq/compound"
+        },
+        {
+          "id": "groq/compound-mini"
+        }
+      ]
+    },
+    "together": {
+      "models": [
+        {
+          "id": "Qwen/Qwen3.8-Next-80B-A3B-Instruct"
+        },
+        {
+          "id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V3"
+        },
+        {
+          "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        }
+      ]
+    },
+    "nvidia": {
+      "models": [
+        {
+          "id": "nvidia/llama-3.3-nemotron-super-49b-v1"
+        },
+        {
+          "id": "openai/gpt-oss-120b"
+        },
+        {
+          "id": "qwen/qwen3.5-397b-a17b"
+        }
+      ]
+    },
+    "agnes": {
+      "models": [
+        {
+          "id": "agnes-2.0-flash"
+        }
+      ]
+    },
+    "volcengine": {
+      "models": [
+        {
+          "id": "ark-code-latest",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "doubao-seed-2.0-code",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "doubao-seed-2.0-pro"
+        },
+        {
+          "id": "doubao-seed-2.0-lite"
+        },
+        {
+          "id": "doubao-seed-2.0-mini"
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "capabilities": [
+            "chat",
+            "code"
+          ]
+        },
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        },
+        {
+          "id": "minimax-m3"
+        },
+        {
+          "id": "minimax-m2.7"
+        },
+        {
+          "id": "kimi-k2.6"
+        }
+      ]
+    },
+    "openrouter": {
+      "models": [
+        {
+          "id": "openai/gpt-5.6-sol"
+        },
+        {
+          "id": "anthropic/claude-opus-5"
+        },
+        {
+          "id": "google/gemini-3.8-flash"
+        },
+        {
+          "id": "deepseek/deepseek-v4-pro"
+        },
+        {
+          "id": "x-ai/grok-4.6"
+        },
+        {
+          "id": "qwen/qwen3.8-max"
+        }
+      ]
+    },
+    "cc-vibe": {
+      "models": [
+        {
+          "id": "claude-opus-5"
+        },
+        {
+          "id": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-fable-5"
+        },
+        {
+          "id": "claude-fable-5-1"
+        },
+        {
+          "id": "claude-haiku-4-5"
+        },
+        {
+          "id": "gpt-5.5"
+        },
+        {
+          "id": "gpt-5.6-luna"
+        },
+        {
+          "id": "gpt-5.6-sol"
+        },
+        {
+          "id": "gpt-5.6-terra"
+        },
+        {
+          "id": "gpt-6-astra"
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "kimi-k2.7"
+        }
+      ]
+    },
+    "apimart": {
+      "models": [
+        {
+          "id": "claude-opus-5"
+        },
+        {
+          "id": "claude-fable-5-1"
+        },
+        {
+          "id": "grok-4.6"
+        },
+        {
+          "id": "qwen3.8-max"
+        },
+        {
+          "id": "gemini-3.7-flash"
+        },
+        {
+          "id": "kimi-k3"
+        },
+        {
+          "id": "minimax-m3"
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "mimo-v2.5-pro"
+        },
+        {
+          "id": "gpt-5.6-sol"
+        },
+        {
+          "id": "gpt-6-astra"
+        },
+        {
+          "id": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "capabilities": [
+            "chat",
+            "vision"
+          ]
+        }
+      ]
+    },
+    "88api": {
+      "models": [
+        {
+          "id": "gpt-5.6-sol"
+        },
+        {
+          "id": "gpt-6-astra"
+        },
+        {
+          "id": "deepseek-v4-flash"
+        },
+        {
+          "id": "claude-opus-5"
+        },
+        {
+          "id": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-fable-5"
+        },
+        {
+          "id": "claude-fable-5-1"
+        },
+        {
+          "id": "grok-4.6"
+        },
+        {
+          "id": "gemini-3.8-flash"
+        },
+        {
+          "id": "glm-5.3"
+        },
+        {
+          "id": "kimi-k3"
+        }
+      ]
+    },
+    "grooroute": {
+      "models": [
+        {
+          "id": "gpt-5.6-sol"
+        },
+        {
+          "id": "gpt-6-astra"
+        },
+        {
+          "id": "gpt-5.6-terra"
+        },
+        {
+          "id": "gpt-5.6-luna"
+        },
+        {
+          "id": "gpt-5.5"
+        },
+        {
+          "id": "claude-opus-5"
+        },
+        {
+          "id": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-fable-5"
+        },
+        {
+          "id": "claude-fable-5-1"
+        },
+        {
+          "id": "claude-haiku-4-5"
+        }
+      ]
+    },
+    "custom": {
+      "models": [
+        {
+          "id": "custom-model",
+          "label": "自定义模型 ID"
+        }
+      ]
+    }
+  }
+}

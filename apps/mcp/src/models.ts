@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { dirname, join } from 'node:path';
 
 // Fixed vocabulary shared with Rust and the skill (design §4).
 export const CAPABILITIES = ['chat', 'code', 'reasoning', 'vision', 'image_gen', 'video_gen', 'tts', 'asr', 'embedding', 'rerank'] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
-export type ModelProvider = { id: string; kind?: string; protocol?: string; baseUrl?: string; envKeys?: string[]; baseUrlEnvKey?: string };
+export type CatalogModelEntry = { id: string; label?: string; capabilities?: string[]; deprecated?: boolean };
+export type ModelProvider = { id: string; kind?: string; protocol?: string; baseUrl?: string; envKeys?: string[]; baseUrlEnvKey?: string; defaultModel?: string; models?: CatalogModelEntry[] };
 
 export type KeyRow = {
   secretId: string;
@@ -173,8 +175,28 @@ export function readModelSnapshot(path: string): ModelSnapshot {
 }
 
 // Shared with the desktop UI and Rust crates; resolves from both src/ and dist/.
-export function loadModelProviders(): ModelProvider[] {
-  return JSON.parse(readFileSync(new URL('../../../packages/provider-definitions/providers.json', import.meta.url), 'utf8'));
+/** Desktop writes the effective model lists (bundled + verified remote overlay) next to the vault. */
+export function effectiveModelsPath(dbPath: string): string {
+  return process.env.SECRETHUB_EFFECTIVE_MODELS_PATH ?? join(dirname(dbPath), 'catalog', 'effective-models.json');
+}
+
+// Only model lists and the default come from the effective file; URLs, protocols and env names stay bundled.
+// The file lives in the same local directory as the vault, so it is trusted like the vault and not re-verified.
+export function loadModelProviders(effectivePath?: string): ModelProvider[] {
+  const bundled: ModelProvider[] = JSON.parse(readFileSync(new URL('../../../packages/provider-definitions/providers.json', import.meta.url), 'utf8'));
+  if (!effectivePath) return bundled;
+  let effective: Record<string, { defaultModel?: unknown; models?: unknown }>;
+  try {
+    const parsed = JSON.parse(readFileSync(effectivePath, 'utf8'));
+    if (!parsed || typeof parsed.providers !== 'object' || parsed.providers === null) return bundled;
+    effective = parsed.providers;
+  } catch { return bundled; }
+  return bundled.map((provider) => {
+    const entry = effective[provider.id];
+    if (!entry || !Array.isArray(entry.models)) return provider;
+    const models = entry.models.filter((model): model is CatalogModelEntry => typeof model === 'object' && model !== null && typeof (model as CatalogModelEntry).id === 'string');
+    return { ...provider, models, ...(typeof entry.defaultModel === 'string' ? { defaultModel: entry.defaultModel } : {}) };
+  });
 }
 
 function compare(a: string, b: string) { return a < b ? -1 : a > b ? 1 : 0; }

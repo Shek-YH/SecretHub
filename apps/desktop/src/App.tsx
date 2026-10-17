@@ -4,7 +4,7 @@ import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal 
 import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilitySuggestionBatch, type PendingPlan, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { TagField } from './TagPicker';
 import { buildModelOptions } from './modelOptions';
-import { defaultApiKeyEnvKey, defaultEndpointEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
+import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
 
 type SecretMetadata = {
   id: string;
@@ -49,6 +49,7 @@ export function App() {
   const [capBatches, setCapBatches] = useState<CapabilitySuggestionBatch[]>([]);
   const [reviewCaps, setReviewCaps] = useState<CapabilitySuggestionBatch | null>(null);
   const [modelsRevision, setModelsRevision] = useState(0);
+  const [, setCatalogRevision] = useState(0);
   const [autoLocked, setAutoLocked] = useState(false);
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -100,6 +101,12 @@ export function App() {
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
   }
+
+  // Provider templates come from the effective catalog in the desktop app; demo/test mode keeps the static import.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    backend.catalogEffective().then((effective) => { applyEffectiveCatalog(effective); setCatalogRevision((value) => value + 1); }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -360,7 +367,7 @@ function Field({ label, value }: { label: string; value: string }) { return <div
 function ProviderPanel({ t, onConfigure }: { t: ReturnType<typeof getTranslation>; onConfigure: (preset: CredentialPreset) => void }) {
   async function openWebsite(url: string) { if (isTauriRuntime()) await backend.openExternalUrl(url); else window.open(url, '_blank', 'noopener,noreferrer'); }
   function configure(provider: ProviderTemplate) {
-    const model = provider.models[0];
+    const model = provider.models.find((item) => item.id === provider.defaultModel) ?? provider.models[0];
     onConfigure({ provider: provider.id, name: `${provider.name} · ${model.label}`, envKey: defaultApiKeyEnvKey(provider.id), modelId: model.id, modelEnvKey: model.envKey, endpointUrl: provider.baseUrl, endpointEnvKey: defaultEndpointEnvKey(provider.id) });
   }
   return <section className="settings-panel provider-panel"><div className="settings-heading"><span className="section-kicker">{t.providerPanel.kicker}</span><h2>{t.nav.providers}</h2><p>{t.providerPanel.subtitle}</p></div><div className="provider-directory-grid">{providerTemplates.map((provider) => <article className="provider-directory-card" key={provider.id}><div className="provider-directory-heading"><div><strong>{provider.name}</strong><span>{provider.models.length} {t.providerPanel.templates}</span></div><span className="provider-dot green" /></div><div className="provider-models">{provider.models.slice(0, 4).map((model) => <span key={model.id}>{model.label}</span>)}{provider.models.length > 4 && <span>+ {provider.models.length - 4}</span>}</div><div className="provider-directory-url">{provider.baseUrl || t.providerPanel.endpoint}</div><div className="provider-card-actions"><button className="secondary-button" onClick={() => configure(provider)}>{t.providerPanel.configure}</button>{provider.keyUrl && <button className="inline-link" onClick={() => void openWebsite(provider.keyUrl)}>{t.providerPanel.officialKey}</button>}</div></article>)}</div><div className="form-security"><span>◆</span>{t.providerPanel.security}</div></section>;
@@ -481,11 +488,11 @@ export function SecretForm({ t, knownTags, initial, preset, syncedModels = [], o
   const [error, setError] = useState('');
   const template: ProviderTemplate = providerTemplate(provider);
   const availableProviders = providerTemplates.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(providerQuery.toLowerCase()));
-  const modelGroups = buildModelOptions(template.models, template.id === 'custom' ? [] : syncedModels);
+  const modelGroups = buildModelOptions(template.models, template.id === 'custom' ? [] : syncedModels, template.defaultModel);
   const isCustomModel = template.id === 'custom' || ![...modelGroups.synced, ...modelGroups.recommended].some((model) => model.id === modelId);
 
   function selectTemplate(next: ProviderTemplate) {
-    const firstModel = next.models[0];
+    const firstModel = next.models.find((item) => item.id === next.defaultModel) ?? next.models[0];
     setProvider(next.id);
     setName((current) => current || next.name);
     setEnvKey((current) => current || defaultApiKeyEnvKey(next.id));

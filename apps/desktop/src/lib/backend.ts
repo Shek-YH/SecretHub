@@ -1,4 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import type { EffectiveModels } from '../providers';
 
 /** Dispatched on window whenever a backend call fails because the vault auto-locked. */
 export const AUTO_LOCK_EVENT = 'secrethub:auto-locked';
@@ -66,6 +67,7 @@ export const backend = {
   tagList: () => invoke<string[]>('tag_list'),
   tagCreate: (name: string) => invoke<string>('tag_create', { name }),
   tagDelete: (name: string) => invoke<boolean>('tag_delete', { name }),
+  catalogEffective: () => invoke<EffectiveModels>('catalog_effective'),
   audit: () => invoke<BackendAuditEvent[]>('audit_list'),
   backup: (path: string) => invoke<void>('backup_export', { path }),
   pendingPlans: () => invoke<PendingPlan[]>('mcp_pending_plans'),

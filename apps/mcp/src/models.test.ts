@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { CAPABILITIES, findModels, fitToLimit, loadModelProviders, readModelSnapshot, type KeyRow, type ModelProvider, type ModelRow } from './models.js';
+import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot, type KeyRow, type ModelProvider, type ModelRow } from './models.js';
 
 const providers: ModelProvider[] = [
   { id: 'agg', kind: 'aggregator', protocol: 'openai', baseUrl: 'https://agg.example/v1', envKeys: ['AGG_API_KEY'], baseUrlEnvKey: 'AGG_BASE_URL' },
@@ -149,6 +149,38 @@ describe('input schema', () => {
 
   it('loads the shared provider catalog with aggregator kinds', () => {
     expect(loadModelProviders().some((p) => p.kind === 'aggregator')).toBe(true);
+  });
+
+  it('reads the effective models file but keeps bundled URLs, and falls back when it is missing or broken', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'secrethub-effective-'));
+    try {
+      const bundled = loadModelProviders();
+      const bundledDeepseek = bundled.find((p) => p.id === 'deepseek')!;
+      const file = join(directory, 'effective-models.json');
+      writeFileSync(file, JSON.stringify({ serial: 5, providers: { deepseek: { defaultModel: 'ds-new', models: [{ id: 'ds-new' }, { notId: 1 }] }, bogus: { models: [{ id: 'x' }] } } }));
+      const merged = loadModelProviders(file);
+      const deepseek = merged.find((p) => p.id === 'deepseek')!;
+      expect(deepseek.models).toEqual([{ id: 'ds-new' }]);
+      expect(deepseek.defaultModel).toBe('ds-new');
+      expect(deepseek.baseUrl).toBe(bundledDeepseek.baseUrl);
+      expect(merged.some((p) => p.id === 'bogus')).toBe(false);
+      expect(merged.length).toBe(bundled.length);
+      expect(loadModelProviders(join(directory, 'missing.json'))).toEqual(bundled);
+      writeFileSync(file, '{not json');
+      expect(loadModelProviders(file)).toEqual(bundled);
+      writeFileSync(file, JSON.stringify({ providers: 'nope' }));
+      expect(loadModelProviders(file)).toEqual(bundled);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it('derives the effective models path next to the vault unless overridden', () => {
+    const saved = process.env.SECRETHUB_EFFECTIVE_MODELS_PATH;
+    delete process.env.SECRETHUB_EFFECTIVE_MODELS_PATH;
+    try {
+      expect(effectiveModelsPath(join('x', 'data', 'vault.sqlite'))).toBe(join('x', 'data', 'catalog', 'effective-models.json'));
+      process.env.SECRETHUB_EFFECTIVE_MODELS_PATH = 'custom.json';
+      expect(effectiveModelsPath('anything')).toBe('custom.json');
+    } finally { if (saved === undefined) delete process.env.SECRETHUB_EFFECTIVE_MODELS_PATH; else process.env.SECRETHUB_EFFECTIVE_MODELS_PATH = saved; }
   });
 });
 

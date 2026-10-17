@@ -7,14 +7,14 @@ import { z } from 'zod';
 import { openCatalogStore, recommendForStack } from './catalog.js';
 import { bindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, precheckPlan } from './plan.js';
 import { MAX_SUGGESTIONS, precheckSuggestions, queueSuggestions, suggestionSchema } from './caps.js';
-import { CAPABILITIES, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
+import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
 
 const CHARACTER_LIMIT = 25_000;
 const dbPath = process.env.SECRETHUB_DB_PATH ?? join(process.env.APPDATA ?? homedir(), 'com.secrethub.desktop', 'vault.sqlite');
 const planDirectory = process.env.SECRETHUB_PLAN_DIR ?? join(dirname(dbPath), 'mcp-pending');
 const resultDirectory = process.env.SECRETHUB_RESULT_DIR ?? join(dirname(dbPath), 'mcp-results');
 const catalog = openCatalogStore(dbPath);
-const modelProviders = loadModelProviders();
+const modelProviders = loadModelProviders(effectiveModelsPath(dbPath));
 const server = new McpServer({ name: 'secrethub-mcp-server', version: '0.1.0' });
 
 const responseFormat = z.enum(['json', 'markdown']).default('markdown');

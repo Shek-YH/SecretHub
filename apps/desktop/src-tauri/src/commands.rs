@@ -1203,6 +1203,13 @@ pub fn audit_list(
         .map_err(|error| error.to_string())
 }
 
+/// Models-only effective catalog (bundled data plus any verified remote overlay).
+/// Needs no vault access: it holds no secrets.
+#[tauri::command]
+pub fn catalog_effective() -> secrethub_providers::EffectiveModels {
+    crate::catalog::current_models()
+}
+
 #[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> Result<secrethub_storage::Settings, String> {
     vault_from_state(&state)?

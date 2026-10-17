@@ -10,6 +10,8 @@
     "typecheck": "npm --prefix apps/desktop run typecheck",
     "mcp:test": "npm --prefix apps/mcp run test",
     "mcp:build": "npm --prefix apps/mcp run build",
-    "mcp:smoke": "npm --prefix apps/mcp run smoke"
+    "mcp:smoke": "npm --prefix apps/mcp run smoke",
+    "catalog:check": "node scripts/catalog-check.mjs",
+    "catalog:test": "node --test \"scripts/**/*.test.mjs\""
   }
 }

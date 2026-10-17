@@ -1,6 +1,13 @@
 //! Deterministic provider registry and local format detection.
 
+mod catalog;
 mod models;
+
+pub use catalog::{
+    bundled_serial, effective_catalog, effective_models, parse_overlay, BundledSerial,
+    CatalogError, CatalogOrigin, EffectiveCatalog, EffectiveModels, EffectiveProviderModels,
+    Overlay, OverlayModel, OverlayProvider, MAX_CATALOG_BYTES, MAX_MODELS_PER_PROVIDER,
+};
 
 pub use models::{
     default_rules, infer_capabilities, load_rules, parse_model_list, CapabilityRule,
@@ -36,10 +43,17 @@ pub enum Protocol {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatalogModel {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
+    /// Retired model: not offered in dropdowns, but still used for capability inference.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub deprecated: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +76,9 @@ pub struct ProviderDefinition {
     pub protocol: Protocol,
     #[serde(default)]
     pub models: Vec<CatalogModel>,
+    /// Set only by a remote catalog; otherwise the first non-deprecated model is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
 }
 
 /// Shared with the desktop UI and MCP server; edit the JSON, not this crate.

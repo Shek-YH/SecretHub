@@ -3,8 +3,8 @@
 
 use reqwest::{redirect::Policy, Client, RequestBuilder};
 use secrethub_providers::{
-    default_registry, default_rules, infer_capabilities, model_page_url, parse_model_list,
-    DiscoveredModel, ModelsEndpoint, Protocol,
+    default_rules, infer_capabilities, model_page_url, parse_model_list, DiscoveredModel,
+    ModelsEndpoint, Protocol,
 };
 use secrethub_storage::ProviderModelRow;
 use std::{collections::HashSet, time::Duration};
@@ -111,7 +111,7 @@ pub async fn fetch(endpoint: &ModelsEndpoint, value: &str, want_models: bool) ->
 
 /// Infers capabilities and builds storage rows (deduplicated by model id).
 pub fn build_rows(provider_id: &str, models: &[DiscoveredModel]) -> Vec<ProviderModelRow> {
-    let registry = default_registry();
+    let registry = crate::catalog::effective_registry();
     let rules = default_rules();
     let mut seen = HashSet::new();
     models
