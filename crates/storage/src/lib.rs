@@ -244,6 +244,10 @@ impl Database {
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (provider_id, model_id)
              );
+             CREATE TABLE IF NOT EXISTS tags (
+                name TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 locale TEXT NOT NULL DEFAULT 'zh-CN',
@@ -712,6 +716,51 @@ impl Database {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(projects)
+    }
+
+    /// Tag library: stored tags unioned with tags used on secrets, deduped case-insensitively.
+    pub fn list_tags(&self) -> Result<Vec<String>, StorageError> {
+        let mut names: Vec<String> = self
+            .connection
+            .prepare("SELECT name FROM tags")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        for secret in self.list_metadata()? {
+            names.extend(secret.tags);
+        }
+        let mut seen = std::collections::HashSet::new();
+        names.retain(|name| !name.trim().is_empty() && seen.insert(name.trim().to_lowercase()));
+        names.sort_by_key(|name| (name.to_lowercase(), name.clone()));
+        Ok(names)
+    }
+
+    /// Adds a tag to the library; a case-insensitive duplicate returns the existing spelling.
+    pub fn create_tag(&self, name: &str) -> Result<String, StorageError> {
+        let name = name.trim();
+        let length = name.chars().count();
+        if length == 0 || length > 32 || name.contains(',') || name.chars().any(char::is_control) {
+            return Err(StorageError::InvalidData("invalid tag name".to_owned()));
+        }
+        if let Some(existing) = self
+            .list_tags()?
+            .into_iter()
+            .find(|tag| tag.to_lowercase() == name.to_lowercase())
+        {
+            return Ok(existing);
+        }
+        self.connection.execute(
+            "INSERT INTO tags(name, created_at) VALUES (?1, ?2)",
+            params![name, unix_time()],
+        )?;
+        Ok(name.to_owned())
+    }
+
+    /// Removes a tag from the library only; secrets keep their tags.
+    pub fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "DELETE FROM tags WHERE lower(name) = lower(?1)",
+            params![name.trim()],
+        )? > 0)
     }
 
     pub fn get_settings(&self) -> Result<Settings, StorageError> {

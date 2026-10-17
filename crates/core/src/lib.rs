@@ -386,6 +386,18 @@ impl VaultService {
         self.require_key()?;
         self.database.list_projects().map_err(Into::into)
     }
+    pub fn list_tags(&self) -> Result<Vec<String>, VaultError> {
+        self.require_key()?;
+        self.database.list_tags().map_err(Into::into)
+    }
+    pub fn create_tag(&self, name: &str) -> Result<String, VaultError> {
+        self.require_key()?;
+        self.database.create_tag(name).map_err(Into::into)
+    }
+    pub fn delete_tag(&self, name: &str) -> Result<bool, VaultError> {
+        self.require_key()?;
+        self.database.delete_tag(name).map_err(Into::into)
+    }
     pub fn get_settings(&self) -> Result<secrethub_storage::Settings, VaultError> {
         self.database.get_settings().map_err(Into::into)
     }

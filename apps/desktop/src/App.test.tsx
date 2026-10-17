@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
-import { App, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { App, SecretForm, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
 import { AUTO_LOCK_EVENT, backend, isAutoLockError } from './lib/backend';
 import { getTranslation } from './i18n/translations';
 
@@ -202,5 +202,68 @@ describe('McpPlanBanner', () => {
     vi.spyOn(backend, 'planPreview').mockResolvedValue({ requestId: 'plan-1', projectPath: 'C:/demo', version: 2, entries: [], errors: [{ code: 'env_conflict', message: 'x' }] });
     render(<McpPlanBanner plan={plan} t={getTranslation('en-US')} onReview={() => undefined} />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('env_conflict'));
+  });
+});
+
+describe('Tag picker in the secret form', () => {
+  async function openEditForm() {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0]);
+    return user;
+  }
+
+  it('pre-selects existing tags and lists library tags from demo secrets', async () => {
+    const user = await openEditForm();
+    const form = screen.getByRole('dialog', { name: '编辑凭据' });
+    expect(within(form).getByText('production')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: '选择标签' }));
+    const picker = screen.getByRole('dialog', { name: '选择标签' });
+    expect(within(picker).getByRole('button', { name: 'ai' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(picker).getByRole('button', { name: 'research' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(picker).getByRole('button', { name: 'database' })).toBeInTheDocument();
+  });
+
+  it('multi-selects, auto-selects new tags, discards on cancel and applies on confirm', async () => {
+    const user = await openEditForm();
+    const form = screen.getByRole('dialog', { name: '编辑凭据' });
+    await user.click(within(form).getByRole('button', { name: '选择标签' }));
+    let picker = screen.getByRole('dialog', { name: '选择标签' });
+    await user.click(within(picker).getByRole('button', { name: 'research' }));
+    await user.click(within(picker).getByRole('button', { name: 'ai' }));
+    await user.type(within(picker).getByLabelText('新建标签'), 'Fresh{Enter}');
+    expect(within(picker).getByRole('button', { name: 'Fresh' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(picker).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog', { name: '选择标签' })).not.toBeInTheDocument();
+    expect(within(form).queryByText('research')).not.toBeInTheDocument();
+    expect(within(form).getByText('production')).toBeInTheDocument();
+
+    await user.click(within(form).getByRole('button', { name: '选择标签' }));
+    picker = screen.getByRole('dialog', { name: '选择标签' });
+    await user.click(within(picker).getByRole('button', { name: 'research' }));
+    await user.type(within(picker).getByLabelText('新建标签'), 'RESEARCH');
+    await user.click(within(picker).getByRole('button', { name: '添加' }));
+    expect(within(picker).getAllByRole('button', { name: /^research$/i })).toHaveLength(1);
+    await user.type(within(picker).getByLabelText('新建标签'), 'a,b');
+    await user.click(within(picker).getByRole('button', { name: '添加' }));
+    expect(within(picker).getByRole('alert')).toHaveTextContent('1–32');
+    await user.click(within(picker).getByRole('button', { name: '确定' }));
+    expect(within(form).getByText('research')).toBeInTheDocument();
+    expect(within(form).getByText('production')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: '移除标签 production' }));
+    expect(within(form).queryByText('production')).not.toBeInTheDocument();
+  });
+
+  it('passes the selected tags array to onSave', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const initial = { id: 's1', name: 'Demo', envKey: 'DEMO_KEY', provider: 'custom', tags: ['ai'], status: 'unknown', updated: 'now', valueType: 'text' };
+    render(<SecretForm t={getTranslation('zh-CN')} knownTags={['ai', 'ops']} initial={initial} onClose={() => undefined} onSave={onSave} />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '选择标签' }));
+    await user.click(screen.getByRole('button', { name: 'ops' }));
+    await user.click(screen.getByRole('button', { name: '确定' }));
+    await user.type(screen.getByLabelText(/Secret 值/), 'v');
+    await user.click(screen.getByRole('button', { name: '保存凭据' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tags: ['ai', 'ops'] }));
   });
 });

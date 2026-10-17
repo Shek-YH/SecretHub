@@ -1348,3 +1348,33 @@ mod tests {
         assert!(!is_env_key("DEEPSEEK-V4.1-FLASH"));
     }
 }
+
+#[tauri::command]
+pub fn tag_list(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .list_tags()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn tag_create(name: String, state: State<'_, AppState>) -> Result<String, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .create_tag(&name)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn tag_delete(name: String, state: State<'_, AppState>) -> Result<bool, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .delete_tag(&name)
+        .map_err(|error| error.to_string())
+}

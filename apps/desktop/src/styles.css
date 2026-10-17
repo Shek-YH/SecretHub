@@ -122,3 +122,20 @@ body { background: #071126; color: #eef4ff; }
 .plan-row-skipped { opacity: .55; }
 .plan-warning { color: #d8b27c !important; }
 .plan-evidence { display: block; margin-bottom: 4px; }
+
+.tag-field { margin-top: 14px; }
+.tag-field-label { display: block; color: #89a198; font-size: 11px; margin-bottom: 6px; }
+.tag-field-selected { align-items: center; }
+.tag-field-empty { color: #657a73; font-size: 11px; }
+.tag-chip { display: inline-flex; align-items: center; gap: 5px; }
+.tag-chip button, .tag-delete { border: 0; background: transparent; color: inherit; padding: 0 2px; font-size: 12px; cursor: pointer; }
+.tag-picker { width: min(440px, calc(100vw - 48px)); }
+.tag-picker-backdrop { z-index: 5; }
+.tag-picker-options { margin: 6px 0 14px; }
+.tag-option-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.tag-option { cursor: pointer; padding: 6px 10px; font-size: 11px; }
+.tag-option.selected { background: #5278ff; color: #fff; border-color: #5278ff; font-weight: 700; }
+.tag-option.selected::before { content: '✓ '; }
+.tag-new-row { display: flex; gap: 8px; align-items: center; }
+.tag-new-row input { margin-top: 0; }
+.tag-manage-toggle { margin-right: auto; }

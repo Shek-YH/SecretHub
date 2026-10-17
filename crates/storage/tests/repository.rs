@@ -359,3 +359,38 @@ fn overrides_win_per_provider_and_model_and_survive_resync() {
         (vec!["tts".to_owned()], "ai")
     );
 }
+
+#[test]
+fn tag_library_unions_dedupes_and_validates() {
+    let (_path, database) = temp_database();
+    database
+        .create_secret(NewSecret {
+            name: "A".into(),
+            provider_id: "generic".into(),
+            env_key: "A_KEY".into(),
+            description: String::new(),
+            tags: vec!["Prod".into(), "ai".into()],
+            ciphertext: vec![1],
+            nonce: vec![0; 12],
+        })
+        .unwrap();
+    assert_eq!(database.create_tag("  zeta ").unwrap(), "zeta");
+    assert_eq!(database.create_tag("PROD").unwrap(), "Prod");
+    assert_eq!(database.create_tag("ZETA").unwrap(), "zeta");
+    assert_eq!(database.create_tag("Beta").unwrap(), "Beta");
+    assert_eq!(
+        database.list_tags().unwrap(),
+        vec!["ai", "Beta", "Prod", "zeta"]
+    );
+
+    for invalid in ["", "   ", "a,b", "bad	tag", &"x".repeat(33)] {
+        assert!(database.create_tag(invalid).is_err(), "{invalid:?}");
+    }
+    assert!(database.create_tag(&"x".repeat(32)).is_ok());
+
+    assert!(database.delete_tag("BETA").unwrap());
+    assert!(!database.delete_tag("beta").unwrap());
+    // Tags still used by a secret keep appearing after library deletion.
+    assert!(!database.delete_tag("ai").unwrap());
+    assert!(database.list_tags().unwrap().contains(&"ai".to_owned()));
+}

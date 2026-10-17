@@ -232,3 +232,19 @@ fn master_password_requires_at_least_nine_characters() {
     drop(vault);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn tag_library_requires_unlock_and_round_trips() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut vault =
+        VaultService::open(Database::open(workspace.path().join("vault.sqlite")).unwrap()).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    assert_eq!(vault.create_tag(" Team ").unwrap(), "Team");
+    assert_eq!(vault.create_tag("team").unwrap(), "Team");
+    assert_eq!(vault.list_tags().unwrap(), vec!["Team"]);
+    assert!(vault.delete_tag("team").unwrap());
+    assert!(vault.list_tags().unwrap().is_empty());
+    vault.lock();
+    assert!(vault.list_tags().is_err());
+    assert!(vault.create_tag("x").is_err());
+}
