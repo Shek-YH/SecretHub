@@ -150,3 +150,6 @@ body { background: #071126; color: #eef4ff; }
 .cap-empty { color: #7d918a; font-size: 10px; }
 .cap-row select, .cap-row input { margin-top: 0; min-width: 0; }
 .model-capability-menu { font-size: 10px; max-width: 150px; }
+.capture-modal { width: min(460px, calc(100vw - 48px)); }
+.capture-status { margin: 4px 0; padding: 10px 12px; border: 1px solid #2b3a35; border-radius: 8px; font-size: 12px; color: #c2d2cd; }
+.capture-countdown { font: 700 28px ui-monospace, SFMono-Regular, Consolas, monospace; text-align: center; margin: 8px 0; color: #c2d2cd; }

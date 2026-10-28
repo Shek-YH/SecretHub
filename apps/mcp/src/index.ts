@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { openCatalogStore, recommendForStack } from './catalog.js';
 import { bindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, precheckPlan } from './plan.js';
 import { MAX_SUGGESTIONS, precheckSuggestions, queueSuggestions, suggestionSchema } from './caps.js';
+import { getCaptureStatus, isValidCaptureRequestId, precheckCapture, queueCapture } from './capture.js';
 import { getSyncStatus, isValidSyncRequestId, MAX_SYNC_SECRETS, precheckSyncRequest, queueSyncRequest } from './sync.js';
 import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
 
@@ -60,6 +61,18 @@ server.registerTool('secrethub_request_model_sync', { title: 'Request Model Sync
 server.registerTool('secrethub_get_sync_status', { title: 'Get Sync Status', description: 'Report a model-sync request queued by secrethub_request_model_sync: pending (waiting for the vault to be unlocked or still running), done (per key: modelsSyncStatus ok|failed|unsupported|unchanged|skipped, validationStatus, count, added and removed model ids), failed, or not_found. Reads only status files; never returns Secret values.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
   if (!isValidSyncRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned by secrethub_request_model_sync.' }, response_format), isError: true };
   return catalogResult(getSyncStatus(request_id, planDirectory, resultDirectory), response_format);
+});
+
+const captureDescription = 'Ask the user to add an API key for one provider through SecretHub Desktop. Desktop shows "AI requests to get your <provider> API key"; only after the user clicks Start does it open the official key page in the user\'s own browser and, for at most 3 minutes, watch the clipboard for the key they copy. The key goes straight into the vault and never to you: this tool, secrethub_get_capture_status and every other tool never return it, so never ask the user to paste a key into chat and never use browser tools on the key page. Tell the user to click Start in SecretHub Desktop, then create and copy the key on the provider site. Poll secrethub_get_capture_status with the returned requestId; on captured you get the new secretId, after which secrethub_request_model_sync can sync its models.';
+server.registerTool('secrethub_start_key_capture', { title: 'Start Key Capture', description: captureDescription, inputSchema: { provider_id: z.string().trim().min(1).max(100), response_format: responseFormat }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, ({ provider_id, response_format }) => {
+  const problem = precheckCapture(provider_id, modelProviders);
+  if (problem) return { ...catalogResult({ queued: false, error: problem }, response_format), isError: true };
+  const requestId = queueCapture(planDirectory, provider_id);
+  return catalogResult({ requestId, providerId: provider_id, requiresUserConfirmation: true, nextStep: 'Ask the user to open SecretHub Desktop and click Start on the capture request, then create and copy the key on the provider site. Poll secrethub_get_capture_status with this requestId.' }, response_format);
+});
+server.registerTool('secrethub_get_capture_status', { title: 'Get Capture Status', description: 'Report a key capture queued by secrethub_start_key_capture: waiting (for the user to click Start in Desktop, or for them to copy the key; at most 3 minutes after Start), captured (with the new secretId, never the key), timeout, cancelled, declined, or not_found. Reads only status files.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
+  if (!isValidCaptureRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned by secrethub_start_key_capture.' }, response_format), isError: true };
+  return catalogResult(getCaptureStatus(request_id, planDirectory, resultDirectory), response_format);
 });
 
 function catalogResult(value: Record<string, unknown>, format: 'json' | 'markdown') { const text = format === 'json' ? JSON.stringify(value, null, 2) : markdown(value); return { content: [{ type: 'text' as const, text: text.slice(0, CHARACTER_LIMIT) }], structuredContent: value }; }

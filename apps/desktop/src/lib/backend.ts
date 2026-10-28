@@ -29,6 +29,8 @@ export type BackendValidationResult = { id: string; status: string; models_sync_
 export type BackendModel = { model_id: string; display_name: string; input: string[]; output: string[]; capabilities: string[]; capability_source: string; synced_at: number };
 export type CapabilityModelRow = { capability: string; model_id: string; env_key: string };
 export type PendingSyncRequest = { requestId: string; secretCount: number | null; createdAt: string };
+export type CaptureStatus = { state: 'idle' | 'waiting' | 'captured' | 'timeout' | 'cancelled'; providerId: string | null; remainingSeconds: number; secretId: string | null; validation: string | null };
+export type CaptureRequest = { requestId: string; providerId: string; providerName: string; createdAt: string };
 export type BackendModelSync = { id: string; status: string; count: number };
 export type ProjectEnvEntry = { original_key: string; key: string; value: string; source: 'managed' | 'manual'; secret_id?: string | null };
 
@@ -86,5 +88,10 @@ export const backend = {
   pendingCapabilitySuggestions: () => invoke<CapabilitySuggestionBatch[]>('mcp_pending_capability_suggestions'),
   resolveCapabilitySuggestions: (request_id: string, accepted_model_ids: string[]) => invoke<void>('mcp_resolve_capability_suggestions', { requestId: request_id, acceptedModelIds: accepted_model_ids }),
   pendingSyncRequests: () => invoke<PendingSyncRequest[]>('mcp_pending_sync_requests'),
+  captureStart: (providerId: string) => invoke<CaptureStatus>('key_capture_start', { providerId }),
+  captureCancel: () => invoke<CaptureStatus>('key_capture_cancel'),
+  captureStatus: () => invoke<CaptureStatus>('key_capture_status'),
+  pendingCaptureRequests: () => invoke<CaptureRequest[]>('mcp_pending_capture_requests'),
+  captureDecision: (requestId: string, accept: boolean) => invoke<CaptureStatus>('mcp_capture_decision', { requestId, accept }),
   confirmPlan: (request_id: string, confirmed: boolean, skip_keys?: string[]) => invoke<void>('mcp_confirm_plan', { requestId: request_id, confirmed, skipKeys: skip_keys }),
 };

@@ -27,6 +27,9 @@ const messages = [
   { jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'secrethub_request_model_sync', arguments: { secret_ids: ['secret-model'], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'secrethub_request_model_sync', arguments: { secret_ids: ['secret-fixture'], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'secrethub_get_sync_status', arguments: { request_id: 'sync-../x', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 14, method: 'tools/call', params: { name: 'secrethub_start_key_capture', arguments: { provider_id: 'deepseek', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 15, method: 'tools/call', params: { name: 'secrethub_start_key_capture', arguments: { provider_id: 'custom', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 16, method: 'tools/call', params: { name: 'secrethub_get_capture_status', arguments: { request_id: 'capture-../x', response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -81,6 +84,14 @@ try {
   assert.equal(JSON.stringify(syncFile).includes('0A0B0C'), false);
   assert.equal(responses.find((response) => response.id === 12).result.isError, true);
   assert.equal(responses.find((response) => response.id === 13).result.isError, true);
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_start_key_capture'));
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_get_capture_status'));
+  const captureQueued = responses.find((response) => response.id === 14).result.structuredContent;
+  assert.match(captureQueued.requestId, /^capture-/);
+  const captureFile = JSON.parse(readFileSync(`${planDirectory}/${captureQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([captureFile.kind, captureFile.providerId], ['start_key_capture', 'deepseek']);
+  assert.equal(responses.find((response) => response.id === 15).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 16).result.isError, true);
   mkdirSync(resultDirectory, { recursive: true });
   writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
   const statusCalls = [

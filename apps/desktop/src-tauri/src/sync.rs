@@ -184,7 +184,7 @@ pub fn mcp_pending_sync_requests(app: AppHandle) -> Result<Vec<PendingSyncView>,
 
 /// True while the vault is unlocked and the idle timer has not expired; background work must
 /// not keep a vault usable past the auto-lock deadline.
-fn ready(state: &State<'_, AppState>) -> bool {
+pub(crate) fn ready(state: &State<'_, AppState>) -> bool {
     let unlocked = state
         .vault
         .lock()

@@ -4,6 +4,7 @@ use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
 mod caps;
+mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
@@ -15,6 +16,7 @@ mod sync;
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
     pub policy: Mutex<AutoLockPolicy>,
+    pub capture: capture::CaptureState,
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -50,6 +52,7 @@ pub fn run() {
                     settings.auto_lock_minutes as u64 * 60,
                     now_seconds(),
                 )),
+                capture: capture::CaptureState::default(),
             });
             catalog_update::start(app.handle().clone());
             sync::start(app.handle().clone());
@@ -100,6 +103,11 @@ pub fn run() {
             commands::audit_list,
             commands::catalog_effective,
             sync::mcp_pending_sync_requests,
+            capture::key_capture_start,
+            capture::key_capture_cancel,
+            capture::key_capture_status,
+            capture::mcp_pending_capture_requests,
+            capture::mcp_capture_decision,
             catalog_update::catalog_status,
             catalog_update::catalog_set_auto_update,
             catalog_update::catalog_check_now,

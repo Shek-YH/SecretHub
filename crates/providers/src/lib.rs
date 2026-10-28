@@ -72,6 +72,12 @@ pub struct ProviderDefinition {
     pub base_url: String,
     #[serde(default)]
     pub validation_url: Option<String>,
+    /// Official page where the user creates an API key (opened in the user's browser).
+    #[serde(default)]
+    pub key_url: Option<String>,
+    /// Env name for the base URL; callers derive `<ID>_BASE_URL` when absent.
+    #[serde(default)]
+    pub base_url_env_key: Option<String>,
     /// Present for AI model providers; absent for GitHub/Supabase/Cloudflare-style services.
     #[serde(default)]
     pub model_env_key: Option<String>,

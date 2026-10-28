@@ -7,7 +7,7 @@ export const CAPABILITIES = ['chat', 'code', 'reasoning', 'vision', 'image_gen',
 export type Capability = (typeof CAPABILITIES)[number];
 
 export type CatalogModelEntry = { id: string; label?: string; capabilities?: string[]; deprecated?: boolean };
-export type ModelProvider = { id: string; kind?: string; protocol?: string; baseUrl?: string; envKeys?: string[]; baseUrlEnvKey?: string; defaultModel?: string; models?: CatalogModelEntry[] };
+export type ModelProvider = { id: string; keyUrl?: string; kind?: string; protocol?: string; baseUrl?: string; envKeys?: string[]; baseUrlEnvKey?: string; defaultModel?: string; models?: CatalogModelEntry[] };
 
 export type KeyRow = {
   secretId: string;
