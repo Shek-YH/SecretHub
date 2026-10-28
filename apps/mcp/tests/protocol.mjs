@@ -36,6 +36,9 @@ const messages = [
   { jsonrpc: '2.0', id: 20, method: 'tools/call', params: { name: 'secrethub_media_add', arguments: { path: join(directory, 'does-not-exist.png'), response_format: 'json' } } },
   { jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'secrethub_media_add', arguments: { path: directory, response_format: 'json' } } },
   { jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'secrethub_get_media_add_status', arguments: { request_id: 'media-../x', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'secret-model', capability: 'chat', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'secret-model', capability: 'video_gen', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 25, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'missing', capability: 'chat', response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -111,6 +114,14 @@ try {
   assert.equal(responses.find((response) => response.id === 20).result.isError, true);
   assert.equal(responses.find((response) => response.id === 21).result.isError, true);
   assert.equal(responses.find((response) => response.id === 22).result.isError, true);
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_get_invocation'));
+  const invocation = responses.find((response) => response.id === 23).result.structuredContent;
+  assert.deepEqual([invocation.kind, invocation.url, invocation.authHeader], ['openai-chat', 'https://api.deepseek.com/chat/completions', 'Authorization: Bearer ${DEEPSEEK_API_KEY}']);
+  assert.equal(invocation.envVars.apiKey, 'DEEPSEEK_API_KEY');
+  assert.match(invocation.docsUrl, /^https:/);
+  assert.equal(JSON.stringify(invocation).includes('0A0B0C'), false);
+  assert.equal(responses.find((response) => response.id === 24).result.structuredContent.kind, 'native');
+  assert.equal(responses.find((response) => response.id === 25).result.isError, true);
   mkdirSync(resultDirectory, { recursive: true });
   writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
   const statusCalls = [

@@ -114,6 +114,13 @@ per-capability names: `LLM_MODEL`, `CODE_MODEL`, `VISION_MODEL`,
 `IMAGE_MODEL`, `VIDEO_MODEL`, `TTS_MODEL`, `ASR_MODEL`, `EMBEDDING_MODEL`,
 `RERANK_MODEL`.
 
+Once the selection is confirmed, call `secrethub_get_invocation` with
+`secret_id` and `capability` for each chosen capability. It returns the URL,
+auth header, request body skeleton and env variable names for that provider;
+use them to write correct client code that reads keys from environment
+variables. Never inline a key. `kind: native` means SecretHub has no verified
+template: follow the returned `docsUrl` instead of guessing a path.
+
 ### 6. Verify credentials before any write
 
 For every Secret to be used (model keys and non-model credentials), check
@@ -226,6 +233,7 @@ requires a persistent `.env` file.
 - [ ] `secrethub_find_models` run; `uncovered`, `unsyncedKeys`, `truncated` handled.
 - [ ] Uncertain capabilities verified or flagged; suggestions left for Desktop approval.
 - [ ] Selection table confirmed by the user in chat.
+- [ ] `secrethub_get_invocation` called per chosen capability; client code uses env names only.
 - [ ] Every required credential verified as ready (re-checked after user confirmation).
 - [ ] Plan prepared with bindings / Secret IDs only, no values.
 - [ ] User approved in SecretHub Desktop; `secrethub_get_plan_status` checked.

@@ -46,7 +46,14 @@
           "vision"
         ]
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://api-docs.deepseek.com/api/create-chat-completion"
   },
   {
     "id": "minimax-global",
@@ -80,7 +87,8 @@
       {
         "id": "MiniMax-M2"
       }
-    ]
+    ],
+    "docsUrl": "https://platform.minimax.io/docs/api-reference/text-chat-openai.md"
   },
   {
     "id": "minimax",
@@ -138,7 +146,8 @@
       {
         "id": "glm-5"
       }
-    ]
+    ],
+    "docsUrl": "https://docs.z.ai/api-reference/llm/chat-completion.md"
   },
   {
     "id": "zai",
@@ -160,7 +169,8 @@
       {
         "id": "glm-5"
       }
-    ]
+    ],
+    "docsUrl": "https://docs.z.ai/api-reference/introduction"
   },
   {
     "id": "kimi",
@@ -194,7 +204,14 @@
       {
         "id": "kimi-k2.6"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://platform.kimi.com/docs/api/chat"
   },
   {
     "id": "kimi-global",
@@ -275,7 +292,30 @@
       {
         "id": "gpt-4.1"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "image_gen": {
+        "kind": "openai-images",
+        "path": "/images/generations"
+      },
+      "tts": {
+        "kind": "openai-audio-speech",
+        "path": "/audio/speech"
+      },
+      "asr": {
+        "kind": "openai-audio-transcriptions",
+        "path": "/audio/transcriptions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      }
+    },
+    "docsUrl": "https://developers.openai.com/api/docs/guides/text"
   },
   {
     "id": "gemini",
@@ -320,7 +360,22 @@
       {
         "id": "gemini-3-flash-preview"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      },
+      "image_gen": {
+        "kind": "openai-images",
+        "path": "/images/generations"
+      }
+    },
+    "docsUrl": "https://ai.google.dev/gemini-api/docs/openai"
   },
   {
     "id": "byteplus",
@@ -428,7 +483,8 @@
       {
         "id": "ernie-5.1"
       }
-    ]
+    ],
+    "docsUrl": "https://cloud.baidu.com/doc/qianfan-api/s/3m7of64lb"
   },
   {
     "id": "opencode-zen",
@@ -565,7 +621,18 @@
       {
         "id": "qwen3.5-plus"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      }
+    },
+    "docsUrl": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope"
   },
   {
     "id": "qianwen-platform",
@@ -648,7 +715,14 @@
       {
         "id": "claude-haiku-4-5-20251001"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "anthropic-messages",
+        "path": "/v1/messages"
+      }
+    },
+    "docsUrl": "https://platform.claude.com/docs/en/api/messages"
   },
   {
     "id": "xai",
@@ -680,7 +754,14 @@
       {
         "id": "grok-4"
       }
-    ]
+    ],
+    "invocations": {
+      "image_gen": {
+        "kind": "openai-images",
+        "path": "/images/generations"
+      }
+    },
+    "docsUrl": "https://docs.x.ai/developers/rest-api-reference/inference/images"
   },
   {
     "id": "hunyuan",
@@ -722,7 +803,8 @@
       {
         "id": "kimi-k2.6"
       }
-    ]
+    ],
+    "docsUrl": "https://cloud.tencent.com/document/product/1729/101848"
   },
   {
     "id": "meta",
@@ -766,7 +848,8 @@
       {
         "id": "sonar-reasoning"
       }
-    ]
+    ],
+    "docsUrl": "https://docs.perplexity.ai/api-reference/chat-completions-post"
   },
   {
     "id": "stepfun",
@@ -786,7 +869,14 @@
       {
         "id": "step-3.5-flash"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://platform.stepfun.com/docs/api-reference/chat/chat-completion-create"
   },
   {
     "id": "mistral",
@@ -823,7 +913,18 @@
           "code"
         ]
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      }
+    },
+    "docsUrl": "https://docs.mistral.ai/api/endpoint/chat"
   },
   {
     "id": "cohere",
@@ -848,7 +949,8 @@
       {
         "id": "c4ai-aya-expanse-32b"
       }
-    ]
+    ],
+    "docsUrl": "https://docs.cohere.com/reference/chat"
   },
   {
     "id": "groq",
@@ -883,7 +985,22 @@
       {
         "id": "groq/compound-mini"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "asr": {
+        "kind": "openai-audio-transcriptions",
+        "path": "/audio/transcriptions"
+      },
+      "tts": {
+        "kind": "openai-audio-speech",
+        "path": "/audio/speech"
+      }
+    },
+    "docsUrl": "https://console.groq.com/docs/api-reference"
   },
   {
     "id": "together",
@@ -908,7 +1025,8 @@
       {
         "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
       }
-    ]
+    ],
+    "docsUrl": "https://docs.together.ai/reference/chat-completions-1"
   },
   {
     "id": "nvidia",
@@ -1052,7 +1170,14 @@
       {
         "id": "qwen/qwen3.8-max"
       }
-    ]
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://openrouter.ai/docs/api/reference/overview"
   },
   {
     "id": "cc-vibe",

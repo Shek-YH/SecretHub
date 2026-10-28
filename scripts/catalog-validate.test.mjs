@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { bundledProviders, bundledSerial, definitionsDir, validateCatalog } from './lib/catalog.mjs';
+import { bundledProviders, bundledSerial, definitionsDir, validateCatalog, validateProviderInvocations } from './lib/catalog.mjs';
 
 const ids = bundledProviders().map((provider) => provider.id);
 const wrap = (providers, extra = {}) => JSON.stringify({ schema: 1, serial: 2026101699, publishedAt: '2026-10-17T00:00:00Z', providers, ...extra });
@@ -17,6 +17,8 @@ test('the shipped catalog is valid and not older than the bundled serial', () =>
 test('rejects the same invalid inputs as the Rust parser', () => {
   const bad = [
     wrap({ deepseek: { models: [{ id: 'x' }], baseUrl: 'https://evil.example' } }),
+    wrap({ deepseek: { models: [{ id: 'x' }], invocations: { chat: { kind: 'openai-chat', path: '/x' } } } }),
+    wrap({ deepseek: { models: [{ id: 'x' }], docsUrl: 'https://evil.example' } }),
     wrap({ deepseek: { models: [{ id: 'x', url: 'https://evil.example' }] } }),
     wrap({}, { baseUrl: 'https://evil.example' }),
     wrap({ deepseek: { models: [{ id: '' }] } }),
@@ -44,4 +46,33 @@ test('catalog:check exits non-zero for a bad file and zero for the shipped one',
   assert.equal(spawnSync(process.execPath, [script], { encoding: 'utf8' }).status, 0);
   const result = spawnSync(process.execPath, [script, join(definitionsDir, 'providers.json')], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
+});
+
+test('bundled invocations and docsUrl in providers.json are valid', () => {
+  const providers = bundledProviders();
+  assert.deepEqual(validateProviderInvocations(providers), []);
+  assert.ok(providers.some((provider) => Object.keys(provider.invocations ?? {}).length > 0));
+});
+
+test('rejects invalid invocations like the Rust validator', () => {
+  const make = (extra) => [{ id: 'p', ...extra }];
+  const chat = { kind: 'openai-chat', path: '/chat/completions' };
+  assert.deepEqual(validateProviderInvocations(make({ invocations: { chat }, docsUrl: 'https://docs.example.com' })), []);
+  assert.deepEqual(validateProviderInvocations(make({ invocations: { video_gen: { kind: 'async-task', path: '/t', pollPath: '/t/{id}' } } })), []);
+  const bad = [
+    { invocations: { telepathy: chat } },
+    { invocations: { chat: { ...chat, kind: 'soap' } } },
+    { invocations: { chat: { ...chat, path: 'chat' } } },
+    { invocations: { chat: { ...chat, path: '//evil.example/x' } } },
+    { invocations: { chat: { ...chat, path: '/a/../b' } } },
+    { invocations: { chat: { ...chat, path: '/a:b' } } },
+    { invocations: { chat: { ...chat, path: '/a b' } } },
+    { invocations: { chat: { ...chat, path: `/${'a'.repeat(200)}` } } },
+    { invocations: { chat: { ...chat, pollPath: '/p' } } },
+    { invocations: { chat: { ...chat, extra: 1 } } },
+    { invocations: { video_gen: { kind: 'async-task', path: '/t', pollPath: '/t/{id}/../x' } } },
+    { docsUrl: 'http://docs.example.com' },
+    { docsUrl: 'not a url' },
+  ];
+  for (const extra of bad) assert.notDeepEqual(validateProviderInvocations(make(extra)), [], JSON.stringify(extra));
 });

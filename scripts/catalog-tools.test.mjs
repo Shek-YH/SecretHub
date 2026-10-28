@@ -107,6 +107,8 @@ test('bake merges the catalog into providers.json and the bundled serial, idempo
   ]);
   const beforeDeepseek = before.find((provider) => provider.id === 'deepseek');
   assert.equal(deepseek.baseUrl, beforeDeepseek.baseUrl);
+  assert.deepEqual(deepseek.invocations, beforeDeepseek.invocations);
+  assert.equal(deepseek.docsUrl, beforeDeepseek.docsUrl);
   assert.deepEqual(after.filter((provider) => provider.id !== 'deepseek'), before.filter((provider) => provider.id !== 'deepseek'));
   assert.deepEqual(JSON.parse(readFileSync(serialPath, 'utf8')), { serial: newSerial, publishedAt: '2026-10-20T08:00:00Z' });
   const snapshot = readFileSync(providersPath);

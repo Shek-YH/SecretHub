@@ -10,6 +10,7 @@ import { MAX_SUGGESTIONS, precheckSuggestions, queueSuggestions, suggestionSchem
 import { getMedia, getMediaAddStatus, isValidMediaRequestId, mediaAddSchema, MEDIA_KINDS, ORIENTATIONS, precheckMediaAdd, queueMediaAdd, readMedia, searchMedia } from './media.js';
 import { getCaptureStatus, isValidCaptureRequestId, precheckCapture, queueCapture } from './capture.js';
 import { getSyncStatus, isValidSyncRequestId, MAX_SYNC_SECRETS, precheckSyncRequest, queueSyncRequest } from './sync.js';
+import { buildInvocation } from './invocation.js';
 import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
 
 const CHARACTER_LIMIT = 25_000;
@@ -76,6 +77,12 @@ server.registerTool('secrethub_get_capture_status', { title: 'Get Capture Status
   return catalogResult(getCaptureStatus(request_id, planDirectory, resultDirectory), response_format);
 });
 
+const invocationDescription = 'Get the call template for one capability of one stored key: HTTP method, full url (the provider bundled base URL, or the key own endpoint URL, plus the capability path), pollUrl for asynchronous tasks, authHeader written with the API-key variable NAME (for example `Authorization: Bearer ${DEEPSEEK_API_KEY}`), a bodySkeleton whose model is `${MODEL_ENV}`, envVars (apiKey, baseUrl, model variable names) and docsUrl. Use it after choosing models to write correct client code that reads keys from environment variables; never inline a key. Returns kind `native` with docsUrl and a note when SecretHub has no verified standard template for that capability. Metadata only: never returns Secret values and never calls the provider.';
+server.registerTool('secrethub_get_invocation', { title: 'Get Invocation Template', description: invocationDescription, inputSchema: { secret_id: z.string().min(1).max(200), capability: z.enum(CAPABILITIES), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ secret_id, capability, response_format }) => {
+  const secret = catalog.get(secret_id);
+  if (!secret) return { ...catalogResult({ found: false, error: `Unknown secret id: ${secret_id}` }, response_format), isError: true };
+  return catalogResult(buildInvocation(secret, capability, readModelSnapshot(dbPath).capabilityModels ?? [], modelProviders), response_format);
+});
 const mediaSearchDescription = 'Search the SecretHub media library (images, videos, audio, text the user collected for testing). Filters: kind, tags (all must match), query (file name, description or tag text), orientation (landscape|portrait|square, derived from width and height), min/max duration in milliseconds (assets without a known duration are excluded when a bound is set). Returns id, kind, filename, absolute path, mime, sizeBytes, width, height, durationMs, orientation, description and tags, newest first. The path can be used directly to upload or copy the file into a project test folder. Read-only; works while the vault is locked; file contents are never returned.';
 server.registerTool('secrethub_media_search', { title: 'Search Media Library', description: mediaSearchDescription, inputSchema: { kind: z.enum(MEDIA_KINDS).optional(), tags: z.array(z.string().trim().min(1).max(32)).max(20).optional(), query: z.string().trim().min(1).max(200).optional(), orientation: z.enum(ORIENTATIONS).optional(), min_duration_ms: z.number().int().min(0).optional(), max_duration_ms: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).default(20), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ kind, tags, query, orientation, min_duration_ms, max_duration_ms, limit, response_format }) => {
   const found = searchMedia(readMedia(dbPath), { kind, tags, query, orientation, minDurationMs: min_duration_ms, maxDurationMs: max_duration_ms, limit });

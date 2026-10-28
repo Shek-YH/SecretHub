@@ -1,6 +1,7 @@
 //! Deterministic provider registry and local format detection.
 
 mod catalog;
+mod invocations;
 mod models;
 mod verify;
 
@@ -9,6 +10,8 @@ pub use catalog::{
     CatalogError, CatalogOrigin, EffectiveCatalog, EffectiveModels, EffectiveProviderModels,
     Overlay, OverlayModel, OverlayProvider, MAX_CATALOG_BYTES, MAX_MODELS_PER_PROVIDER,
 };
+
+pub use invocations::{validate_invocations, Invocation, INVOCATION_KINDS};
 
 pub use verify::{
     check_serial, embedded_public_key, evaluate_remote, verify_signature, SerialCheck, Verdict,
@@ -20,7 +23,7 @@ pub use models::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::{net::IpAddr, sync::LazyLock};
+use std::{collections::BTreeMap, net::IpAddr, sync::LazyLock};
 use url::Url;
 
 /// Whether one key reaches a single vendor's models or many vendors' models.
@@ -90,6 +93,12 @@ pub struct ProviderDefinition {
     /// Set only by a remote catalog; otherwise the first non-deprecated model is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    /// Bundled only (never from the remote overlay): capability -> how to call it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub invocations: BTreeMap<String, Invocation>,
+    /// Official API docs entry (https), shown to users and AI clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs_url: Option<String>,
 }
 
 /// Shared with the desktop UI and MCP server; edit the JSON, not this crate.

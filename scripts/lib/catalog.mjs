@@ -63,6 +63,39 @@ export function validateCatalog(text, providerIds) {
   return errors;
 }
 
+export const INVOCATION_KINDS = ['openai-chat', 'openai-images', 'openai-audio-speech', 'openai-audio-transcriptions', 'openai-embeddings', 'anthropic-messages', 'gemini-generate', 'async-task', 'native'];
+const MAX_PATH_CHARS = 200;
+const safePath = (path) => typeof path === 'string' && path.startsWith('/') && chars(path) <= MAX_PATH_CHARS && !path.includes('//') && !path.includes('..') && !path.includes(':') && !/\s/u.test(path);
+
+/** Validates the bundled `invocations` / `docsUrl` of providers.json (never accepted from the remote overlay). Mirrors crates/providers/src/invocations.rs. */
+export function validateProviderInvocations(providers) {
+  const errors = [];
+  for (const provider of providers) {
+    const at = provider.id;
+    if (provider.invocations !== undefined) {
+      if (!isObject(provider.invocations)) { errors.push(`${at}: invocations must be an object`); continue; }
+      for (const [capability, invocation] of Object.entries(provider.invocations)) {
+        const where = `${at}.${capability}`;
+        if (!CAPABILITY_VOCABULARY.includes(capability)) { errors.push(`${at}: unknown capability \`${capability}\``); continue; }
+        if (!isObject(invocation)) { errors.push(`${where}: must be an object`); continue; }
+        for (const key of unknownKeys(invocation, ['kind', 'path', 'pollPath'])) errors.push(`${where}: unknown field \`${key}\``);
+        if (!INVOCATION_KINDS.includes(invocation.kind)) errors.push(`${where}: unknown kind \`${invocation.kind}\``);
+        if (!safePath(invocation.path)) errors.push(`${where}: path is not a safe relative path`);
+        if (invocation.pollPath !== undefined) {
+          if (invocation.kind !== 'async-task') errors.push(`${where}: pollPath is only for async-task`);
+          else if (typeof invocation.pollPath !== 'string' || !safePath(invocation.pollPath.replaceAll('{id}', 'ID'))) errors.push(`${where}: pollPath is not a safe relative path`);
+        }
+      }
+    }
+    if (provider.docsUrl !== undefined) {
+      let ok = false;
+      try { const url = new URL(provider.docsUrl); ok = url.protocol === 'https:' && url.hostname !== ''; } catch { /* invalid */ }
+      if (!ok) errors.push(`${at}: docsUrl must be an https URL`);
+    }
+  }
+  return errors;
+}
+
 export function bundledProviders() {
   return JSON.parse(readFileSync(join(definitionsDir, 'providers.json'), 'utf8'));
 }

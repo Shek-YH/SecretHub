@@ -34,6 +34,9 @@ type ProviderDefinition = {
   kind?: string;
   protocol?: string;
   defaultModel?: string;
+  /** Bundled call templates for MCP clients; not used by the UI. */
+  invocations?: Record<string, { kind: string; path: string; pollPath?: string } | undefined>;
+  docsUrl?: string;
   models: Array<{ id: string; label?: string; capabilities?: string[]; deprecated?: boolean }>;
 };
 

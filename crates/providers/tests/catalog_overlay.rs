@@ -30,6 +30,8 @@ fn rejects_unknown_fields_anywhere() {
         r#"{"deepseek":{"models":[{"id":"x"}],"baseUrl":"https://evil.example"}}"#,
         r#"{"deepseek":{"models":[{"id":"x","url":"https://evil.example"}]}}"#,
         r#"{"deepseek":{"models":[{"id":"x","keyUrl":"https://evil.example"}]}}"#,
+        r#"{"deepseek":{"models":[{"id":"x"}],"invocations":{"chat":{"kind":"openai-chat","path":"/x"}}}}"#,
+        r#"{"deepseek":{"models":[{"id":"x"}],"docsUrl":"https://evil.example"}}"#,
     ] {
         assert!(
             parse_overlay(overlay_json(body).as_bytes()).is_err(),
