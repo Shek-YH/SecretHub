@@ -24,6 +24,9 @@ const messages = [
   { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'secrethub_suggest_model_capabilities', arguments: { provider_id: 'deepseek', suggestions: [{ model_id: 'plain-model', capabilities: ['chat', 'code'], evidence_url: 'https://docs.example/plain-model' }], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'secrethub_suggest_model_capabilities', arguments: { provider_id: 'no-such-provider', suggestions: [{ model_id: 'plain-model', capabilities: ['chat'] }], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'secrethub_suggest_model_capabilities', arguments: { provider_id: 'deepseek', suggestions: [{ model_id: 'a', capabilities: ['chat'] }, { model_id: 'a', capabilities: ['code'] }], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'secrethub_request_model_sync', arguments: { secret_ids: ['secret-model'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'secrethub_request_model_sync', arguments: { secret_ids: ['secret-fixture'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'secrethub_get_sync_status', arguments: { request_id: 'sync-../x', response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -69,6 +72,15 @@ try {
   assert.deepEqual(caps.suggestions, [{ modelId: 'plain-model', capabilities: ['chat', 'code'], evidenceUrl: 'https://docs.example/plain-model' }]);
   assert.equal(responses.find((response) => response.id === 9).result.isError, true);
   assert.equal(responses.find((response) => response.id === 10).result.isError, true);
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_request_model_sync'));
+  assert.ok(tools.some((tool) => tool.name === 'secrethub_get_sync_status'));
+  const syncQueued = responses.find((response) => response.id === 11).result.structuredContent;
+  assert.match(syncQueued.requestId, /^sync-/);
+  const syncFile = JSON.parse(readFileSync(`${planDirectory}/${syncQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual(syncFile.secretIds, ['secret-model']);
+  assert.equal(JSON.stringify(syncFile).includes('0A0B0C'), false);
+  assert.equal(responses.find((response) => response.id === 12).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 13).result.isError, true);
   mkdirSync(resultDirectory, { recursive: true });
   writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
   const statusCalls = [

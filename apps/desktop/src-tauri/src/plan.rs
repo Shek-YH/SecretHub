@@ -776,7 +776,7 @@ pub fn write_result(directory: &Path, result: &PlanResult) -> Result<(), PlanErr
     Ok(())
 }
 
-fn prune_results(directory: &Path, keep: usize) {
+pub(crate) fn prune_results(directory: &Path, keep: usize) {
     let Ok(read) = fs::read_dir(directory) else {
         return;
     };

@@ -28,6 +28,7 @@ export type BackendAuditEvent = { id: string; operation: string; secret_id?: str
 export type BackendValidationResult = { id: string; status: string; models_sync_status: string };
 export type BackendModel = { model_id: string; display_name: string; input: string[]; output: string[]; capabilities: string[]; capability_source: string; synced_at: number };
 export type CapabilityModelRow = { capability: string; model_id: string; env_key: string };
+export type PendingSyncRequest = { requestId: string; secretCount: number | null; createdAt: string };
 export type BackendModelSync = { id: string; status: string; count: number };
 export type ProjectEnvEntry = { original_key: string; key: string; value: string; source: 'managed' | 'manual'; secret_id?: string | null };
 
@@ -84,5 +85,6 @@ export const backend = {
   planPreview: (request_id: string) => invoke<PlanPreview>('mcp_plan_preview', { requestId: request_id }),
   pendingCapabilitySuggestions: () => invoke<CapabilitySuggestionBatch[]>('mcp_pending_capability_suggestions'),
   resolveCapabilitySuggestions: (request_id: string, accepted_model_ids: string[]) => invoke<void>('mcp_resolve_capability_suggestions', { requestId: request_id, acceptedModelIds: accepted_model_ids }),
+  pendingSyncRequests: () => invoke<PendingSyncRequest[]>('mcp_pending_sync_requests'),
   confirmPlan: (request_id: string, confirmed: boolean, skip_keys?: string[]) => invoke<void>('mcp_confirm_plan', { requestId: request_id, confirmed, skipKeys: skip_keys }),
 };

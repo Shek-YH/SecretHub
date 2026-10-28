@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal } from './McpReview';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type PendingPlan, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { SyncRequestBanner } from './AiRequests';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { TagField } from './TagPicker';
 import { CatalogSettings } from './CatalogSettings';
 import { buildModelOptions } from './modelOptions';
@@ -50,6 +51,8 @@ export function App() {
   const [reviewPlan, setReviewPlan] = useState<PendingPlan | null>(null);
   const [capBatches, setCapBatches] = useState<CapabilitySuggestionBatch[]>([]);
   const [reviewCaps, setReviewCaps] = useState<CapabilitySuggestionBatch | null>(null);
+  const [pendingSync, setPendingSync] = useState<PendingSyncRequest[]>([]);
+  const previousSyncCount = useRef(0);
   const [modelsRevision, setModelsRevision] = useState(0);
   const [, setCatalogRevision] = useState(0);
   const [autoLocked, setAutoLocked] = useState(false);
@@ -147,11 +150,16 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); void backend.pendingCapabilitySuggestions().then(setCapBatches).catch((error) => setRuntimeError(String(error))); };
+    const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); void backend.pendingCapabilitySuggestions().then(setCapBatches).catch((error) => setRuntimeError(String(error)));
+      // Queued AI sync requests run in the backend once unlocked; when the queue drains, reload what they changed.
+      void backend.pendingSyncRequests().then((items) => { setPendingSync(items); if (previousSyncCount.current > 0 && items.length === 0) { void refreshSecretsRef.current(); setModelsRevision((value) => value + 1); } previousSyncCount.current = items.length; }).catch(() => undefined); };
     loadPlans();
     const timer = window.setInterval(loadPlans, 2000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const refreshSecretsRef = useRef(refreshSecrets);
+  refreshSecretsRef.current = refreshSecrets;
 
   function planReviewed() {
     const id = reviewPlan?.request_id;
@@ -315,6 +323,7 @@ export function App() {
           <span className="shield-icon" aria-hidden="true">◆</span><span>{t.security.localOnly}</span><span className="strip-divider" /><span>{t.security.encrypted}</span><span className="strip-divider" /><span>{t.security.audit}</span>
         </section>
         {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onReview={() => setReviewPlan(plan)} />)}
+        {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
         {capBatches.map((batch) => <CapabilitySuggestionBanner key={batch.requestId} batch={batch} t={t} onReview={() => setReviewCaps(batch)} />)}
         {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}
         {reviewCaps && <CapabilitySuggestionModal batch={reviewCaps} t={t} onClose={() => setReviewCaps(null)} onDone={capsReviewed} />}

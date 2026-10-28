@@ -9,6 +9,8 @@ mod catalog_update;
 mod commands;
 mod model_sync;
 mod plan;
+mod queue;
+mod sync;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
@@ -50,6 +52,7 @@ pub fn run() {
                 )),
             });
             catalog_update::start(app.handle().clone());
+            sync::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -96,6 +99,7 @@ pub fn run() {
             commands::project_env_save,
             commands::audit_list,
             commands::catalog_effective,
+            sync::mcp_pending_sync_requests,
             catalog_update::catalog_status,
             catalog_update::catalog_set_auto_update,
             catalog_update::catalog_check_now,

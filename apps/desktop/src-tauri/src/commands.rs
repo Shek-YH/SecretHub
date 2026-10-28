@@ -484,10 +484,10 @@ pub fn secret_models(
         .map_err(|error| error.to_string())
 }
 
-struct CheckReport {
-    validation: Option<String>,
-    models_status: String,
-    count: usize,
+pub(crate) struct CheckReport {
+    pub(crate) validation: Option<String>,
+    pub(crate) models_status: String,
+    pub(crate) count: usize,
 }
 
 /// What to store for the model list after a check.
@@ -499,7 +499,7 @@ enum ModelsWrite {
 
 /// Validates the key and syncs its model list with one request path.
 /// The vault lock is never held across an `.await`.
-async fn check_secret(
+pub(crate) async fn check_secret(
     id: &str,
     state: &State<'_, AppState>,
     update_validation: bool,
