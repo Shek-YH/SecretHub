@@ -10,7 +10,7 @@ const databasePath = join(directory, 'vault.sqlite');
 const planDirectory = join(directory, 'plans');
 const resultDirectory = join(directory, 'results');
 const database = new DatabaseSync(databasePath);
-database.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, value_type TEXT, category TEXT, scope TEXT, favorite INTEGER, archived INTEGER, model_id TEXT, model_env_key TEXT, endpoint_url TEXT, endpoint_env_key TEXT, updated_at INTEGER); CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB); CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER); CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER); CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER); INSERT INTO secrets VALUES ('secret-fixture', 'Fixture Metadata', 'generic', 'FIXTURE_KEY', 'unknown', '["test"]', 'token', 'other', 'global', 0, 0, '', '', 'https://example.invalid', 'GENERIC_BASE_URL', 1); INSERT INTO secret_payloads VALUES ('secret-fixture', X'010203'); CREATE TABLE provider_models (secret_id TEXT, model_id TEXT, display_name TEXT, input_json TEXT, output_json TEXT, capabilities_json TEXT, capability_source TEXT, synced_at INTEGER); INSERT INTO secrets VALUES ('secret-model', 'Model Key', 'deepseek', 'DEEPSEEK_API_KEY', 'valid', '[]', 'api_key', 'ai', 'global', 0, 0, '', '', '', '', 0); INSERT INTO secret_payloads VALUES ('secret-model', X'0A0B0C'); INSERT INTO provider_models VALUES ('secret-model', 'plain-model', '', '[]', '[]', '[]', 'unknown', 5), ('secret-model', 'vision-model', '', '[]', '[]', '["chat","vision"]', 'provider', 5);`);
+database.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, value_type TEXT, category TEXT, scope TEXT, favorite INTEGER, archived INTEGER, model_id TEXT, model_env_key TEXT, endpoint_url TEXT, endpoint_env_key TEXT, updated_at INTEGER); CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB); CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER); CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER); CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER); INSERT INTO secrets VALUES ('secret-fixture', 'Fixture Metadata', 'generic', 'FIXTURE_KEY', 'unknown', '["test"]', 'token', 'other', 'global', 0, 0, '', '', 'https://example.invalid', 'GENERIC_BASE_URL', 1); INSERT INTO secret_payloads VALUES ('secret-fixture', X'010203'); CREATE TABLE media_assets (id TEXT PRIMARY KEY, kind TEXT, filename TEXT, stored_path TEXT, sha256 TEXT, size_bytes INTEGER, mime TEXT, width INTEGER, height INTEGER, duration_ms INTEGER, description TEXT, tags_json TEXT, source TEXT, created_at INTEGER); INSERT INTO media_assets VALUES ('asset-1', 'image', 'cat.png', 'C:\\media\\asset-1.png', 'aa', 10, 'image/png', 1920, 1080, NULL, 'a cat', '["pets"]', 'user', 2), ('asset-2', 'video', 'clip.mp4', 'C:\\media\\asset-2.mp4', 'bb', 20, 'video/mp4', 1080, 1920, 5000, 'portrait clip', '[]', 'ai', 1); CREATE TABLE provider_models (secret_id TEXT, model_id TEXT, display_name TEXT, input_json TEXT, output_json TEXT, capabilities_json TEXT, capability_source TEXT, synced_at INTEGER); INSERT INTO secrets VALUES ('secret-model', 'Model Key', 'deepseek', 'DEEPSEEK_API_KEY', 'valid', '[]', 'api_key', 'ai', 'global', 0, 0, '', '', '', '', 0); INSERT INTO secret_payloads VALUES ('secret-model', X'0A0B0C'); INSERT INTO provider_models VALUES ('secret-model', 'plain-model', '', '[]', '[]', '[]', 'unknown', 5), ('secret-model', 'vision-model', '', '[]', '[]', '["chat","vision"]', 'provider', 5);`);
 database.close();
 const messages = [
   { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
@@ -30,6 +30,12 @@ const messages = [
   { jsonrpc: '2.0', id: 14, method: 'tools/call', params: { name: 'secrethub_start_key_capture', arguments: { provider_id: 'deepseek', response_format: 'json' } } },
   { jsonrpc: '2.0', id: 15, method: 'tools/call', params: { name: 'secrethub_start_key_capture', arguments: { provider_id: 'custom', response_format: 'json' } } },
   { jsonrpc: '2.0', id: 16, method: 'tools/call', params: { name: 'secrethub_get_capture_status', arguments: { request_id: 'capture-../x', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 17, method: 'tools/call', params: { name: 'secrethub_media_search', arguments: { orientation: 'portrait', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 18, method: 'tools/call', params: { name: 'secrethub_media_get', arguments: { id: 'asset-1', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 19, method: 'tools/call', params: { name: 'secrethub_media_add', arguments: { path: databasePath, description: 'fixture file', tags: ['t1'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 20, method: 'tools/call', params: { name: 'secrethub_media_add', arguments: { path: join(directory, 'does-not-exist.png'), response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'secrethub_media_add', arguments: { path: directory, response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'secrethub_get_media_add_status', arguments: { request_id: 'media-../x', response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -92,6 +98,19 @@ try {
   assert.deepEqual([captureFile.kind, captureFile.providerId], ['start_key_capture', 'deepseek']);
   assert.equal(responses.find((response) => response.id === 15).result.isError, true);
   assert.equal(responses.find((response) => response.id === 16).result.isError, true);
+  for (const name of ['secrethub_media_search', 'secrethub_media_get', 'secrethub_media_add', 'secrethub_get_media_add_status']) assert.ok(tools.some((tool) => tool.name === name), name);
+  const mediaFound = responses.find((response) => response.id === 17).result.structuredContent;
+  assert.deepEqual(mediaFound.items.map((item) => [item.id, item.orientation, item.durationMs]), [['asset-2', 'portrait', 5000]]);
+  assert.equal(mediaFound.items[0].path, 'C:\\media\\asset-2.mp4');
+  const mediaGot = responses.find((response) => response.id === 18).result.structuredContent;
+  assert.deepEqual([mediaGot.found, mediaGot.item.orientation, mediaGot.item.tags], [true, 'landscape', ['pets']]);
+  const mediaQueued = responses.find((response) => response.id === 19).result.structuredContent;
+  assert.match(mediaQueued.requestId, /^media-/);
+  const mediaFile = JSON.parse(readFileSync(`${planDirectory}/${mediaQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([mediaFile.kind, mediaFile.path, mediaFile.tags], ['add_media', databasePath, ['t1']]);
+  assert.equal(responses.find((response) => response.id === 20).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 21).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 22).result.isError, true);
   mkdirSync(resultDirectory, { recursive: true });
   writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
   const statusCalls = [

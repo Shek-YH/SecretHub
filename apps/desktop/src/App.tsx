@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal } from './McpReview';
-import { CaptureRequestBanner, SyncRequestBanner } from './AiRequests';
+import { CaptureRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
+import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { TagField } from './TagPicker';
 import { CatalogSettings } from './CatalogSettings';
 import { buildModelOptions } from './modelOptions';
@@ -32,7 +33,7 @@ type SecretMetadata = {
   modelsSyncStatus?: string;
 };
 type Profile = { id: string; name: string; description: string; secret_ids: string[] };
-type Navigation = 'all' | 'api_key' | 'token' | 'url' | 'password' | 'text' | 'providers' | 'profiles' | 'projects' | 'settings' | 'audit';
+type Navigation = 'all' | 'api_key' | 'token' | 'url' | 'password' | 'text' | 'providers' | 'profiles' | 'projects' | 'media' | 'settings' | 'audit';
 type CredentialPreset = { provider: string; name: string; envKey: string; modelId: string; modelEnvKey: string; endpointUrl: string; endpointEnvKey: string };
 
 const demoSecrets: SecretMetadata[] = [
@@ -56,6 +57,8 @@ export function App() {
   const previousSyncCount = useRef(0);
   const [captureRequests, setCaptureRequests] = useState<CaptureRequest[]>([]);
   const [captureName, setCaptureName] = useState<string | null>(null);
+  const [mediaRequests, setMediaRequests] = useState<MediaRequest[]>([]);
+  const [mediaRevision, setMediaRevision] = useState(0);
   const [modelsRevision, setModelsRevision] = useState(0);
   const [, setCatalogRevision] = useState(0);
   const [autoLocked, setAutoLocked] = useState(false);
@@ -156,7 +159,8 @@ export function App() {
     const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); void backend.pendingCapabilitySuggestions().then(setCapBatches).catch((error) => setRuntimeError(String(error)));
       // Queued AI sync requests run in the backend once unlocked; when the queue drains, reload what they changed.
       void backend.pendingSyncRequests().then((items) => { setPendingSync(items); if (previousSyncCount.current > 0 && items.length === 0) { void refreshSecretsRef.current(); setModelsRevision((value) => value + 1); } previousSyncCount.current = items.length; }).catch(() => undefined);
-      void backend.pendingCaptureRequests().then(setCaptureRequests).catch(() => undefined); };
+      void backend.pendingCaptureRequests().then(setCaptureRequests).catch(() => undefined);
+      void backend.pendingMediaRequests().then(setMediaRequests).catch(() => undefined); };
     loadPlans();
     const timer = window.setInterval(loadPlans, 2000);
     return () => window.clearInterval(timer);
@@ -178,6 +182,14 @@ export function App() {
       setCaptureRequests((current) => current.filter((item) => item.requestId !== request.requestId));
       if (accept) setCaptureName(request.providerName);
     } catch (error) { setRuntimeError(`${t.capture.failed}: ${String(error)}`); }
+  }
+
+  async function decideMedia(request: MediaRequest, accept: boolean) {
+    try {
+      await backend.mediaDecision(request.requestId, accept);
+      setMediaRequests((current) => current.filter((item) => item.requestId !== request.requestId));
+      setMediaRevision((value) => value + 1);
+    } catch (error) { setRuntimeError(`${t.media.failed}: ${String(error)}`); }
   }
 
   const captureDone = useRef<(secretId: string) => void>(() => undefined);
@@ -323,6 +335,7 @@ export function App() {
           <NavItem active={activeNav === 'profiles'} label={t.nav.profiles} onClick={() => setActiveNav('profiles')} />
           <NavItem active={activeNav === 'projects'} label={t.nav.projects} onClick={() => setActiveNav('projects')} />
           <NavItem active={activeNav === 'providers'} label={t.nav.providers} dot="green" onClick={() => setActiveNav('providers')} />
+          <NavItem active={activeNav === 'media'} label={t.media.nav} onClick={() => setActiveNav('media')} />
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setActiveNav('settings')}><span className="nav-glyph">/</span>{t.nav.settings}</button>
@@ -347,11 +360,12 @@ export function App() {
         {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onReview={() => setReviewPlan(plan)} />)}
         {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus?.unlocked && captureRequests.map((request) => <CaptureRequestBanner key={request.requestId} request={request} t={t} onStart={() => void decideCapture(request, true)} onDecline={() => void decideCapture(request, false)} />)}
+        {mediaRequests.map((request) => <MediaRequestBanner key={request.requestId} request={request} t={t} onAccept={() => void decideMedia(request, true)} onDecline={() => void decideMedia(request, false)} />)}
         {capBatches.map((batch) => <CapabilitySuggestionBanner key={batch.requestId} batch={batch} t={t} onReview={() => setReviewCaps(batch)} />)}
         {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}
         {reviewCaps && <CapabilitySuggestionModal batch={reviewCaps} t={t} onClose={() => setReviewCaps(null)} onDone={capsReviewed} />}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked && activeNav !== 'media' ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'media' ? <MediaLibrary t={t} revision={mediaRevision} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
               <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><select aria-label={t.list.sort} value={sortMode} onChange={(event) => setSortMode(event.target.value as 'updated' | 'usage' | 'name')}><option value="updated">{t.list.sortUpdated}</option><option value="usage">{t.list.sortUsage}</option><option value="name">{t.list.sortName}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>

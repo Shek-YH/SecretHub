@@ -8,6 +8,7 @@ mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
+mod media;
 mod model_sync;
 mod plan;
 mod queue;
@@ -108,6 +109,17 @@ pub fn run() {
             capture::key_capture_status,
             capture::mcp_pending_capture_requests,
             capture::mcp_capture_decision,
+            media::media_list,
+            media::media_choose_files,
+            media::media_import,
+            media::media_create_text,
+            media::media_update,
+            media::media_delete,
+            media::media_copy_path,
+            media::media_reveal,
+            media::media_thumbnail,
+            media::mcp_pending_media_requests,
+            media::mcp_media_decision,
             catalog_update::catalog_status,
             catalog_update::catalog_set_auto_update,
             catalog_update::catalog_check_now,

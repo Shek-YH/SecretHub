@@ -31,6 +31,10 @@ export type CapabilityModelRow = { capability: string; model_id: string; env_key
 export type PendingSyncRequest = { requestId: string; secretCount: number | null; createdAt: string };
 export type CaptureStatus = { state: 'idle' | 'waiting' | 'captured' | 'timeout' | 'cancelled'; providerId: string | null; remainingSeconds: number; secretId: string | null; validation: string | null };
 export type CaptureRequest = { requestId: string; providerId: string; providerName: string; createdAt: string };
+export type MediaAsset = { id: string; kind: string; filename: string; stored_path: string; sha256: string; size_bytes: number; mime: string; width: number | null; height: number | null; duration_ms: number | null; description: string; tags: string[]; source: string; created_at: number };
+export type MediaListing = { assets: MediaAsset[]; count: number; usage_bytes: number; ffprobe: boolean };
+export type MediaImportItem = { path: string; ok: boolean; id: string | null; duplicate: boolean; error: string | null };
+export type MediaRequest = { requestId: string; path: string; filename: string; sizeBytes: number | null; problem: string | null; description: string; tags: string[]; createdAt: string };
 export type BackendModelSync = { id: string; status: string; count: number };
 export type ProjectEnvEntry = { original_key: string; key: string; value: string; source: 'managed' | 'manual'; secret_id?: string | null };
 
@@ -93,5 +97,16 @@ export const backend = {
   captureStatus: () => invoke<CaptureStatus>('key_capture_status'),
   pendingCaptureRequests: () => invoke<CaptureRequest[]>('mcp_pending_capture_requests'),
   captureDecision: (requestId: string, accept: boolean) => invoke<CaptureStatus>('mcp_capture_decision', { requestId, accept }),
+  mediaList: () => invoke<MediaListing>('media_list'),
+  mediaChooseFiles: () => invoke<string[] | null>('media_choose_files'),
+  mediaImport: (paths: string[]) => invoke<MediaImportItem[]>('media_import', { paths }),
+  mediaCreateText: (name: string, content: string, description: string, tags: string[]) => invoke<MediaAsset>('media_create_text', { name, content, description, tags }),
+  mediaUpdate: (id: string, description: string, tags: string[]) => invoke<boolean>('media_update', { id, description, tags }),
+  mediaDelete: (id: string) => invoke<boolean>('media_delete', { id }),
+  mediaCopyPath: (id: string) => invoke<void>('media_copy_path', { id }),
+  mediaReveal: (id: string) => invoke<void>('media_reveal', { id }),
+  mediaThumbnail: (id: string) => invoke<string | null>('media_thumbnail', { id }),
+  pendingMediaRequests: () => invoke<MediaRequest[]>('mcp_pending_media_requests'),
+  mediaDecision: (requestId: string, accept: boolean) => invoke<void>('mcp_media_decision', { requestId, accept }),
   confirmPlan: (request_id: string, confirmed: boolean, skip_keys?: string[]) => invoke<void>('mcp_confirm_plan', { requestId: request_id, confirmed, skipKeys: skip_keys }),
 };

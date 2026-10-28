@@ -2,8 +2,8 @@
 
 use secrethub_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError, VaultKey};
 use secrethub_storage::{
-    CapabilityModelRow, Database, NewSecret, ProviderModelRow, SecretMetadata, StorageError,
-    UpdatedSecret, CAPABILITY_MODEL_ORDER,
+    CapabilityModelRow, Database, MediaAsset, NewSecret, ProviderModelRow, SecretMetadata,
+    StorageError, UpdatedSecret, CAPABILITY_MODEL_ORDER,
 };
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -321,6 +321,33 @@ impl VaultService {
         self.database
             .list_provider_models(secret_id)
             .map_err(Into::into)
+    }
+
+    // Media assets are not secrets: these work while the vault is locked.
+    pub fn insert_media(&self, asset: &MediaAsset) -> Result<(), VaultError> {
+        self.database.insert_media(asset).map_err(Into::into)
+    }
+    pub fn get_media(&self, id: &str) -> Result<Option<MediaAsset>, VaultError> {
+        self.database.get_media(id).map_err(Into::into)
+    }
+    pub fn find_media_by_sha(&self, sha256: &str) -> Result<Option<MediaAsset>, VaultError> {
+        self.database.find_media_by_sha(sha256).map_err(Into::into)
+    }
+    pub fn list_media(&self) -> Result<Vec<MediaAsset>, VaultError> {
+        self.database.list_media().map_err(Into::into)
+    }
+    pub fn update_media_meta(
+        &self,
+        id: &str,
+        description: &str,
+        tags: &[String],
+    ) -> Result<bool, VaultError> {
+        self.database
+            .update_media_meta(id, description, tags)
+            .map_err(Into::into)
+    }
+    pub fn delete_media(&self, id: &str) -> Result<Option<MediaAsset>, VaultError> {
+        self.database.delete_media(id).map_err(Into::into)
     }
 
     /// A key's per-capability model choices (everything except the chat model).

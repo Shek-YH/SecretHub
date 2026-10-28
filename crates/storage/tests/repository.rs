@@ -445,3 +445,88 @@ fn capability_models_round_trip_in_display_order_and_cascade_on_delete() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+fn media_asset(
+    id: &str,
+    sha: &str,
+    tags: &[&str],
+    created_at: i64,
+) -> secrethub_storage::MediaAsset {
+    secrethub_storage::MediaAsset {
+        id: id.into(),
+        kind: "image".into(),
+        filename: format!("{id}.png"),
+        stored_path: format!("C:/media/{id}.png"),
+        sha256: sha.into(),
+        size_bytes: 10,
+        mime: "image/png".into(),
+        width: Some(640),
+        height: Some(480),
+        duration_ms: None,
+        description: "fixture".into(),
+        tags: tags.iter().map(|tag| tag.to_string()).collect(),
+        source: "user".into(),
+        created_at,
+    }
+}
+
+#[test]
+fn media_assets_round_trip_dedupe_by_hash_and_feed_the_tag_library() {
+    let (_path, database) = temp_database();
+    database
+        .insert_media(&media_asset("asset-1", "aa", &["Cat"], 1))
+        .unwrap();
+    database
+        .insert_media(&media_asset("asset-2", "bb", &["dog", "cat"], 2))
+        .unwrap();
+    // The hash is unique: the same content cannot be stored twice.
+    assert!(database
+        .insert_media(&media_asset("asset-3", "aa", &[], 3))
+        .is_err());
+
+    let listed = database.list_media().unwrap();
+    assert_eq!(
+        listed.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        ["asset-2", "asset-1"]
+    );
+    assert_eq!(listed[1].tags, ["Cat"]);
+    assert_eq!(listed[1].duration_ms, None);
+    assert_eq!(
+        database.find_media_by_sha("bb").unwrap().unwrap().id,
+        "asset-2"
+    );
+    assert!(database.find_media_by_sha("zz").unwrap().is_none());
+
+    assert!(database
+        .update_media_meta("asset-1", "new text", &["x".into()])
+        .unwrap());
+    let updated = database.get_media("asset-1").unwrap().unwrap();
+    assert_eq!(
+        (updated.description.as_str(), updated.tags.clone()),
+        ("new text", vec!["x".to_string()])
+    );
+    assert!(!database.update_media_meta("missing", "", &[]).unwrap());
+
+    // Media tags join the shared tag library (deduped case-insensitively).
+    let tags = database.list_tags().unwrap();
+    assert_eq!(tags, ["cat", "dog", "x"]);
+
+    let removed = database.delete_media("asset-2").unwrap().unwrap();
+    assert_eq!(removed.stored_path, "C:/media/asset-2.png");
+    assert!(database.delete_media("asset-2").unwrap().is_none());
+    assert_eq!(database.list_media().unwrap().len(), 1);
+}
+
+#[test]
+fn migrates_an_existing_database_without_the_media_table() {
+    let path = std::env::temp_dir().join(format!("secrethub-test-{}.sqlite", uuid::Uuid::new_v4()));
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider_id TEXT NOT NULL, env_key TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")
+            .unwrap();
+    }
+    let database = Database::open(&path).unwrap();
+    assert!(database.list_media().unwrap().is_empty());
+    let _ = std::fs::remove_file(path);
+}

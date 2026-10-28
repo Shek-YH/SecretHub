@@ -52,6 +52,31 @@ pub struct ProviderModelRow {
     pub synced_at: i64,
 }
 
+/// One library file (design M4). Media is not secret: no encryption, readable while locked.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MediaAsset {
+    pub id: String,
+    /// image | video | audio | text | other
+    pub kind: String,
+    /// Original file name (display only).
+    pub filename: String,
+    /// Absolute path of the copy inside the media directory.
+    pub stored_path: String,
+    pub sha256: String,
+    pub size_bytes: i64,
+    pub mime: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub description: String,
+    pub tags: Vec<String>,
+    /// user | ai
+    pub source: String,
+    pub created_at: i64,
+}
+
+const MEDIA_COLUMNS: &str = "id, kind, filename, stored_path, sha256, size_bytes, mime, width, height, duration_ms, description, tags_json, source, created_at";
+
 /// A non-chat capability model chosen for a key (the chat model stays in `secrets.model_id`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityModelRow {
@@ -280,6 +305,22 @@ impl Database {
                 model_id TEXT NOT NULL,
                 env_key TEXT NOT NULL,
                 PRIMARY KEY (secret_id, capability)
+             );
+             CREATE TABLE IF NOT EXISTS media_assets (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                sha256 TEXT NOT NULL UNIQUE,
+                size_bytes INTEGER NOT NULL,
+                mime TEXT NOT NULL DEFAULT '',
+                width INTEGER,
+                height INTEGER,
+                duration_ms INTEGER,
+                description TEXT NOT NULL DEFAULT '',
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                source TEXT NOT NULL DEFAULT 'user',
+                created_at INTEGER NOT NULL
              );
              CREATE TABLE IF NOT EXISTS model_capability_overrides (
                 provider_id TEXT NOT NULL,
@@ -617,6 +658,105 @@ impl Database {
             .collect()
     }
 
+    pub fn insert_media(&self, asset: &MediaAsset) -> Result<(), StorageError> {
+        self.connection.execute(
+            &format!("INSERT INTO media_assets({MEDIA_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"),
+            params![
+                asset.id,
+                asset.kind,
+                asset.filename,
+                asset.stored_path,
+                asset.sha256,
+                asset.size_bytes,
+                asset.mime,
+                asset.width,
+                asset.height,
+                asset.duration_ms,
+                asset.description,
+                to_json(&asset.tags)?,
+                asset.source,
+                asset.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_media(&self, id: &str) -> Result<Option<MediaAsset>, StorageError> {
+        self.query_media("WHERE id = ?1", params![id])
+            .map(|mut rows| rows.pop())
+    }
+
+    pub fn find_media_by_sha(&self, sha256: &str) -> Result<Option<MediaAsset>, StorageError> {
+        self.query_media("WHERE sha256 = ?1", params![sha256])
+            .map(|mut rows| rows.pop())
+    }
+
+    /// Every asset, newest first.
+    pub fn list_media(&self) -> Result<Vec<MediaAsset>, StorageError> {
+        self.query_media("", params![])
+    }
+
+    fn query_media(
+        &self,
+        condition: &str,
+        arguments: impl rusqlite::Params,
+    ) -> Result<Vec<MediaAsset>, StorageError> {
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT {MEDIA_COLUMNS} FROM media_assets {condition} ORDER BY created_at DESC, id"
+        ))?;
+        let raw = statement
+            .query_map(arguments, |row| {
+                Ok((
+                    MediaAsset {
+                        id: row.get(0)?,
+                        kind: row.get(1)?,
+                        filename: row.get(2)?,
+                        stored_path: row.get(3)?,
+                        sha256: row.get(4)?,
+                        size_bytes: row.get(5)?,
+                        mime: row.get(6)?,
+                        width: row.get(7)?,
+                        height: row.get(8)?,
+                        duration_ms: row.get(9)?,
+                        description: row.get(10)?,
+                        tags: Vec::new(),
+                        source: row.get(12)?,
+                        created_at: row.get(13)?,
+                    },
+                    row.get::<_, String>(11)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        raw.into_iter()
+            .map(|(mut asset, tags)| {
+                asset.tags = from_json(&tags)?;
+                Ok(asset)
+            })
+            .collect()
+    }
+
+    pub fn update_media_meta(
+        &self,
+        id: &str,
+        description: &str,
+        tags: &[String],
+    ) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "UPDATE media_assets SET description = ?1, tags_json = ?2 WHERE id = ?3",
+            params![description, to_json(tags)?, id],
+        )? > 0)
+    }
+
+    /// Removes the row and returns it so the caller can delete the stored copy.
+    pub fn delete_media(&self, id: &str) -> Result<Option<MediaAsset>, StorageError> {
+        let existing = self.get_media(id)?;
+        if existing.is_some() {
+            self.connection
+                .execute("DELETE FROM media_assets WHERE id = ?1", params![id])?;
+        }
+        Ok(existing)
+    }
+
     /// A key's per-capability model choices in display order.
     pub fn list_capability_models(
         &self,
@@ -832,6 +972,9 @@ impl Database {
             .collect::<Result<Vec<String>, _>>()?;
         for secret in self.list_metadata()? {
             names.extend(secret.tags);
+        }
+        for asset in self.list_media()? {
+            names.extend(asset.tags);
         }
         let mut seen = std::collections::HashSet::new();
         names.retain(|name| !name.trim().is_empty() && seen.insert(name.trim().to_lowercase()));

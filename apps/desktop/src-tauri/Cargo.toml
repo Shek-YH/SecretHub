@@ -15,6 +15,9 @@ tauri-build = { version = "2.4", features = [] }
 
 [dependencies]
 arboard.workspace = true
+base64.workspace = true
+imagesize = "0.13"
+uuid.workspace = true
 dirs.workspace = true
 rfd.workspace = true
 secrethub-core = { path = "../../../crates/core" }

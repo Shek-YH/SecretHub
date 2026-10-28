@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { openCatalogStore, recommendForStack } from './catalog.js';
 import { bindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, precheckPlan } from './plan.js';
 import { MAX_SUGGESTIONS, precheckSuggestions, queueSuggestions, suggestionSchema } from './caps.js';
+import { getMedia, getMediaAddStatus, isValidMediaRequestId, mediaAddSchema, MEDIA_KINDS, ORIENTATIONS, precheckMediaAdd, queueMediaAdd, readMedia, searchMedia } from './media.js';
 import { getCaptureStatus, isValidCaptureRequestId, precheckCapture, queueCapture } from './capture.js';
 import { getSyncStatus, isValidSyncRequestId, MAX_SYNC_SECRETS, precheckSyncRequest, queueSyncRequest } from './sync.js';
 import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
@@ -73,6 +74,26 @@ server.registerTool('secrethub_start_key_capture', { title: 'Start Key Capture',
 server.registerTool('secrethub_get_capture_status', { title: 'Get Capture Status', description: 'Report a key capture queued by secrethub_start_key_capture: waiting (for the user to click Start in Desktop, or for them to copy the key; at most 3 minutes after Start), captured (with the new secretId, never the key), timeout, cancelled, declined, or not_found. Reads only status files.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
   if (!isValidCaptureRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned by secrethub_start_key_capture.' }, response_format), isError: true };
   return catalogResult(getCaptureStatus(request_id, planDirectory, resultDirectory), response_format);
+});
+
+const mediaSearchDescription = 'Search the SecretHub media library (images, videos, audio, text the user collected for testing). Filters: kind, tags (all must match), query (file name, description or tag text), orientation (landscape|portrait|square, derived from width and height), min/max duration in milliseconds (assets without a known duration are excluded when a bound is set). Returns id, kind, filename, absolute path, mime, sizeBytes, width, height, durationMs, orientation, description and tags, newest first. The path can be used directly to upload or copy the file into a project test folder. Read-only; works while the vault is locked; file contents are never returned.';
+server.registerTool('secrethub_media_search', { title: 'Search Media Library', description: mediaSearchDescription, inputSchema: { kind: z.enum(MEDIA_KINDS).optional(), tags: z.array(z.string().trim().min(1).max(32)).max(20).optional(), query: z.string().trim().min(1).max(200).optional(), orientation: z.enum(ORIENTATIONS).optional(), min_duration_ms: z.number().int().min(0).optional(), max_duration_ms: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).default(20), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ kind, tags, query, orientation, min_duration_ms, max_duration_ms, limit, response_format }) => {
+  const found = searchMedia(readMedia(dbPath), { kind, tags, query, orientation, minDurationMs: min_duration_ms, maxDurationMs: max_duration_ms, limit });
+  return catalogResult({ total: found.total, count: found.items.length, items: found.items }, response_format);
+});
+server.registerTool('secrethub_media_get', { title: 'Get Media Asset', description: 'Get one media library asset by id (metadata and absolute path). Read-only; never returns file contents.', inputSchema: { id: z.string().min(1).max(200), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ id, response_format }) => {
+  const item = getMedia(readMedia(dbPath), id);
+  return catalogResult(item ? { found: true, item } : { found: false, id }, response_format);
+});
+server.registerTool('secrethub_media_add', { title: 'Add File to Media Library', description: 'Ask to add a local file (for example a test result you generated) to the SecretHub media library. The path must be an absolute path to an existing regular file of at most 2 GB. This only queues a request: SecretHub Desktop shows the file name, size and full path and copies the file in only after the user confirms. Poll secrethub_get_media_add_status with the returned requestId. Never queue files that are not related to the user\'s task, and never queue secrets such as .env files or key files.', inputSchema: { ...mediaAddSchema, response_format: responseFormat }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, ({ path, description, tags, response_format }) => {
+  const problem = precheckMediaAdd(path);
+  if (problem) return { ...catalogResult({ queued: false, error: problem }, response_format), isError: true };
+  const requestId = queueMediaAdd(planDirectory, { path, description, tags });
+  return catalogResult({ requestId, path, requiresUserConfirmation: true, added: false, nextStep: 'Ask the user to open SecretHub Desktop and confirm adding the file, then call secrethub_get_media_add_status with this requestId.' }, response_format);
+});
+server.registerTool('secrethub_get_media_add_status', { title: 'Get Media Add Status', description: 'Report a request queued by secrethub_media_add: pending (waiting for the user in SecretHub Desktop), added (with the asset id; duplicate is true when the same content was already in the library), declined, failed (with an error code), or not_found. Reads only status files.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
+  if (!isValidMediaRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned by secrethub_media_add.' }, response_format), isError: true };
+  return catalogResult(getMediaAddStatus(request_id, planDirectory, resultDirectory), response_format);
 });
 
 function catalogResult(value: Record<string, unknown>, format: 'json' | 'markdown') { const text = format === 'json' ? JSON.stringify(value, null, 2) : markdown(value); return { content: [{ type: 'text' as const, text: text.slice(0, CHARACTER_LIMIT) }], structuredContent: value }; }

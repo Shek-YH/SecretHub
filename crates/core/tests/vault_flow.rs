@@ -302,3 +302,31 @@ fn capability_models_are_validated_and_require_unlock() {
     vault.lock();
     assert!(vault.list_capability_models(&id).is_err());
 }
+
+#[test]
+fn media_library_is_available_while_the_vault_is_locked() {
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    vault.lock();
+    let asset = secrethub_storage::MediaAsset {
+        id: "asset-1".into(),
+        kind: "text".into(),
+        filename: "notes.txt".into(),
+        stored_path: "C:/media/asset-1.txt".into(),
+        sha256: "aa".into(),
+        size_bytes: 5,
+        mime: "text/plain".into(),
+        width: None,
+        height: None,
+        duration_ms: None,
+        description: String::new(),
+        tags: vec![],
+        source: "ai".into(),
+        created_at: 1,
+    };
+    vault.insert_media(&asset).unwrap();
+    assert_eq!(vault.list_media().unwrap(), vec![asset.clone()]);
+    assert!(vault.list_metadata().is_err(), "secrets stay locked");
+    assert!(vault.delete_media("asset-1").unwrap().is_some());
+}
