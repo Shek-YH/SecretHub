@@ -67,6 +67,10 @@ export function providerTemplate(id: string): ProviderTemplate {
   return providerTemplates.find((provider) => provider.id === id) ?? providerTemplates.find((provider) => provider.id === 'custom')!;
 }
 
+export function providerKind(providerId: string): string {
+  return definitions.find((provider) => provider.id === providerId)?.kind ?? 'direct';
+}
+
 export function defaultApiKeyEnvKey(providerId: string): string {
   return definitions.find((provider) => provider.id === providerId)?.envKeys[0] ?? '';
 }

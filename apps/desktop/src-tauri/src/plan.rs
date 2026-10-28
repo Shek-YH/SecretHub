@@ -500,7 +500,7 @@ fn legacy_keys(
             .find(|item| item.id == *id)
             .ok_or_else(|| PlanError::new("secret_unavailable", "secret not found"))?;
         keys.extend(
-            selected_entries_from_metadata(item, String::new())
+            selected_entries_from_metadata(item, String::new(), &[])
                 .into_iter()
                 .map(|entry| (entry.key, item.id.clone())),
         );

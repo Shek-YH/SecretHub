@@ -2,7 +2,8 @@
 
 use secrethub_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError, VaultKey};
 use secrethub_storage::{
-    Database, NewSecret, ProviderModelRow, SecretMetadata, StorageError, UpdatedSecret,
+    CapabilityModelRow, Database, NewSecret, ProviderModelRow, SecretMetadata, StorageError,
+    UpdatedSecret, CAPABILITY_MODEL_ORDER,
 };
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -322,6 +323,71 @@ impl VaultService {
             .map_err(Into::into)
     }
 
+    /// A key's per-capability model choices (everything except the chat model).
+    pub fn list_capability_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<CapabilityModelRow>, VaultError> {
+        self.require_key()?;
+        self.database
+            .list_capability_models(secret_id)
+            .map_err(Into::into)
+    }
+
+    /// Replaces a key's capability models. Rows with an empty model id are dropped; env names
+    /// must be valid, unique within the key and distinct from the key's own env names.
+    pub fn set_capability_models(
+        &self,
+        secret_id: &str,
+        rows: &[CapabilityModelRow],
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        let Some(metadata) = self.database.get_metadata(secret_id)? else {
+            return Err(VaultError::InvalidSecret);
+        };
+        let mut used: Vec<&str> = [
+            metadata.env_key.as_str(),
+            metadata.model_env_key.as_str(),
+            metadata.endpoint_env_key.as_str(),
+        ]
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .collect();
+        let mut seen_capabilities = Vec::new();
+        let mut kept = Vec::new();
+        for row in rows.iter().filter(|row| !row.model_id.trim().is_empty()) {
+            if !CAPABILITY_MODEL_ORDER.contains(&row.capability.as_str())
+                || seen_capabilities.contains(&row.capability.as_str())
+                || row.model_id.chars().count() > 200
+                || row.model_id.chars().any(char::is_control)
+            {
+                return Err(VaultError::InvalidSecret);
+            }
+            seen_capabilities.push(row.capability.as_str());
+            let env_key = row.env_key.trim();
+            if !env_key.is_empty() {
+                if !valid_env_name(env_key) || used.contains(&env_key) {
+                    return Err(VaultError::InvalidSecret);
+                }
+                used.push(env_key);
+            }
+            kept.push(CapabilityModelRow {
+                capability: row.capability.clone(),
+                model_id: row.model_id.trim().to_owned(),
+                env_key: env_key.to_owned(),
+            });
+        }
+        self.database.replace_capability_models(secret_id, &kept)?;
+        self.database.record_audit(
+            "capability_models_set",
+            Some(secret_id),
+            None,
+            "success",
+            &format!("{{\"source\":\"desktop\",\"count\":{}}}", kept.len()),
+        )?;
+        Ok(())
+    }
+
     /// Stores a user-confirmed capability override for (provider, model). Metadata only.
     pub fn set_capability_override(
         &self,
@@ -424,6 +490,14 @@ impl VaultService {
     fn require_key(&self) -> Result<&VaultKey, VaultError> {
         self.key.as_ref().ok_or(VaultError::Locked)
     }
+}
+
+fn valid_env_name(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some('_' | 'A'..='Z'))
+        && characters.all(|character| {
+            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+        })
 }
 
 fn verifier_for(key: &VaultKey) -> Vec<u8> {

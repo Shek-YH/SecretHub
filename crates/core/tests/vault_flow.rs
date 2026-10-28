@@ -248,3 +248,57 @@ fn tag_library_requires_unlock_and_round_trips() {
     assert!(vault.list_tags().is_err());
     assert!(vault.create_tag("x").is_err());
 }
+
+#[test]
+fn capability_models_are_validated_and_require_unlock() {
+    use secrethub_storage::CapabilityModelRow;
+    let (_path, database) = temp_database();
+    let mut vault = VaultService::open(database).unwrap();
+    vault.setup_master("correct horse battery staple").unwrap();
+    let id = vault
+        .create_secret_with_attributes(
+            NewSecretInput {
+                name: "Agg".into(),
+                provider_id: "openrouter".into(),
+                env_key: "OPENROUTER_API_KEY".into(),
+                description: String::new(),
+                tags: vec![],
+                value: "fixture-secret-value".into(),
+            },
+            secrethub_storage::SecretAttributes::default(),
+        )
+        .unwrap();
+    let row = |capability: &str, model: &str, env: &str| CapabilityModelRow {
+        capability: capability.into(),
+        model_id: model.into(),
+        env_key: env.into(),
+    };
+    vault
+        .set_capability_models(
+            &id,
+            &[
+                row("image_gen", "img", "IMAGE_MODEL"),
+                row("tts", "", "TTS_MODEL"),
+                row("asr", "asr-1", ""),
+            ],
+        )
+        .unwrap();
+    let stored = vault.list_capability_models(&id).unwrap();
+    // Empty model rows are dropped; an empty env name is allowed (not exported).
+    assert_eq!(stored.len(), 2);
+    for bad in [
+        vec![row("image_gen", "a", "X_MODEL"), row("tts", "b", "X_MODEL")],
+        vec![row("chat", "a", "CHAT_MODEL")],
+        vec![row("image_gen", "a", "lower-case")],
+        vec![row("image_gen", "a", "OPENROUTER_API_KEY")],
+        vec![row("image_gen", "a", "A"), row("image_gen", "b", "B")],
+    ] {
+        assert!(vault.set_capability_models(&id, &bad).is_err());
+    }
+    assert_eq!(vault.list_capability_models(&id).unwrap().len(), 2);
+    assert!(vault.set_capability_models("missing", &[]).is_err());
+    vault.set_capability_models(&id, &[]).unwrap();
+    assert!(vault.list_capability_models(&id).unwrap().is_empty());
+    vault.lock();
+    assert!(vault.list_capability_models(&id).is_err());
+}

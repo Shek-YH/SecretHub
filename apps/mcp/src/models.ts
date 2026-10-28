@@ -27,7 +27,10 @@ export type KeyRow = {
 // One synced provider model; capabilities/source already reflect any user/AI override.
 export type ModelRow = { secretId: string; modelId: string; capabilities: string[]; capabilitySource: string };
 
-export type ModelSnapshot = { keys: KeyRow[]; models: ModelRow[] };
+// A model the user picked for one capability of a key (secret_capability_models); absent in old vaults.
+export type CapabilityChoice = { secretId: string; capability: string; modelId: string; envKey: string };
+
+export type ModelSnapshot = { keys: KeyRow[]; models: ModelRow[]; capabilityModels?: CapabilityChoice[] };
 
 export type Candidate = {
   secretId: string;
@@ -44,6 +47,10 @@ export type Candidate = {
   keyStatus: string;
   modelsSyncedAt: number;
   assumed: boolean;
+  /** The user chose this model for the capability in SecretHub Desktop; capabilitySource is then `user`. */
+  preferred?: true;
+  /** Variable name the user entered for a preferred model; use it instead of inventing one. */
+  modelEnvKey?: string;
   reason?: string;
 };
 
@@ -68,10 +75,12 @@ export function findModels(input: FindModelsInput, snapshot: ModelSnapshot, prov
   const eligible = (key: KeyRow) => usable(key) && (input.includeUnverified || key.keyStatus === 'valid');
   const keys = new Map(snapshot.keys.filter(eligible).map((key) => [key.secretId, key]));
   const rows = snapshot.models.filter((row) => keys.has(row.secretId));
+  const choices = new Map((snapshot.capabilityModels ?? []).map((choice) => [`${choice.secretId}|${choice.capability}`, choice]));
+  const chosen = (row: ModelRow, capability: Capability) => choices.get(`${row.secretId}|${capability}`)?.modelId === row.modelId;
 
   // A row matches a capability for real, or (chat only) as an assumed id-only gateway model.
   const matches = (row: ModelRow, capability: Capability): false | 'real' | 'assumed' => {
-    if (row.capabilities.includes(capability)) return 'real';
+    if (row.capabilities.includes(capability) || chosen(row, capability)) return 'real';
     if (capability === 'chat' && row.capabilities.length === 0 && row.capabilitySource === 'unknown') return 'assumed';
     return false;
   };
@@ -106,11 +115,18 @@ export function findModels(input: FindModelsInput, snapshot: ModelSnapshot, prov
         assumed: match === 'assumed',
         cover: coverage.get(key.secretId) ?? 0,
       };
+      if (chosen(row, capability)) {
+        candidate.preferred = true;
+        candidate.capabilitySource = 'user';
+        const envKey = choices.get(`${row.secretId}|${capability}`)!.envKey;
+        if (envKey) candidate.modelEnvKey = envKey;
+      }
       if (key.keyStatus !== 'valid') candidate.reason = `key status: ${key.keyStatus || 'unknown'}`;
       candidates.push(candidate);
     }
     candidates.sort((a, b) =>
-      Number(a.assumed) - Number(b.assumed)
+      Number(Boolean(b.preferred)) - Number(Boolean(a.preferred))
+      || Number(a.assumed) - Number(b.assumed)
       || Number(b.keyStatus === 'valid') - Number(a.keyStatus === 'valid')
       || sourceRank(a.capabilitySource) - sourceRank(b.capabilitySource)
       || b.cover - a.cover
@@ -169,8 +185,10 @@ export function readModelSnapshot(path: string): ModelSnapshot {
       try { modelRows = db.prepare('SELECT m.secret_id, m.model_id, m.capabilities_json AS caps, m.capability_source AS source FROM provider_models m').all() as Array<Record<string, unknown>>; }
       catch { modelRows = []; }
     }
+    let capabilityModels: CapabilityChoice[] = [];
+    try { capabilityModels = (db.prepare('SELECT secret_id, capability, model_id, env_key FROM secret_capability_models').all() as Array<Record<string, unknown>>).map((row) => ({ secretId: String(row.secret_id), capability: String(row.capability), modelId: String(row.model_id), envKey: String(row.env_key ?? '') })); } catch { capabilityModels = []; }
     const models = modelRows.map((row) => ({ secretId: String(row.secret_id), modelId: String(row.model_id), capabilities: parseList(row.caps), capabilitySource: String(row.source) }));
-    return { keys, models };
+    return { keys, models, capabilityModels };
   } finally { db.close(); }
 }
 

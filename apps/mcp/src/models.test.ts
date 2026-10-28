@@ -57,6 +57,52 @@ describe('findModels ranking', () => {
   });
 });
 
+describe('user-chosen capability models', () => {
+  const snapshot = {
+    keys: [key('a')],
+    models: [model('a', 'img-a', ['image_gen'], 'provider'), model('a', 'img-b', ['image_gen'], 'provider'), model('a', 'img-z', [], 'unknown')],
+    capabilityModels: [{ secretId: 'a', capability: 'image_gen', modelId: 'img-b', envKey: 'MY_IMAGE_MODEL' }],
+  };
+
+  it('marks the chosen model as user/preferred and ranks it first for that capability', () => {
+    const result = findModels({ capabilities: ['image_gen'] }, snapshot, providers);
+    expect(ids(result)).toEqual(['a/img-b', 'a/img-a']);
+    expect(result.results[0].candidates[0]).toEqual(expect.objectContaining({ preferred: true, capabilitySource: 'user', modelEnvKey: 'MY_IMAGE_MODEL' }));
+    expect(result.results[0].candidates[1]).not.toHaveProperty('preferred');
+    expect(result.results[0].candidates[1].capabilitySource).toBe('provider');
+  });
+
+  it('keeps a chosen model even when its synced tags do not list the capability, and does not leak to other capabilities', () => {
+    const odd = { ...snapshot, capabilityModels: [{ secretId: 'a', capability: 'image_gen', modelId: 'img-z', envKey: '' }] };
+    const result = findModels({ capabilities: ['image_gen', 'vision'] }, odd, providers);
+    expect(ids(result, 0)).toEqual(['a/img-z', 'a/img-a', 'a/img-b']);
+    expect(result.results[0].candidates[0]).not.toHaveProperty('modelEnvKey');
+    expect(result.uncovered).toEqual(['vision']);
+  });
+
+  it('is ignored when the table is absent (old vaults) or the key is not eligible', () => {
+    const { capabilityModels: _unused, ...plain } = snapshot;
+    expect(ids(findModels({ capabilities: ['image_gen'] }, plain, providers))).toEqual(['a/img-a', 'a/img-b']);
+    expect(ids(findModels({ capabilities: ['image_gen'] }, { ...snapshot, keys: [key('a', { keyStatus: 'invalid' })] }, providers))).toEqual([]);
+  });
+
+  it('reads the table from SQLite and tolerates its absence', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'secrethub-capmodels-'));
+    const path = join(directory, 'vault.sqlite');
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, value_type TEXT, archived INTEGER, endpoint_url TEXT, endpoint_env_key TEXT, updated_at INTEGER);
+        CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB);
+        INSERT INTO secrets VALUES ('s1', 'Main', 'direct', 'K', 'valid', 'api_key', 0, '', '', 1);
+        INSERT INTO secret_payloads VALUES ('s1', X'01');`);
+      expect(readModelSnapshot(path).capabilityModels).toEqual([]);
+      db.exec(`CREATE TABLE secret_capability_models (secret_id TEXT, capability TEXT, model_id TEXT, env_key TEXT);
+        INSERT INTO secret_capability_models VALUES ('s1', 'tts', 'voice-1', 'TTS_MODEL');`);
+      expect(readModelSnapshot(path).capabilityModels).toEqual([{ secretId: 's1', capability: 'tts', modelId: 'voice-1', envKey: 'TTS_MODEL' }]);
+    } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+});
+
 describe('assumed chat', () => {
   const snapshot = { keys: [key('a')], models: [model('a', 'gpt-x', [], 'unknown')] };
 

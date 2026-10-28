@@ -139,3 +139,14 @@ body { background: #071126; color: #eef4ff; }
 .tag-new-row { display: flex; gap: 8px; align-items: center; }
 .tag-new-row input { margin-top: 0; }
 .tag-manage-toggle { margin-right: auto; }
+.cap-section { margin: 8px 23px 0; padding: 12px; border: 1px solid #2b3a35; border-radius: 8px; display: grid; gap: 8px; }
+.secret-form .cap-section { margin: 4px 0; }
+.cap-hint { margin: 0; color: #7d918a; font-size: 11px; }
+.cap-editor { display: grid; gap: 6px; }
+.cap-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) 150px; gap: 8px; align-items: center; font-size: 11px; }
+.cap-row-chat { grid-template-columns: 110px minmax(0, 1fr); }
+.cap-name { color: #c2d2cd; }
+.cap-primary { color: #c2d2cd; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.cap-empty { color: #7d918a; font-size: 10px; }
+.cap-row select, .cap-row input { margin-top: 0; min-width: 0; }
+.model-capability-menu { font-size: 10px; max-width: 150px; }

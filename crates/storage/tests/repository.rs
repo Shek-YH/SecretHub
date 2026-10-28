@@ -409,3 +409,39 @@ fn catalog_auto_update_defaults_on_and_is_independent_of_other_settings() {
     let reopened = Database::open(&path).unwrap();
     assert!(!reopened.catalog_auto_update().unwrap());
 }
+
+#[test]
+fn capability_models_round_trip_in_display_order_and_cascade_on_delete() {
+    use secrethub_storage::{default_capability_env_key, CapabilityModelRow};
+    let (path, database) = temp_database();
+    let id = new_key(&database, "openrouter");
+    let row = |capability: &str, model: &str| CapabilityModelRow {
+        capability: capability.into(),
+        model_id: model.into(),
+        env_key: default_capability_env_key(capability).unwrap().into(),
+    };
+    database
+        .replace_capability_models(&id, &[row("tts", "t1"), row("image_gen", "i1")])
+        .unwrap();
+    let listed = database.list_capability_models(&id).unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .map(|r| r.capability.as_str())
+            .collect::<Vec<_>>(),
+        ["image_gen", "tts"]
+    );
+    // Replace is wholesale.
+    database
+        .replace_capability_models(&id, &[row("code", "c1")])
+        .unwrap();
+    assert_eq!(database.list_capability_models(&id).unwrap().len(), 1);
+    database.delete_secret(&id).unwrap();
+    let count: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM secret_capability_models", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 0);
+}

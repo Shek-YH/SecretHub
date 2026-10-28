@@ -349,7 +349,7 @@ fn copy_to_clipboard(value: String, timeout_seconds: u64) -> Result<(), String> 
 #[tauri::command]
 pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), String> {
     touch_activity(&state)?;
-    let (metadata, value) = {
+    let (metadata, value, rows) = {
         let vault = vault_from_state(&state)?;
         let vault = vault
             .as_ref()
@@ -361,9 +361,12 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
             .find(|item| item.id == id)
             .ok_or_else(|| "secret not found".to_owned())?;
         let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
-        (metadata, value)
+        let rows = vault
+            .list_capability_models(&id)
+            .map_err(|error| error.to_string())?;
+        (metadata, value, rows)
     };
-    let entries = selected_entries_from_metadata(&metadata, value);
+    let entries = selected_entries_from_metadata(&metadata, value, &rows);
     let copied = render_env(&entries).map_err(|error| error.to_string())?;
     copy_to_clipboard(copied, 30)?;
     vault_from_state(&state)?
@@ -436,6 +439,35 @@ pub async fn secret_sync_models(
         status: report.models_status,
         count: report.count,
     })
+}
+
+/// Per-capability model choices of one key (metadata only).
+#[tauri::command]
+pub fn secret_capability_models(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<secrethub_storage::CapabilityModelRow>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .list_capability_models(&id)
+        .map_err(|error| error.to_string())
+}
+
+/// Replaces the per-capability model choices of one key; rows with an empty model are dropped.
+#[tauri::command]
+pub fn secret_set_capability_models(
+    id: String,
+    rows: Vec<secrethub_storage::CapabilityModelRow>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .set_capability_models(&id, &rows)
+        .map_err(|error| error.to_string())
 }
 
 /// Stored model metadata of one key (no secret values), overrides applied.
@@ -607,9 +639,24 @@ pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), Strin
     Ok(())
 }
 
+/// Entries for legacy plans: key, primary model and endpoint only (plan previews rely on this).
 pub(crate) fn selected_entries(
     vault: &VaultService,
     ids: &[String],
+) -> Result<Vec<EnvEntry>, String> {
+    entries_for(vault, ids, false)
+}
+
+/// Entries for manual export: like `selected_entries`, plus the per-capability model rows
+/// right after the primary model.
+fn export_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>, String> {
+    entries_for(vault, ids, true)
+}
+
+fn entries_for(
+    vault: &VaultService,
+    ids: &[String],
+    with_capabilities: bool,
 ) -> Result<Vec<EnvEntry>, String> {
     let metadata = vault.list_metadata().map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
@@ -637,6 +684,13 @@ pub(crate) fn selected_entries(
                 model_entry
             });
         }
+        if with_capabilities {
+            entries.extend(capability_entries(
+                &vault
+                    .list_capability_models(&item.id)
+                    .map_err(|error| error.to_string())?,
+            ));
+        }
         if !item.endpoint_url.trim().is_empty() {
             entries.push(EnvEntry::new(
                 safe_endpoint_env_key(item),
@@ -647,9 +701,18 @@ pub(crate) fn selected_entries(
     Ok(entries)
 }
 
+/// `ENV=model_id` rows for the per-capability models; rows without an env name are not exported.
+fn capability_entries(rows: &[secrethub_storage::CapabilityModelRow]) -> Vec<EnvEntry> {
+    rows.iter()
+        .filter(|row| is_env_key(&row.env_key) && !row.model_id.trim().is_empty())
+        .map(|row| EnvEntry::new(row.env_key.clone(), row.model_id.clone()))
+        .collect()
+}
+
 pub(crate) fn selected_entries_from_metadata(
     metadata: &secrethub_storage::SecretMetadata,
     value: String,
+    capability_rows: &[secrethub_storage::CapabilityModelRow],
 ) -> Vec<EnvEntry> {
     let mut entries = Vec::new();
     if !metadata.env_key.trim().is_empty() {
@@ -664,6 +727,7 @@ pub(crate) fn selected_entries_from_metadata(
         let model_env_key = safe_model_env_key(metadata);
         entries.push(EnvEntry::new(model_env_key, metadata.model_id.clone()));
     }
+    entries.extend(capability_entries(capability_rows));
     if !metadata.endpoint_url.trim().is_empty() {
         entries.push(EnvEntry::new(
             safe_endpoint_env_key(metadata),
@@ -938,7 +1002,7 @@ pub fn export_preview(
     let vault = vault
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?;
-    let entries = selected_entries(vault, &request.secret_ids)?;
+    let entries = export_entries(vault, &request.secret_ids)?;
     let masked = entries
         .iter()
         .map(|entry| EnvEntry::new(&entry.key, "••••••••"))
@@ -959,7 +1023,7 @@ pub fn export_conflicts(
     let directory = validate_export_directory(Path::new(&request.directory))
         .map_err(|error| error.to_string())?;
     let existing = std::fs::read_to_string(directory.join(".env")).unwrap_or_default();
-    let entries = selected_entries(vault, &request.secret_ids)?;
+    let entries = export_entries(vault, &request.secret_ids)?;
     detect_conflicts(&existing, &entries).map_err(|error| error.to_string())
 }
 
@@ -970,7 +1034,7 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
     let vault = vault
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?;
-    let entries = selected_entries(vault, &request.secret_ids)?;
+    let entries = export_entries(vault, &request.secret_ids)?;
     plan::write_project_env(
         Path::new(&request.directory),
         &entries,
@@ -1339,12 +1403,19 @@ mod tests {
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
             "fixture-key".into(),
+            &[secrethub_storage::CapabilityModelRow {
+                capability: "image_gen".into(),
+                model_id: "img-1".into(),
+                env_key: "IMAGE_MODEL".into(),
+            }],
         ))
         .unwrap();
         assert!(rendered.contains("# local project only"));
         assert!(rendered.contains("DEEPSEEK_API_KEY=\"fixture-key\""));
         assert!(rendered.contains("DEEPSEEK_MODEL=\"deepseek-v4.1-flash\""));
         assert!(rendered.contains("DEEPSEEK_BASE_URL=\"https://api.deepseek.com\""));
+        assert!(rendered.contains("IMAGE_MODEL=\"img-1\""));
+        assert!(rendered.find("DEEPSEEK_MODEL").unwrap() < rendered.find("IMAGE_MODEL").unwrap());
         assert!(!rendered.contains("value_type"));
         assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH=\""));
     }

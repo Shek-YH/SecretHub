@@ -27,6 +27,7 @@ export type CapabilitySuggestionBatch = { requestId: string; providerId: string;
 export type BackendAuditEvent = { id: string; operation: string; secret_id?: string | null; result: string; created_at: number };
 export type BackendValidationResult = { id: string; status: string; models_sync_status: string };
 export type BackendModel = { model_id: string; display_name: string; input: string[]; output: string[]; capabilities: string[]; capability_source: string; synced_at: number };
+export type CapabilityModelRow = { capability: string; model_id: string; env_key: string };
 export type BackendModelSync = { id: string; status: string; count: number };
 export type ProjectEnvEntry = { original_key: string; key: string; value: string; source: 'managed' | 'manual'; secret_id?: string | null };
 
@@ -55,6 +56,8 @@ export const backend = {
   validateMany: () => invoke<BackendValidationResult[]>('secret_validate_many'),
   syncModels: (id: string) => invoke<BackendModelSync>('secret_sync_models', { id }),
   models: (id: string) => invoke<BackendModel[]>('secret_models', { id }),
+  capabilityModels: (id: string) => invoke<CapabilityModelRow[]>('secret_capability_models', { id }),
+  setCapabilityModels: (id: string, rows: CapabilityModelRow[]) => invoke<void>('secret_set_capability_models', { id, rows }),
   openExternalUrl: (url: string) => invoke<void>('open_external_url', { url }),
   preview: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<string>('export_preview', { request }),
   export: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<void>('export_env', { request }),

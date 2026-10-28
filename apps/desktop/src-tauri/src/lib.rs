@@ -76,6 +76,8 @@ pub fn run() {
             commands::secret_validate_many,
             commands::secret_sync_models,
             commands::secret_models,
+            commands::secret_capability_models,
+            commands::secret_set_capability_models,
             commands::open_external_url,
             commands::export_preview,
             commands::export_conflicts,

@@ -52,6 +52,44 @@ pub struct ProviderModelRow {
     pub synced_at: i64,
 }
 
+/// A non-chat capability model chosen for a key (the chat model stays in `secrets.model_id`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityModelRow {
+    pub capability: String,
+    pub model_id: String,
+    /// Environment variable name for manual export; empty means "do not export".
+    pub env_key: String,
+}
+
+/// Capabilities that can have a dedicated model besides the chat model, in display order.
+pub const CAPABILITY_MODEL_ORDER: [&str; 9] = [
+    "code",
+    "reasoning",
+    "vision",
+    "image_gen",
+    "video_gen",
+    "tts",
+    "asr",
+    "embedding",
+    "rerank",
+];
+
+/// Default environment variable name for a capability model row.
+pub fn default_capability_env_key(capability: &str) -> Option<&'static str> {
+    Some(match capability {
+        "code" => "CODE_MODEL",
+        "reasoning" => "REASONING_MODEL",
+        "vision" => "VISION_MODEL",
+        "image_gen" => "IMAGE_MODEL",
+        "video_gen" => "VIDEO_MODEL",
+        "tts" => "TTS_MODEL",
+        "asr" => "ASR_MODEL",
+        "embedding" => "EMBEDDING_MODEL",
+        "rerank" => "RERANK_MODEL",
+        _ => return None,
+    })
+}
+
 pub struct NewSecret {
     pub name: String,
     pub provider_id: String,
@@ -235,6 +273,13 @@ impl Database {
                 capability_source TEXT NOT NULL DEFAULT 'unknown',
                 synced_at INTEGER NOT NULL,
                 PRIMARY KEY (secret_id, model_id)
+             );
+             CREATE TABLE IF NOT EXISTS secret_capability_models (
+                secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                capability TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                env_key TEXT NOT NULL,
+                PRIMARY KEY (secret_id, capability)
              );
              CREATE TABLE IF NOT EXISTS model_capability_overrides (
                 provider_id TEXT NOT NULL,
@@ -570,6 +615,60 @@ impl Database {
                 },
             )
             .collect()
+    }
+
+    /// A key's per-capability model choices in display order.
+    pub fn list_capability_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<CapabilityModelRow>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT capability, model_id, env_key FROM secret_capability_models WHERE secret_id = ?1",
+        )?;
+        let mut rows = statement
+            .query_map(params![secret_id], |row| {
+                Ok(CapabilityModelRow {
+                    capability: row.get(0)?,
+                    model_id: row.get(1)?,
+                    env_key: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.sort_by_key(|row| {
+            CAPABILITY_MODEL_ORDER
+                .iter()
+                .position(|item| *item == row.capability)
+                .unwrap_or(usize::MAX)
+        });
+        Ok(rows)
+    }
+
+    /// Replaces all capability model rows of one key atomically. Validation is the caller's job.
+    pub fn replace_capability_models(
+        &self,
+        secret_id: &str,
+        rows: &[CapabilityModelRow],
+    ) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM secret_capability_models WHERE secret_id = ?1",
+            params![secret_id],
+        )?;
+        {
+            let mut insert = transaction.prepare(
+                "INSERT INTO secret_capability_models(secret_id, capability, model_id, env_key) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for row in rows {
+                insert.execute(params![
+                    secret_id,
+                    row.capability,
+                    row.model_id,
+                    row.env_key
+                ])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Stores a confirmed capability override; syncing never touches this table.
