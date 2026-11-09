@@ -279,3 +279,44 @@ describe('change master password', () => {
     expect(within(dialog).getByLabelText('新主密码')).toBeInTheDocument();
   });
 });
+
+describe('secure note, end to end in the app', () => {
+  it('saves a note, hides the body by default, shows it on request and hides it again after switching records', async () => {
+    const calls = mockDesktop();
+    calls.publicFields.mockResolvedValue({});
+    calls.secretFields.mockResolvedValue(['body']);
+    calls.noteBody.mockResolvedValue('line one\nline two');
+    const listSpy = vi.mocked(backend.list);
+    render(<App />);
+    const user = userEvent.setup();
+    await screen.findByText('Fake Login');
+
+    // Write a few lines and save.
+    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    await user.click(within(screen.getByRole('dialog', { name: '你要保存什么？' })).getByRole('button', { name: /安全笔记/ }));
+    const form = screen.getByRole('dialog', { name: '添加安全笔记' });
+    await user.type(within(form).getByLabelText('标题'), '测试笔记');
+    await user.type(within(form).getByLabelText('正文'), 'line one{enter}line two');
+    listSpy.mockResolvedValue([...ROWS, row({ id: 'new-id', name: '测试笔记', value_type: 'note' })]);
+    await user.click(within(form).getByRole('button', { name: '保存凭据' }));
+    await waitFor(() => expect(calls.create).toHaveBeenCalled());
+    expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({ itemType: 'note', name: '测试笔记', fields: { body: 'line one\nline two' } }));
+
+    // The detail does not load the body until asked.
+    await user.click(await within(listPanel()).findByText('测试笔记'));
+    const detail = screen.getByRole('region', { name: '凭据详情' });
+    await within(detail).findByRole('button', { name: '显示正文' });
+    expect(calls.noteBody).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('line one');
+
+    await user.click(within(detail).getByRole('button', { name: '显示正文' }));
+    expect(calls.noteBody).toHaveBeenCalledWith('new-id');
+    await waitFor(() => expect(screen.getByRole('region', { name: '凭据详情' }).textContent).toContain('line one'));
+
+    // Switching to another record and back hides it again.
+    await user.click(within(listPanel()).getByText('Fake Login'));
+    await user.click(within(listPanel()).getByText('测试笔记'));
+    await screen.findByRole('button', { name: '显示正文' });
+    expect(document.body.textContent).not.toContain('line one');
+  });
+});
