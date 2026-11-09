@@ -1,8 +1,9 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
-import { App, SecretForm, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { App, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
 import { AUTO_LOCK_EVENT, backend, isAutoLockError } from './lib/backend';
 import { getTranslation } from './i18n/translations';
+import { SecretForm } from './SecretForm';
 
 describe('SecretHub desktop shell', () => {
   it('drops to the unlock screen with a notice and closes open forms when the vault auto-locks', async () => {
@@ -35,9 +36,13 @@ describe('SecretHub desktop shell', () => {
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getByRole('button', { name: '服务商' }));
     expect(screen.getByRole('heading', { name: '服务商' })).toBeInTheDocument();
-    expect(screen.getByText('OpenAI')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: '配置' })[9]);
-    expect(screen.getAllByRole('combobox')[1]).toHaveValue('gpt-5.6-sol');
+    const openaiCard = screen.getByText('OpenAI').closest('article') as HTMLElement;
+    await user.click(within(openaiCard).getByRole('button', { name: '配置' }));
+    const form = screen.getByRole('dialog', { name: '添加凭据' });
+    expect(within(form).getByRole('button', { name: 'OpenAI' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(form).getByLabelText('名称')).toHaveValue('OpenAI');
+    await user.click(within(form).getByRole('button', { name: /高级设置/ }));
+    expect(within(form).getByLabelText('模型')).toHaveValue('gpt-5.6-sol');
     expect(screen.getByDisplayValue('https://api.openai.com/v1')).toBeInTheDocument();
   });
 
@@ -70,43 +75,47 @@ describe('SecretHub desktop shell', () => {
     expect(screen.queryByRole('button', { name: '一键检测 API Key' })).not.toBeInTheDocument();
   });
 
-  it('filters the provider picker when adding an API key', async () => {
+  it('filters the full provider list when adding an API key', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
-    await user.click(screen.getByRole('button', { name: /^API KEY/ }));
-    const search = screen.getByPlaceholderText('搜索服务商');
-    await user.type(search, 'DeepSeek');
-    expect(screen.getByRole('button', { name: /DeepSeek/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /OpenAI/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '更多…' }));
+    const panel = screen.getByRole('group', { name: '全部服务商' });
+    expect(within(panel).getByRole('button', { name: 'Groq' })).toBeInTheDocument();
+    await user.type(within(panel).getByPlaceholderText('搜索服务商'), 'DeepSeek');
+    expect(within(panel).getByRole('button', { name: 'DeepSeek' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Groq' })).not.toBeInTheDocument();
   });
 
-  it('opens provider templates before the secret form and makes env key optional', async () => {
+  it('opens the one-screen API key form, picks a provider chip and makes env key optional', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    const form = screen.getByRole('dialog', { name: '添加凭据' });
+    expect(within(form).getByLabelText('粘贴 API Key')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: 'DeepSeek' }));
+    expect(within(form).getByLabelText('名称')).toHaveValue('DeepSeek');
+    expect(within(form).getByRole('button', { name: '从官网获取 Key' })).toBeInTheDocument();
+    expect(within(form).getByText('前往官网生成 / 更新 ↗')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: /高级设置/ }));
+    expect(within(form).getByPlaceholderText('OPENAI_API_KEY')).not.toBeRequired();
+    expect(within(form).getByRole('option', { name: 'DeepSeek V4 Flash · deepseek-v4-flash' })).toBeInTheDocument();
+  });
+
+  it('opens a type-specific Token form via the other-types link without showing the model catalog', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    await user.click(screen.getByRole('button', { name: /添加其他类型/ }));
     expect(screen.getByRole('button', { name: /^API KEY/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^TOKEN/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^URL/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Password/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Text/ })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^API KEY/ }));
-    await user.click(screen.getByRole('button', { name: /DeepSeek 3 个模型模板/ }));
-    expect(screen.getAllByDisplayValue('DeepSeek').length).toBeGreaterThan(0);
-    const envKey = screen.getByPlaceholderText('OPENAI_API_KEY');
-    expect(envKey).not.toBeRequired();
-    expect(screen.getByText('前往官网生成 / 更新 ↗')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'DeepSeek V4 Flash · deepseek-v4-flash' })).toBeInTheDocument();
-  });
-
-  it('opens a type-specific Token form without showing the model catalog', async () => {
-    render(<App />);
-    const user = (await import('@testing-library/user-event')).default.setup();
-    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
     await user.click(screen.getByRole('button', { name: /^TOKEN/ }));
     expect(screen.getByText('TOKEN / TOKEN')).toBeInTheDocument();
     expect(screen.queryByText('TEMPLATE CATALOG / PROVIDERS')).not.toBeInTheDocument();
     expect(screen.queryByText('API Base URL')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('粘贴 API Key')).not.toBeInTheDocument();
   });
 
   it('loads editable metadata and permits saving without exposing the old value', async () => {
@@ -115,7 +124,7 @@ describe('SecretHub desktop shell', () => {
     await user.click(screen.getByRole('button', { name: '编辑' }));
     expect(screen.getByDisplayValue('OpenAI Main')).toBeInTheDocument();
     expect(screen.getByDisplayValue('OPENAI_API_KEY')).toBeInTheDocument();
-    const value = screen.getByPlaceholderText('留空则保留原值');
+    const value = screen.getByPlaceholderText('留空则保持不变');
     expect(value).not.toBeRequired();
     expect(screen.getByText('复制 API Key')).toBeInTheDocument();
   });
@@ -319,5 +328,55 @@ describe('Tag picker in the secret form', () => {
     await user.type(screen.getByLabelText(/Secret 值/), 'v');
     await user.click(screen.getByRole('button', { name: '保存凭据' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tags: ['ai', 'ops'] }));
+  });
+});
+
+describe('shell conveniences', () => {
+  it('focuses the search box with Ctrl+K and shows the matching hint', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    expect(screen.getByText('Ctrl K')).toBeInTheDocument();
+    const search = screen.getByRole('textbox', { name: '搜索凭据、服务商或标签' });
+    expect(search).not.toHaveFocus();
+    await user.keyboard('{Control>}k{/Control}');
+    expect(search).toHaveFocus();
+  });
+
+  it('jumps back to the list from another view with Ctrl+K', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    expect(screen.queryByRole('textbox', { name: '搜索凭据、服务商或标签' })).not.toBeInTheDocument();
+    await user.keyboard('{Control>}k{/Control}');
+    expect(await screen.findByRole('textbox', { name: '搜索凭据、服务商或标签' })).toHaveFocus();
+  });
+
+  it('masks the detail value with dots only, without a fake tail', () => {
+    render(<App />);
+    const masked = document.querySelector('.masked-value') as HTMLElement;
+    expect(masked.textContent).toMatch(/^•+$/);
+    expect(masked.textContent).not.toMatch(/Km2/);
+  });
+
+  it('shows relative update times in the list', () => {
+    render(<App />);
+    expect(screen.getByText('OpenAI · 2 小时前')).toBeInTheDocument();
+    expect(screen.getByText('Anthropic · 1 天前')).toBeInTheDocument();
+  });
+
+  it('groups providers into common and collapsed more, and searching reveals matches across both', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    expect(screen.getByText('DeepSeek')).toBeInTheDocument();
+    expect(screen.queryByText('Groq')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: /^更多服务商（\d+）/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.type(screen.getByPlaceholderText('搜索服务商'), 'groq');
+    expect(screen.getByText('Groq')).toBeInTheDocument();
+    expect(screen.queryByText('DeepSeek')).not.toBeInTheDocument();
+    await user.clear(screen.getByPlaceholderText('搜索服务商'));
+    await user.click(toggle);
+    expect(screen.getByText('Groq')).toBeInTheDocument();
   });
 });

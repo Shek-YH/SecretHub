@@ -169,3 +169,31 @@ body { background: #071126; color: #eef4ff; }
 .media-error { white-space: pre-wrap; overflow-wrap: anywhere; }
 .media-request-file { display: grid; gap: 2px; margin: 6px 0; }
 .media-request-file code { overflow-wrap: anywhere; }
+.provider-chip-section { margin-top: 14px; }
+.provider-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.provider-chip { padding: 5px 10px; border: 1px solid #203760; border-radius: 14px; background: #091733; color: #b9c9ee; font-size: 11px; }
+.provider-chip:hover { border-color: #5278ff; }
+.provider-chip.active { border-color: #5278ff; background: #1a2f66; color: #eef4ff; }
+.provider-chip-more { border-style: dashed; }
+.provider-more-panel { margin-top: 8px; padding: 10px; border: 1px solid #203760; border-radius: 8px; max-height: 220px; overflow-y: auto; }
+.provider-more-panel input { margin-top: 0; }
+.provider-panel-search { margin-top: 18px; max-width: 360px; }
+.key-field { margin-top: 14px; }
+.key-field > label { margin-top: 0; }
+.key-input-row { display: flex; gap: 8px; align-items: center; }
+.key-input-row input { flex: 1; }
+.key-input-row button { margin-top: 6px; white-space: nowrap; }
+.detect-hint { margin-top: 6px; }
+.capture-button { white-space: nowrap; }
+.default-model-line { margin-top: 12px; }
+.advanced-toggle { margin-top: 14px; border: 0; background: transparent; color: #85a3ff; font-size: 11px; padding: 4px 0; }
+.advanced-section { margin-top: 4px; padding-top: 2px; border-top: 1px dashed #203760; }
+.other-types-link { margin: 12px auto 0; text-align: center; }
+.provider-more-toggle { margin-top: 18px; }
+.filterable-select { position: relative; }
+.filterable-list { position: absolute; z-index: 5; left: 0; right: 0; max-height: 220px; overflow-y: auto; margin-top: 2px; border: 1px solid #31518e; border-radius: 6px; background: #0b1a36; box-shadow: 0 12px 30px rgba(0, 0, 0, .4); }
+.filterable-group-label { padding: 6px 10px 2px; color: #7d918a; font-size: 10px; }
+.filterable-option { padding: 6px 10px; font-size: 11px; color: #d9e4ff; cursor: pointer; overflow-wrap: anywhere; }
+.filterable-option:hover, .filterable-option[aria-selected="true"] { background: #1a2f66; }
+.filterable-note { padding: 6px 10px; color: #7d918a; font-size: 10px; }
+.cap-row .filterable-select input { margin-top: 0; }

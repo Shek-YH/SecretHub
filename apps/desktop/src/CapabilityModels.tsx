@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { BackendModel, CapabilityModelRow } from './lib/backend';
 import type { getTranslation } from './i18n/translations';
+import { FilterableSelect, SEARCH_THRESHOLD } from './FilterableSelect';
 
 type T = ReturnType<typeof getTranslation>;
 
@@ -64,7 +65,7 @@ export function CapabilityModelsEditor({ t, models, value, onChange, primaryMode
       const options = row?.model_id && !candidates.includes(row.model_id) ? [row.model_id, ...candidates] : candidates;
       return <div className="cap-row" key={capability}>
         <span className="cap-name">{label}</span>
-        {options.length === 0 ? <span className="cap-empty">{t.cap.noModels}</span> : <select aria-label={`${label} ${t.cap.modelAria}`} value={row?.model_id ?? ''} onChange={(event) => chooseModel(capability, event.target.value)}><option value="">{t.cap.notSet}</option>{options.map((id) => <option value={id} key={id}>{id}</option>)}</select>}
+        {options.length === 0 ? <span className="cap-empty">{t.cap.noModels}</span> : candidates.length > SEARCH_THRESHOLD ? <FilterableSelect ariaLabel={`${label} ${t.cap.modelAria}`} value={row?.model_id ?? ''} onChange={(id) => chooseModel(capability, id)} placeholder={t.quick.modelSearchPlaceholder} truncatedLabel={t.quick.modelTruncated} noMatchLabel={t.quick.modelNoMatch} groups={[{ options: candidates.map((id) => ({ id, text: id })) }]} /> : <select aria-label={`${label} ${t.cap.modelAria}`} value={row?.model_id ?? ''} onChange={(event) => chooseModel(capability, event.target.value)}><option value="">{t.cap.notSet}</option>{options.map((id) => <option value={id} key={id}>{id}</option>)}</select>}
         <input aria-label={`${label} ${t.cap.envAria}`} value={row?.env_key ?? ''} disabled={!row?.model_id} placeholder={DEFAULT_CAPABILITY_ENV[capability]} onChange={(event) => { touched.current.add(capability); update(capability, { env_key: event.target.value.toUpperCase() }); }} />
       </div>;
     })}

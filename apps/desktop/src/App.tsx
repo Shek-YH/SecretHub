@@ -5,42 +5,24 @@ import { CaptureRequestBanner, MediaRequestBanner, SyncRequestBanner } from './A
 import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
 import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
-import { TagField } from './TagPicker';
 import { CatalogSettings } from './CatalogSettings';
-import { buildModelOptions } from './modelOptions';
-import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, providerKind, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
-import { CAPABILITY_ORDER, CapabilityModelsEditor, CapabilityModelsPanel, DEFAULT_CAPABILITY_ENV, capabilityError, capabilityLabel, needsCapabilitySection, normalizeRows } from './CapabilityModels';
+import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, groupProviders, providerKind, providerTemplates, resolveProviderId, type ProviderTemplate } from './providers';
+import { SecretForm } from './SecretForm';
+import type { CredentialPreset, SecretMetadata, SecretRequest } from './secretTypes';
+import { formatRelativeTime } from './time';
+import { CAPABILITY_ORDER, CapabilityModelsPanel, DEFAULT_CAPABILITY_ENV, capabilityError, capabilityLabel, needsCapabilitySection, normalizeRows } from './CapabilityModels';
 
-type SecretMetadata = {
-  id: string;
-  name: string;
-  envKey: string;
-  provider: string;
-  description?: string;
-  tags: string[];
-  status: string;
-  updated: string;
-  favorite?: boolean;
-  valueType?: string;
-  category?: string;
-  scope?: string;
-  archived?: boolean;
-  modelId?: string;
-  modelEnvKey?: string;
-  endpointUrl?: string;
-  endpointEnvKey?: string;
-  modelsSyncedAt?: number;
-  modelsSyncStatus?: string;
-};
 type Profile = { id: string; name: string; description: string; secret_ids: string[] };
 type Navigation = 'all' | 'api_key' | 'token' | 'url' | 'password' | 'text' | 'providers' | 'profiles' | 'projects' | 'media' | 'settings' | 'audit';
-type CredentialPreset = { provider: string; name: string; envKey: string; modelId: string; modelEnvKey: string; endpointUrl: string; endpointEnvKey: string };
 
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+const SEARCH_SHORTCUT_LABEL = IS_MAC ? '⌘ K' : 'Ctrl K';
+const nowSeconds = Math.floor(Date.now() / 1000);
 const demoSecrets: SecretMetadata[] = [
-  { id: 'openai-main', name: 'OpenAI Main', envKey: 'OPENAI_API_KEY', provider: 'OpenAI', tags: ['ai', 'production'], status: 'valid', updated: '2h ago', favorite: true, valueType: 'api_key', category: 'ai', scope: 'global' },
-  { id: 'anthropic-lab', name: 'Anthropic Lab', envKey: 'ANTHROPIC_API_KEY', provider: 'Anthropic', tags: ['ai', 'research'], status: 'valid', updated: '1d ago', valueType: 'api_key', category: 'ai', scope: 'global' },
-  { id: 'supabase-cuecut', name: 'Supabase CueCut', envKey: 'SUPABASE_URL', provider: 'Supabase', tags: ['database', 'cuecut'], status: 'unknown', updated: '3d ago', valueType: 'url', category: 'database', scope: 'project' },
-  { id: 'github-build', name: 'GitHub Build', envKey: 'GITHUB_TOKEN', provider: 'GitHub', tags: ['ci', 'developer'], status: 'valid', updated: '5d ago', valueType: 'token', category: 'git', scope: 'global' },
+  { id: 'openai-main', name: 'OpenAI Main', envKey: 'OPENAI_API_KEY', provider: 'OpenAI', tags: ['ai', 'production'], status: 'valid', updated: '', updatedAt: nowSeconds - 7200, favorite: true, valueType: 'api_key', category: 'ai', scope: 'global' },
+  { id: 'anthropic-lab', name: 'Anthropic Lab', envKey: 'ANTHROPIC_API_KEY', provider: 'Anthropic', tags: ['ai', 'research'], status: 'valid', updated: '', updatedAt: nowSeconds - 86400, valueType: 'api_key', category: 'ai', scope: 'global' },
+  { id: 'supabase-cuecut', name: 'Supabase CueCut', envKey: 'SUPABASE_URL', provider: 'Supabase', tags: ['database', 'cuecut'], status: 'unknown', updated: '', updatedAt: nowSeconds - 259200, valueType: 'url', category: 'database', scope: 'project' },
+  { id: 'github-build', name: 'GitHub Build', envKey: 'GITHUB_TOKEN', provider: 'GitHub', tags: ['ci', 'developer'], status: 'valid', updated: '', updatedAt: nowSeconds - 432000, valueType: 'token', category: 'git', scope: 'global' },
 ];
 const demoUsageCounts: Record<string, number> = { 'openai-main': 4, 'anthropic-lab': 2, 'supabase-cuecut': 1, 'github-build': 3 };
 
@@ -103,6 +85,24 @@ export function App() {
     backend.capabilityModels(selectedId).then((rows) => { if (!cancelled) setCapRows(rows); }).catch(() => { if (!cancelled) setCapRows([]); });
     return () => { cancelled = true; };
   }, [selectedId, selectedSyncedAt, modelsRevision]);
+  // Ctrl+K (Cmd+K on macOS) jumps to the credential search, switching back to the list view first if needed.
+  const searchRef = useRef<HTMLInputElement>(null);
+  const pendingSearchFocus = useRef(false);
+  const locked = Boolean(vaultStatus && !vaultStatus.unlocked);
+  const listViewActive = !locked && !['media', 'settings', 'providers', 'profiles', 'projects', 'audit'].includes(activeNav);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'k' || !(IS_MAC ? event.metaKey : event.ctrlKey) || event.altKey || locked) return;
+      event.preventDefault();
+      if (listViewActive) searchRef.current?.focus();
+      else { pendingSearchFocus.current = true; setActiveNav('all'); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [listViewActive, locked]);
+  useEffect(() => {
+    if (pendingSearchFocus.current && listViewActive) { pendingSearchFocus.current = false; searchRef.current?.focus(); }
+  }, [listViewActive]);
   const filtered = useMemo(() => {
     const result = secrets.filter((secret) => `${secret.name} ${secret.envKey} ${secret.provider} ${secret.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && (activeNav === 'all' || activeNav === 'api_key' || activeNav === 'token' || activeNav === 'url' || activeNav === 'password' || activeNav === 'text' ? (activeNav === 'all' || secret.valueType === activeNav) : true) && (categoryFilter === 'all' || secret.category === categoryFilter) && (statusFilter === 'all' || secret.status === statusFilter) && (!favoriteOnly || Boolean(secret.favorite)) && (includeArchived || !secret.archived));
     return [...result].sort((left, right) => sortMode === 'name' ? left.name.localeCompare(right.name) : sortMode === 'usage' ? (usageCounts[right.id] ?? 0) - (usageCounts[left.id] ?? 0) : 0);
@@ -115,7 +115,7 @@ export function App() {
       const [items, audit] = await Promise.all([backend.list(query), backend.audit()]);
       const counts = audit.reduce<Record<string, number>>((result, event) => { if (event.operation === 'env_exported' && event.secret_id) result[event.secret_id] = (result[event.secret_id] ?? 0) + 1; return result; }, {});
       setUsageCounts(counts);
-      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status })));
+      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: '', updatedAt: secret.updated_at, valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status })));
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
   }
@@ -255,7 +255,7 @@ export function App() {
     try { await backend.setCapabilityModels(secret.id, next); setCapRows(next); setModelMessage(`${t.cap.defaultSet}: ${capabilityLabel(t, capability)} · ${modelId}`); } catch (error) { setModelMessage(String(error)); }
   }
 
-  // New aggregator keys: validate and sync right after saving, then show the detail with the capability section.
+  // New API keys: validate and sync right after saving, then show the detail (with the capability section for aggregators).
   async function openAfterSync(id: string) {
     setActiveNav('all'); setSelectedId(id); setModelSyncing(true);
     try { await backend.validate(id); await refreshSecrets(); setModelsRevision((value) => value + 1); setModelMessage(t.cap.autoSyncDone); }
@@ -295,7 +295,7 @@ export function App() {
     const { capability_models: capabilityModels, ...request } = fullRequest;
     if (editingSecret) {
       if (isTauriRuntime()) { await backend.update(editingSecret.id, request); if (capabilityModels) await backend.setCapabilityModels(editingSecret.id, capabilityModels); }
-      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, description: request.description, tags: request.tags, updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key, endpointUrl: request.endpoint_url, endpointEnvKey: request.endpoint_env_key } : secret));
+      setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, description: request.description, tags: request.tags, updated: '', updatedAt: Math.floor(Date.now() / 1000), valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key, endpointUrl: request.endpoint_url, endpointEnvKey: request.endpoint_env_key } : secret));
       setEditingSecret(null);
       if (isTauriRuntime()) await refreshSecrets();
       return;
@@ -303,10 +303,10 @@ export function App() {
     if (isTauriRuntime()) {
       const createdId = await backend.create(request);
       await refreshSecrets();
-      if (request.value_type === 'api_key' && providerKind(request.provider_id) === 'aggregator') void openAfterSync(createdId);
+      if (request.value_type === 'api_key') void openAfterSync(createdId);
       return;
     }
-    const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, description: request.description, tags: request.tags, status: 'unknown', updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key, endpointUrl: request.endpoint_url, endpointEnvKey: request.endpoint_env_key };
+    const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, description: request.description, tags: request.tags, status: 'unknown', updated: '', updatedAt: Math.floor(Date.now() / 1000), valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key, endpointUrl: request.endpoint_url, endpointEnvKey: request.endpoint_env_key };
     setSecrets((current) => [localSecret, ...current]);
   }
 
@@ -365,10 +365,10 @@ export function App() {
         {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}
         {reviewCaps && <CapabilitySuggestionModal batch={reviewCaps} t={t} onClose={() => setReviewCaps(null)} onDone={capsReviewed} />}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked && activeNav !== 'media' ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'media' ? <MediaLibrary t={t} revision={mediaRevision} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked && activeNav !== 'media' ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'media' ? <MediaLibrary t={t} revision={mediaRevision} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} secrets={secrets} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
-              <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><select aria-label={t.list.sort} value={sortMode} onChange={(event) => setSortMode(event.target.value as 'updated' | 'usage' | 'name')}><option value="updated">{t.list.sortUpdated}</option><option value="usage">{t.list.sortUsage}</option><option value="name">{t.list.sortName}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
+              <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>{SEARCH_SHORTCUT_LABEL}</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><select aria-label={t.list.sort} value={sortMode} onChange={(event) => setSortMode(event.target.value as 'updated' | 'usage' | 'name')}><option value="updated">{t.list.sortUpdated}</option><option value="usage">{t.list.sortUsage}</option><option value="name">{t.list.sortName}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
               {selectedIds.length > 0 && <div className="selection-actions"><span>{selectedIds.length} {t.list.selected}</span><button onClick={() => setShowExport(true)}>{t.actions.export}</button><button onClick={() => setShowProfilePrompt(true)}>{t.actions.profile}</button><button onClick={() => setSelectedIds([])}>×</button></div>}
             </div>
             <div className="workspace-grid">
@@ -382,7 +382,7 @@ export function App() {
               <section className="detail-panel" aria-label={t.detail.title}>
                 {selected ? <>
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {selected.provider.toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
-                  <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value">••••••••••••••••Km2</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
+                  <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value" aria-label={t.detail.masked}>••••••••••••••••</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
                   <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} />{selected.modelId && <Field label={t.form.model} value={selected.modelId} />}{selected.endpointUrl && <Field label={t.form.endpointUrl} value={selected.endpointUrl} />}<div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
                   <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}{selected.valueType === 'api_key' && <ModelSyncSection t={t} locale={locale} status={selected.modelsSyncStatus ?? ''} syncedAt={selected.modelsSyncedAt ?? 0} models={models} syncing={modelSyncing} message={modelMessage} onSync={() => void syncModels(selected.id)} currentModelId={selected.modelId} onSetDefault={(modelId) => void setDefaultModel(selected, modelId)} capabilityRows={capRows} onSetCapabilityDefault={(capability, modelId) => void setCapabilityDefault(selected, capability, modelId)} />}{selected.valueType === 'api_key' && needsCapabilitySection(providerKind(selected.provider), models) && <CapabilityModelsPanel key={selected.id} t={t} models={models} rows={capRows} primaryModelId={selected.modelId} reservedEnvKeys={[selected.envKey, selected.modelEnvKey ?? '', selected.endpointEnvKey ?? '']} onSave={async (rows) => { await backend.setCapabilityModels(selected.id, rows); setCapRows(rows); }} />}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
                   <div className="detail-note"><span className="lock-small">◆</span><span>{t.security.warning}</span></div>
@@ -394,7 +394,7 @@ export function App() {
         <footer className="app-footer"><span>SecretHub / {t.footer.version}</span><span>{t.footer.vault} · {t.footer.synced}</span></footer>
       </main>
       {captureName && <CaptureModal t={t} providerName={captureName} onCaptured={(secretId) => captureDone.current(secretId)} onClose={() => { setCaptureName(null); void refreshSecrets(); setModelsRevision((value) => value + 1); }} />}
-      {showForm && <SecretForm t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} preset={credentialPreset} syncedModels={editingSecret && editingSecret.id === selectedId ? models : []} capabilityRows={editingSecret && editingSecret.id === selectedId ? capRows : []} onCapture={(providerId, providerName) => void startCapture(providerId, providerName)} onClose={() => { setShowForm(false); setEditingSecret(null); setCredentialPreset(null); }} onSave={saveSecret} />}
+      {showForm && <SecretForm t={t} knownTags={secrets.flatMap((secret) => secret.tags)} existingSecrets={secrets.map((secret) => ({ name: secret.name, provider: secret.provider, archived: secret.archived }))} initial={editingSecret} preset={credentialPreset} syncedModels={editingSecret && editingSecret.id === selectedId ? models : []} capabilityRows={editingSecret && editingSecret.id === selectedId ? capRows : []} onCapture={(providerId, providerName) => void startCapture(providerId, providerName)} onClose={() => { setShowForm(false); setEditingSecret(null); setCredentialPreset(null); }} onSave={saveSecret} />}
       {showExport && <ExportPanel t={t} selectedIds={selectedIds} onClose={() => setShowExport(false)} onExported={() => void refreshSecrets()} />}
       {showImport && <ImportPanel t={t} onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); void refreshSecrets(); }} />}
       {showProfilePrompt && <ProfilePrompt t={t} selectedIds={selectedIds} onClose={() => setShowProfilePrompt(false)} onSaved={() => { setShowProfilePrompt(false); setActiveNav('profiles'); }} />}
@@ -451,18 +451,35 @@ function CapabilityDefaultMenu({ t, model, rows, onPick }: { t: ReturnType<typeo
 }
 
 function SecretRow({ secret, selected, checked, t, onClick, onToggle }: { secret: SecretMetadata; selected: boolean; checked: boolean; t: ReturnType<typeof getTranslation>; onClick: () => void; onToggle: () => void }) {
-  return <article className={`secret-row ${selected ? 'selected' : ''}`} onClick={onClick}><input type="checkbox" checked={checked} onChange={onToggle} onClick={(event) => event.stopPropagation()} aria-label={`${t.actions.export} ${secret.name}`} /><div className="row-avatar">{secret.provider.slice(0, 1)}</div><div className="row-copy"><strong>{secret.name}</strong><span>{secret.envKey}</span><small>{secret.provider} · {secret.updated}</small></div><span className={`row-status ${secret.status}`} />{secret.favorite && <span className="favorite">★</span>}</article>;
+  return <article className={`secret-row ${selected ? 'selected' : ''}`} onClick={onClick}><input type="checkbox" checked={checked} onChange={onToggle} onClick={(event) => event.stopPropagation()} aria-label={`${t.actions.export} ${secret.name}`} /><div className="row-avatar">{secret.provider.slice(0, 1)}</div><div className="row-copy"><strong>{secret.name}</strong><span>{secret.envKey}</span><small>{secret.provider} · {secret.updatedAt ? formatRelativeTime(secret.updatedAt, t.time) : secret.updated}</small></div><span className={`row-status ${secret.status}`} />{secret.favorite && <span className="favorite">★</span>}</article>;
 }
 
 function Field({ label, value }: { label: string; value: string }) { return <div><span className="field-label">{label}</span><strong className="field-value">{value}</strong></div>; }
 
-function ProviderPanel({ t, onConfigure, onCapture }: { t: ReturnType<typeof getTranslation>; onConfigure: (preset: CredentialPreset) => void; onCapture: (provider: ProviderTemplate) => void }) {
+function ProviderPanel({ t, secrets, onConfigure, onCapture }: { t: ReturnType<typeof getTranslation>; secrets: SecretMetadata[]; onConfigure: (preset: CredentialPreset) => void; onCapture: (provider: ProviderTemplate) => void }) {
+  const [query, setQuery] = useState('');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const usedProviderIds = secrets.filter((secret) => !secret.archived).map((secret) => resolveProviderId(secret.provider)).filter((id): id is string => Boolean(id));
+  const allGroups = groupProviders(providerTemplates, usedProviderIds);
+  const groups = groupProviders(providerTemplates, usedProviderIds, query);
+  const showMore = moreOpen || groups.searching;
   async function openWebsite(url: string) { if (isTauriRuntime()) await backend.openExternalUrl(url); else window.open(url, '_blank', 'noopener,noreferrer'); }
   function configure(provider: ProviderTemplate) {
     const model = provider.models.find((item) => item.id === provider.defaultModel) ?? provider.models[0];
-    onConfigure({ provider: provider.id, name: `${provider.name} · ${model.label}`, envKey: defaultApiKeyEnvKey(provider.id), modelId: model.id, modelEnvKey: model.envKey, endpointUrl: provider.baseUrl, endpointEnvKey: defaultEndpointEnvKey(provider.id) });
+    onConfigure({ provider: provider.id, name: provider.name, envKey: defaultApiKeyEnvKey(provider.id), modelId: model.id, modelEnvKey: model.envKey, endpointUrl: provider.baseUrl, endpointEnvKey: defaultEndpointEnvKey(provider.id) });
   }
-  return <section className="settings-panel provider-panel"><div className="settings-heading"><span className="section-kicker">{t.providerPanel.kicker}</span><h2>{t.nav.providers}</h2><p>{t.providerPanel.subtitle}</p></div><div className="provider-directory-grid">{providerTemplates.map((provider) => <article className="provider-directory-card" key={provider.id}><div className="provider-directory-heading"><div><strong>{provider.name}</strong><span>{provider.models.length} {t.providerPanel.templates}</span></div><span className="provider-dot green" /></div><div className="provider-models">{provider.models.slice(0, 4).map((model) => <span key={model.id}>{model.label}</span>)}{provider.models.length > 4 && <span>+ {provider.models.length - 4}</span>}</div><div className="provider-directory-url">{provider.baseUrl || t.providerPanel.endpoint}</div><div className="provider-card-actions"><button className="secondary-button" onClick={() => configure(provider)}>{t.providerPanel.configure}</button>{provider.keyUrl && <button className="inline-link" onClick={() => void openWebsite(provider.keyUrl)}>{t.providerPanel.officialKey}</button>}{provider.keyUrl && <button className="inline-link" onClick={() => onCapture(provider)}>{t.capture.button}</button>}</div></article>)}</div><div className="form-security"><span>◆</span>{t.providerPanel.security}</div></section>;
+  const card = (provider: ProviderTemplate) => <article className="provider-directory-card" key={provider.id}><div className="provider-directory-heading"><div><strong>{provider.name}</strong><span>{provider.models.length} {t.providerPanel.templates}</span></div><span className="provider-dot green" /></div><div className="provider-models">{provider.models.slice(0, 4).map((model) => <span key={model.id}>{model.label}</span>)}{provider.models.length > 4 && <span>+ {provider.models.length - 4}</span>}</div><div className="provider-directory-url">{provider.baseUrl || t.providerPanel.endpoint}</div><div className="provider-card-actions"><button className="secondary-button" onClick={() => configure(provider)}>{t.providerPanel.configure}</button>{provider.keyUrl && <button className="inline-link" onClick={() => void openWebsite(provider.keyUrl)}>{t.providerPanel.officialKey}</button>}{provider.keyUrl && <button className="inline-link" onClick={() => onCapture(provider)}>{t.capture.button}</button>}</div></article>;
+  return <section className="settings-panel provider-panel">
+    <div className="settings-heading"><span className="section-kicker">{t.providerPanel.kicker}</span><h2>{t.nav.providers}</h2><p>{t.providerPanel.subtitle}</p></div>
+    <input className="provider-search-input provider-panel-search" aria-label={t.form.providerSearch} placeholder={t.form.providerSearch} value={query} onChange={(event) => setQuery(event.target.value)} />
+    <div className="provider-directory-grid">{groups.common.map(card)}</div>
+    {groups.searching && groups.common.length === 0 && groups.more.length === 0 && <div className="empty-state provider-empty"><strong>{t.form.providerSearchEmpty}</strong></div>}
+    {groups.more.length > 0 && <>
+      <button type="button" className="advanced-toggle provider-more-toggle" aria-expanded={showMore} onClick={() => setMoreOpen((open) => !open)}><span aria-hidden="true">{showMore ? '▾' : '▸'}</span> {t.quick.moreCount.replace('{n}', String(groups.searching ? groups.more.length : allGroups.more.length))}</button>
+      {showMore && <div className="provider-directory-grid">{groups.more.map(card)}</div>}
+    </>}
+    <div className="form-security"><span>◆</span>{t.providerPanel.security}</div>
+  </section>;
 }
 
 function SettingsPanel({ t, locale, onCatalogUpdated }: { t: ReturnType<typeof getTranslation>; locale: Locale; onCatalogUpdated: () => void }) {
@@ -554,98 +571,6 @@ export function McpPlanBanner({ plan, t, onReview }: { plan: PendingPlan; t: Ret
 }
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }
-
-type SecretRequest = { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; capability_models?: CapabilityModelRow[] };
-type CredentialType = 'api_key' | 'token' | 'url' | 'password' | 'text';
-
-export function SecretForm({ t, knownTags, initial, preset, syncedModels = [], capabilityRows = [], onCapture, onClose, onSave }: { t: ReturnType<typeof getTranslation>; knownTags: string[]; initial: SecretMetadata | null; preset?: CredentialPreset | null; syncedModels?: BackendModel[]; capabilityRows?: CapabilityModelRow[]; onCapture?: (providerId: string, providerName: string) => void; onClose: () => void; onSave: (request: SecretRequest) => Promise<void> }) {
-  const existingProvider = initial ? providerTemplates.find((item) => item.id === initial.provider || item.name === initial.provider)?.id ?? 'custom' : preset?.provider ?? '';
-  const [mode, setMode] = useState<'type' | 'provider' | 'form'>(initial || preset ? 'form' : 'type');
-  const [credentialType, setCredentialType] = useState<CredentialType>((initial?.valueType as CredentialType) ?? 'api_key');
-  const [name, setName] = useState(initial?.name ?? preset?.name ?? '');
-  const [envKey, setEnvKey] = useState(initial?.envKey ?? preset?.envKey ?? '');
-  const [provider, setProvider] = useState(existingProvider);
-  const [providerQuery, setProviderQuery] = useState('');
-  const [value, setValue] = useState('');
-  const [valueType, setValueType] = useState(initial?.valueType ?? 'api_key');
-  const [category, setCategory] = useState(initial?.category ?? 'other');
-  const [scope, setScope] = useState(initial?.scope ?? 'global');
-  const [favorite, setFavorite] = useState(initial?.favorite ?? false);
-  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
-  const [notes, setNotes] = useState(initial?.description ?? '');
-  const [modelId, setModelId] = useState(initial?.modelId ?? preset?.modelId ?? '');
-  const [modelEnvKey, setModelEnvKey] = useState(initial?.modelEnvKey ?? preset?.modelEnvKey ?? '');
-  const [endpointUrl, setEndpointUrl] = useState(initial?.endpointUrl ?? preset?.endpointUrl ?? '');
-  const [endpointEnvKey, setEndpointEnvKey] = useState(initial?.endpointEnvKey ?? preset?.endpointEnvKey ?? '');
-  const [capDraft, setCapDraft] = useState<CapabilityModelRow[]>(capabilityRows);
-  const [error, setError] = useState('');
-  const template: ProviderTemplate = providerTemplate(provider);
-  const showCaps = Boolean(initial) && credentialType === 'api_key' && needsCapabilitySection(providerKind(provider), syncedModels);
-  const modelOptional = credentialType === 'api_key' && providerKind(provider) === 'aggregator';
-  const availableProviders = providerTemplates.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(providerQuery.toLowerCase()));
-  const modelGroups = buildModelOptions(template.models, template.id === 'custom' ? [] : syncedModels, template.defaultModel);
-  const isCustomModel = template.id === 'custom' || ![...modelGroups.synced, ...modelGroups.recommended].some((model) => model.id === modelId);
-
-  function selectTemplate(next: ProviderTemplate) {
-    const firstModel = next.models.find((item) => item.id === next.defaultModel) ?? next.models[0];
-    setProvider(next.id);
-    setName((current) => current || next.name);
-    setEnvKey((current) => current || defaultApiKeyEnvKey(next.id));
-    setModelId(firstModel.id);
-    setModelEnvKey(firstModel.envKey);
-    setEndpointUrl(next.baseUrl);
-    setEndpointEnvKey(defaultEndpointEnvKey(next.id));
-    setCategory(next.id === 'custom' ? 'other' : 'ai');
-    setMode('form');
-  }
-
-  function selectCredentialType(next: CredentialType) {
-    setCredentialType(next);
-    setValueType(next);
-    setProvider(next === 'api_key' ? '' : 'custom');
-    setModelId('');
-    setModelEnvKey('');
-    setEnvKey(next === 'api_key' ? '' : next === 'token' ? 'TOKEN' : next === 'url' ? 'URL' : next.toUpperCase());
-    setMode(next === 'api_key' ? 'provider' : 'form');
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    try {
-      if (credentialType === 'api_key' && ((!modelId.trim() && !modelOptional) || !endpointUrl.trim())) throw new Error(t.form.apiKeyFieldsRequired);
-      let capabilityModels: CapabilityModelRow[] | undefined;
-      if (showCaps) {
-        capabilityModels = normalizeRows(capDraft);
-        const problem = capabilityError(t, capabilityModels, [envKey.trim().toUpperCase(), modelEnvKey.trim().toUpperCase(), endpointEnvKey.trim().toUpperCase()]);
-        if (problem) throw new Error(problem);
-      }
-      await onSave({ ...(capabilityModels ? { capability_models: capabilityModels } : {}), name, provider_id: provider || 'custom', env_key: envKey.trim().toUpperCase(), description: notes, tags, value, value_type: valueType, category, scope, favorite, archived: initial?.archived ?? false, model_id: modelId.trim(), model_env_key: modelEnvKey.trim().toUpperCase(), endpoint_url: endpointUrl.trim(), endpoint_env_key: endpointEnvKey.trim().toUpperCase() });
-      onClose();
-    } catch (reason) { setError(String(reason)); }
-  }
-
-  if (mode === 'type') {
-    const typeOptions: Array<{ id: CredentialType; label: string; hint: string }> = [
-      { id: 'api_key', label: t.form.apiKeyType, hint: t.form.apiKeyHint },
-      { id: 'token', label: t.form.tokenType, hint: t.form.tokenHint },
-      { id: 'url', label: t.form.urlType, hint: t.form.urlHint },
-      { id: 'password', label: t.form.passwordType, hint: t.form.passwordHint },
-      { id: 'text', label: t.form.textType, hint: t.form.textHint },
-    ];
-    return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.form.typeTitle}><div className="secret-form credential-type-picker"><div className="form-heading"><div><span className="section-kicker">CREDENTIAL ROUTER / TYPE</span><h2>{t.form.typeTitle}</h2><p className="form-intro">{t.form.typeIntro}</p></div><button type="button" className="close-button" onClick={onClose}>×</button></div><div className="credential-type-grid">{typeOptions.map((item) => <button type="button" className="credential-type-card" key={item.id} onClick={() => selectCredentialType(item.id)}><strong>{item.label}</strong><span>{item.hint}</span></button>)}</div></div></div>;
-  }
-
-  if (mode === 'provider') {
-    return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.form.addTitle}><div className="secret-form provider-picker"><div className="form-heading"><div><span className="section-kicker">API KEY / PROVIDER</span><h2>{t.form.addTitle}</h2><p className="form-intro">{t.form.providerIntro}</p></div><div className="form-heading-actions"><button type="button" className="back-button" onClick={() => setMode('type')}>{t.form.back}</button><button type="button" className="close-button" onClick={onClose}>×</button></div></div><input className="provider-search-input" aria-label={t.form.providerSearch} placeholder={t.form.providerSearch} value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} />{availableProviders.length === 0 ? <div className="empty-state provider-empty"><strong>{t.form.providerSearchEmpty}</strong></div> : <div className="provider-grid">{availableProviders.map((item) => <button type="button" className="provider-card" key={item.id} onClick={() => selectTemplate(item)}><strong>{item.name}</strong><span>{item.models.length} {t.providerPanel.templates}</span>{item.keyUrl && <small>{t.providerPanel.officialKey}</small>}</button>)}</div>}</div></div>;
-  }
-
-  const modelOptions = [...modelGroups.synced, ...modelGroups.recommended];
-  const optionLabel = (model: { id: string; label: string; capabilities: string[] }) => `${model.label} · ${model.id}${model.capabilities.length ? ` [${model.capabilities.join(', ')}]` : ''}`;
-  async function openExternal(url: string) {
-    try { if (isTauriRuntime()) await backend.openExternalUrl(url); else window.open(url, '_blank', 'noopener,noreferrer'); } catch (reason) { setError(String(reason)); }
-  }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">{credentialType === 'api_key' ? `API KEY / ${template.name.toUpperCase()}` : `${credentialType.toUpperCase()} / ${credentialType.toUpperCase()}`}</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2><p className="form-intro">{credentialType === 'api_key' ? t.form.presetIntro : t.form.plainIntro}</p></div><button type="button" className="close-button" onClick={onClose}>×</button></div>{credentialType === 'api_key' && <><label>{t.form.provider}<select value={provider} onChange={(event) => selectTemplate(providerTemplate(event.target.value))}>{providerTemplates.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>{template.keyUrl && <div className="provider-link-row"><span>API Key</span><a href={template.keyUrl} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openExternal(template.keyUrl); }}>{t.form.officialKeyLink}</a>{onCapture && !initial && <button type="button" className="inline-link" onClick={() => onCapture(template.id, template.name)}>{t.capture.button}</button>}</div>}</>}<label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<span className="optional-label">{t.form.optional}</span><input value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.value}<input required={!initial} value={value} onChange={(event) => setValue(event.target.value)} type={credentialType === 'url' ? 'url' : credentialType === 'text' ? 'text' : 'password'} autoComplete="new-password" placeholder={initial ? t.form.keepExistingValue : undefined} />{credentialType === 'url' && value.trim() && <button type="button" className="inline-link" onClick={() => void openExternal(value.trim())}>{t.form.openUrl}</button>}</label>{credentialType === 'api_key' && <><div className="form-two-col"><label>{t.form.model}<select value={isCustomModel ? '__custom__' : modelId} onChange={(event) => { const next = event.target.value; if (next === '__custom__') { setModelId(''); setModelEnvKey('MODEL_NAME'); } else { const found = modelOptions.find((item) => item.id === next); setModelId(next); if (found) setModelEnvKey(found.envKey); } }}>{modelGroups.synced.length > 0 ? <><optgroup label={t.form.syncedModelsGroup}>{modelGroups.synced.map((model) => <option value={model.id} key={model.id}>{optionLabel(model)}</option>)}</optgroup>{modelGroups.recommended.length > 0 && <optgroup label={t.form.recommendedModelsGroup}>{modelGroups.recommended.map((model) => <option value={model.id} key={model.id}>{optionLabel(model)}</option>)}</optgroup>}</> : modelGroups.recommended.map((model) => <option value={model.id} key={model.id}>{optionLabel(model)}</option>)}<option value="__custom__">{t.form.customModel}</option></select>{isCustomModel && <input value={modelId} onChange={(event) => setModelId(event.target.value)} placeholder="your-model-id" />}</label><label>{t.form.modelEnvKey}<input value={modelEnvKey} onChange={(event) => setModelEnvKey(event.target.value)} placeholder="OPENAI_MODEL" /></label></div>{modelOptional && !initial && <p className="cap-hint">{t.cap.newKeyHint}</p>}<div className="form-two-col"><label>{t.form.endpointUrl}<input required value={endpointUrl} onChange={(event) => setEndpointUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label><label>{t.form.endpointEnvKey}<input required value={endpointEnvKey} onChange={(event) => setEndpointEnvKey(event.target.value)} placeholder="OPENAI_BASE_URL" /></label></div>{showCaps && <div className="cap-section"><strong>{t.cap.title}</strong><p className="cap-hint">{t.cap.hint}</p><CapabilityModelsEditor t={t} models={syncedModels} value={capDraft} onChange={setCapDraft} primaryModelId={modelId} /></div>}</>}<div className="form-two-col"><label>{t.form.valueType}<select value={valueType} onChange={(event) => { const next = event.target.value as CredentialType; setCredentialType(next); setValueType(next); }}>{credentialType === 'api_key' && <option value="api_key">API key</option>}{credentialType !== 'api_key' && <option value={credentialType}>{credentialType.toUpperCase()}</option>}</select></label><label>{t.form.category}<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select></label></div><label>{t.form.scope}<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="global">Global</option><option value="project">Project</option><option value="profile">Profile</option></select></label><label className="checkbox-label"><input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />{t.form.favorite}</label><TagField t={t} value={tags} onChange={setTags} knownTags={knownTags} /><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
-}
 
 function ExportPanel({ t, selectedIds, onClose, onExported }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void; onExported: () => void }) {
   const [directory, setDirectory] = useState('.'); const [preview, setPreview] = useState(''); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [conflicts, setConflicts] = useState<string[]>([]);

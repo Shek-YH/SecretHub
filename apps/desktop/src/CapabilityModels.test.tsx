@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
-import { SecretForm, ModelSyncSection } from './App';
+import { ModelSyncSection } from './App';
+import { SecretForm } from './SecretForm';
 import { CapabilityModelsEditor, capabilityError, needsCapabilitySection, normalizeRows, validateCapabilityRows } from './CapabilityModels';
 import { getTranslation } from './i18n/translations';
 import type { BackendModel, CapabilityModelRow } from './lib/backend';
@@ -70,6 +71,27 @@ describe('CapabilityModelsEditor', () => {
   });
 });
 
+describe('CapabilityModelsEditor with many candidates', () => {
+  it('uses a searchable control above 15 candidates and allows a typed id', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const many = Array.from({ length: 20 }, (_, index) => synced(`img-${String(index).padStart(2, '0')}`, ['image_gen']));
+    function Stateful() {
+      const [rows, setRows] = useState<CapabilityModelRow[]>([]);
+      return <CapabilityModelsEditor t={t} models={many} value={rows} primaryModelId="chat-a" onChange={(next) => { setRows(next); onChange(next); }} />;
+    }
+    render(<Stateful />);
+    const box = screen.getByRole('combobox', { name: '生图 默认模型' });
+    await user.click(box);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(20);
+    await user.type(box, 'img-1');
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(10);
+    await user.type(box, 'x');
+    expect(screen.getByText(t.quick.modelNoMatch)).toBeInTheDocument();
+    expect(onChange).toHaveBeenLastCalledWith([row('image_gen', 'img-1x', 'IMAGE_MODEL')]);
+  });
+});
+
 describe('SecretForm capability section', () => {
   const aggregator = { id: 's1', name: 'OR', envKey: 'OPENROUTER_API_KEY', provider: 'openrouter', tags: [], status: 'valid', updated: 'now', valueType: 'api_key', modelId: '', modelEnvKey: 'OPENROUTER_MODEL', endpointUrl: 'https://openrouter.ai/api/v1', endpointEnvKey: 'OPENROUTER_BASE_URL' };
 
@@ -79,7 +101,7 @@ describe('SecretForm capability section', () => {
     render(<SecretForm t={t} knownTags={[]} initial={null} preset={{ provider: 'openrouter', name: 'OR', envKey: 'OPENROUTER_API_KEY', modelId: '', modelEnvKey: 'OPENROUTER_MODEL', endpointUrl: 'https://openrouter.ai/api/v1', endpointEnvKey: 'OPENROUTER_BASE_URL' }} onClose={() => undefined} onSave={onSave} />);
     expect(screen.getByText(t.cap.newKeyHint)).toBeInTheDocument();
     expect(screen.queryByText(t.cap.title)).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText('Secret 值'), 'fake-test-value');
+    await user.type(screen.getByLabelText(t.quick.pasteKey), 'fake-test-value');
     await user.click(screen.getByRole('button', { name: t.form.save }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ provider_id: 'openrouter', model_id: '' })));
     expect(onSave.mock.calls[0][0]).not.toHaveProperty('capability_models');
@@ -89,7 +111,7 @@ describe('SecretForm capability section', () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     render(<SecretForm t={t} knownTags={[]} initial={null} preset={{ provider: 'deepseek', name: 'DS', envKey: 'DEEPSEEK_API_KEY', modelId: '', modelEnvKey: 'DEEPSEEK_MODEL', endpointUrl: 'https://api.deepseek.com', endpointEnvKey: 'DEEPSEEK_BASE_URL' }} onClose={() => undefined} onSave={onSave} />);
-    await user.type(screen.getByLabelText('Secret 值'), 'fake-test-value');
+    await user.type(screen.getByLabelText(t.quick.pasteKey), 'fake-test-value');
     await user.click(screen.getByRole('button', { name: t.form.save }));
     expect(await screen.findByRole('alert')).toHaveTextContent(t.form.apiKeyFieldsRequired);
     expect(onSave).not.toHaveBeenCalled();
