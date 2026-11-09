@@ -30,6 +30,16 @@ export type GroupBinding = z.infer<typeof groupBindingSchema>;
 export type AnyBinding = Binding | GroupBinding;
 const isGroupBinding = (binding: AnyBinding): binding is GroupBinding => !('env' in binding);
 
+// A profile with variable subsets becomes a v2 plan: subset groups are bound with `variables`,
+// everything else stays in `secretIds`. Profiles without subsets keep the plain v1 shape.
+export function profilePlanFields(profile: { secretIds: string[]; variables?: Record<string, string[]> }): Record<string, unknown> {
+  const subsets = profile.variables ?? {};
+  const bindings = profile.secretIds.filter((id) => subsets[id]?.length).map((id) => ({ secret_id: id, variables: subsets[id] }));
+  if (bindings.length === 0) return { secretIds: profile.secretIds };
+  const wholeIds = profile.secretIds.filter((id) => !subsets[id]?.length);
+  return { version: 2, bindings, ...(wholeIds.length > 0 ? { secretIds: wholeIds } : {}) };
+}
+
 export type PlanLookup = { secret(id: string): CatalogSecret | undefined; providers: ModelProvider[] };
 
 // Read-only metadata pre-check; Desktop validates again before anything is written.

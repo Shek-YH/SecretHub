@@ -88,14 +88,19 @@ fn persists_profiles_projects_and_safe_default_settings() {
             name: "AI Standard".into(),
             description: "default AI stack".into(),
             secret_ids: vec!["secret-a".into(), "secret-b".into()],
+            variables: std::collections::BTreeMap::from([(
+                "secret-b".to_owned(),
+                vec!["A_HOST".to_owned()],
+            )]),
             created_at: now,
             updated_at: now,
         })
         .unwrap();
-    assert_eq!(
-        database.list_profiles().unwrap()[0].secret_ids,
-        vec!["secret-a", "secret-b"]
-    );
+    let stored = &database.list_profiles().unwrap()[0];
+    assert_eq!(stored.secret_ids, vec!["secret-a", "secret-b"]);
+    // Only the member with a subset has one; the other means "every variable".
+    assert_eq!(stored.variables.len(), 1);
+    assert_eq!(stored.variables["secret-b"], vec!["A_HOST"]);
     let project = database
         .record_project("C:\\Projects\\demo", "demo")
         .unwrap();

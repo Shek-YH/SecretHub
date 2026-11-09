@@ -239,3 +239,18 @@ body { background: #071126; color: #eef4ff; }
 .group-variable-row .secret-input label:first-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .group-secret-switch { white-space: nowrap; }
 .group-fields .field-label small { opacity: .6; margin-left: 6px; }
+
+/* Export dialog */
+.export-dialog { max-width: 760px; }
+.export-items { display: grid; gap: 6px; }
+.export-item-head { display: flex; gap: 8px; align-items: center; }
+.export-item-head strong { flex: 1; }
+.export-variables { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 12px; padding: 6px 0 0 8px; }
+.recent-projects { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.recent-chip { cursor: pointer; border: 0; }
+.export-preview { width: 100%; border-collapse: collapse; font-size: 12px; }
+.export-preview th, .export-preview td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.08); word-break: break-all; }
+.export-row-conflict td { color: #ff6b6b; }
+.export-profile-row { display: flex; gap: 8px; }
+.export-profile-row input { flex: 1; }
+.profile-subset { display: block; opacity: .7; }

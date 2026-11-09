@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openCatalogStore } from './catalog.js';
-import { bindingSchema, groupBindingSchema, precheckPlan } from './plan.js';
+import { bindingSchema, groupBindingSchema, precheckPlan, profilePlanFields } from './plan.js';
 
 const SCHEMA = `
   CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider_id TEXT NOT NULL, env_key TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'unknown', value_type TEXT NOT NULL DEFAULT 'api_key', category TEXT NOT NULL DEFAULT 'other', scope TEXT NOT NULL DEFAULT 'global', favorite INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, model_id TEXT NOT NULL DEFAULT '', model_env_key TEXT NOT NULL DEFAULT '', endpoint_url TEXT NOT NULL DEFAULT '', endpoint_env_key TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0, subtitle TEXT NOT NULL DEFAULT '', dev_use INTEGER NOT NULL DEFAULT 0, ai_values INTEGER NOT NULL DEFAULT 1);
   CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB NOT NULL);
   CREATE TABLE group_variables (secret_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT NOT NULL, secret INTEGER NOT NULL, plain_value TEXT NOT NULL DEFAULT '', PRIMARY KEY (secret_id, name));
   CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER);
-  CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER);
+  CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER, variables_json TEXT NOT NULL DEFAULT '');
   CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER);`;
 
 const SECRET_MARKER = 'FAKE-SECRET-MUST-NOT-APPEAR';
@@ -111,5 +111,43 @@ describe('plan pre-check for config groups', () => {
     expect(groupBindingSchema.safeParse({ secret_id: 'g1', variables: [] }).success).toBe(false);
     expect(groupBindingSchema.safeParse({ secret_id: 'g1', variables: ['1BAD'] }).success).toBe(false);
     expect(groupBindingSchema.safeParse({ secret_id: 'g1', capability: 'chat' }).success).toBe(false);
+  });
+});
+
+describe('profiles with variable subsets', () => {
+  it('lists the subset of a group and leaves whole groups alone', () => {
+    seed();
+    const db = new DatabaseSync(path);
+    db.exec("INSERT INTO profiles VALUES ('p1', 'Deploy', '', 1); INSERT INTO profile_secrets VALUES ('p1', 'g1', 0, '[\"SSH_HOST\",\"SSH_PORT\"]'), ('p1', 'g2', 1, ''), ('p1', 'k1', 2, '');");
+    db.close();
+    const profile = openCatalogStore(path).profile('p1')!;
+    expect(profile.secretIds).toEqual(['g1', 'g2', 'k1']);
+    expect(profile.variables).toEqual({ g1: ['SSH_HOST', 'SSH_PORT'] });
+    expect(JSON.stringify(profile)).not.toContain(SECRET_MARKER);
+  });
+
+  it('works on a vault whose profile_secrets has no variables column', () => {
+    const db = new DatabaseSync(path);
+    db.exec(SCHEMA.replace(", variables_json TEXT NOT NULL DEFAULT ''", ''));
+    db.exec("INSERT INTO secrets (id, name, provider_id, env_key, value_type) VALUES ('k1', 'Key', 'openai', 'OPENAI_API_KEY', 'api_key'); INSERT INTO secret_payloads VALUES ('k1', X'0A'); INSERT INTO profiles VALUES ('p1', 'Old', '', 1); INSERT INTO profile_secrets VALUES ('p1', 'k1', 0);");
+    db.close();
+    const profile = openCatalogStore(path).profile('p1')!;
+    expect(profile.secretIds).toEqual(['k1']);
+    expect(profile.variables).toBeUndefined();
+  });
+
+  it('turns subsets into a v2 plan and plain profiles into v1', () => {
+    expect(profilePlanFields({ secretIds: ['k1', 'g1'] })).toEqual({ secretIds: ['k1', 'g1'] });
+    expect(profilePlanFields({ secretIds: ['k1', 'g1', 'g2'], variables: { g1: ['SSH_HOST'] } })).toEqual({
+      version: 2,
+      bindings: [{ secret_id: 'g1', variables: ['SSH_HOST'] }],
+      secretIds: ['k1', 'g2'],
+    });
+    expect(profilePlanFields({ secretIds: ['g1'], variables: { g1: ['A'] } })).toEqual({ version: 2, bindings: [{ secret_id: 'g1', variables: ['A'] }] });
+    // The generated plan passes the same pre-check as a hand-written one.
+    seed();
+    const fields = profilePlanFields({ secretIds: ['k1', 'g1'], variables: { g1: ['SSH_HOST'] } }) as { bindings: Array<{ secret_id: string; variables: string[] }>; secretIds: string[] };
+    const bindings = fields.bindings.map((binding) => groupBindingSchema.parse(binding));
+    expect(precheckPlan({ secretIds: fields.secretIds, bindings }, lookup())).toBeUndefined();
   });
 });

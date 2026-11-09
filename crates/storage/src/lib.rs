@@ -234,6 +234,9 @@ pub struct StoredProfile {
     pub name: String,
     pub description: String,
     pub secret_ids: Vec<String>,
+    /// Config group variable subsets by secret id; a group without an entry means every variable.
+    #[serde(default)]
+    pub variables: std::collections::BTreeMap<String, Vec<String>>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -511,6 +514,12 @@ impl Database {
             "secrets",
             "ai_values",
             "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "profile_secrets",
+            "variables_json",
+            "TEXT NOT NULL DEFAULT ''",
         )?;
         add_column_if_missing(
             &connection,
@@ -1147,9 +1156,14 @@ impl Database {
             params![profile.id],
         )?;
         for (position, secret_id) in profile.secret_ids.iter().enumerate() {
+            // An empty column means "every variable".
+            let subset = match profile.variables.get(secret_id) {
+                Some(names) => to_json(names)?,
+                None => String::new(),
+            };
             self.connection.execute(
-                "INSERT INTO profile_secrets(profile_id, secret_id, position) VALUES (?1, ?2, ?3)",
-                params![profile.id, secret_id, position as i64],
+                "INSERT INTO profile_secrets(profile_id, secret_id, position, variables_json) VALUES (?1, ?2, ?3, ?4)",
+                params![profile.id, secret_id, position as i64, subset],
             )?;
         }
         Ok(())
@@ -1170,18 +1184,29 @@ impl Database {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         for (id, name, description, created_at, updated_at) in rows {
-            let mut ids = self
+            let members = self
                 .connection
                 .prepare(
-                    "SELECT secret_id FROM profile_secrets WHERE profile_id = ?1 ORDER BY position",
+                    "SELECT secret_id, variables_json FROM profile_secrets WHERE profile_id = ?1 ORDER BY position",
                 )?
-                .query_map(params![id], |row| row.get(0))?
-                .collect::<Result<Vec<String>, _>>()?;
+                .query_map(params![id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut ids = Vec::new();
+            let mut variables = std::collections::BTreeMap::new();
+            for (secret_id, subset) in members {
+                if !subset.is_empty() {
+                    variables.insert(secret_id.clone(), from_json(&subset)?);
+                }
+                ids.push(secret_id);
+            }
             profiles.push(StoredProfile {
                 id,
                 name,
                 description,
-                secret_ids: std::mem::take(&mut ids),
+                secret_ids: ids,
+                variables,
                 created_at,
                 updated_at,
             });

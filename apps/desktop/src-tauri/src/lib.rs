@@ -8,6 +8,7 @@ mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
+mod export;
 mod groups;
 mod import;
 mod items;
@@ -112,6 +113,8 @@ pub fn run() {
             commands::export_preview,
             commands::export_conflicts,
             commands::export_env,
+            export::export_preview_v2,
+            export::export_apply_v2,
             commands::choose_project_directory,
             commands::profile_list,
             commands::profile_save,

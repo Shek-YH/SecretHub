@@ -26,7 +26,8 @@ export type CatalogSecret = {
 
 export type GroupVariable = { name: string; secret: boolean; value?: string };
 
-export type CatalogProfile = { id: string; name: string; description: string; secretIds: string[] };
+/** `variables` lists the variable subset of config groups in the profile; a group without an entry means every variable. */
+export type CatalogProfile = { id: string; name: string; description: string; secretIds: string[]; variables?: Record<string, string[]> };
 export type CatalogProject = { id: string; path: string; displayName: string; lastUsedAt: number };
 export type CatalogSeed = { secrets: CatalogSecret[]; profiles: CatalogProfile[]; projects: CatalogProject[] };
 
@@ -37,6 +38,11 @@ export type CatalogStore = {
   profile(id: string): CatalogProfile | undefined;
   projects(): CatalogProject[];
 };
+
+function copyProfile(profile: CatalogProfile): CatalogProfile {
+  const { variables, ...rest } = profile;
+  return { ...rest, secretIds: [...profile.secretIds], ...(variables ? { variables: Object.fromEntries(Object.entries(variables).map(([id, names]) => [id, [...names]])) } : {}) };
+}
 
 export function createCatalogStore(seed: CatalogSeed): CatalogStore {
   const secrets = seed.secrets.map((secret) => ({ ...secret, tags: [...secret.tags], valueType: secret.valueType ?? 'api_key', category: secret.category ?? 'other', scope: secret.scope ?? 'global', favorite: secret.favorite ?? false, archived: secret.archived ?? false, modelId: secret.modelId ?? '', modelEnvKey: secret.modelEnvKey ?? '', endpointUrl: secret.endpointUrl ?? '', endpointEnvKey: secret.endpointEnvKey ?? '' }));
@@ -49,8 +55,8 @@ export function createCatalogStore(seed: CatalogSeed): CatalogStore {
       return { total: filtered.length, count: items.length, offset, items, hasMore, ...(hasMore ? { nextOffset: offset + items.length } : {}) };
     },
     get(id) { return secrets.find((secret) => secret.id === id); },
-    profiles() { return seed.profiles.map((profile) => ({ ...profile, secretIds: [...profile.secretIds] })); },
-    profile(id) { const profile = seed.profiles.find((item) => item.id === id); return profile ? { ...profile, secretIds: [...profile.secretIds] } : undefined; },
+    profiles() { return seed.profiles.map(copyProfile); },
+    profile(id) { const profile = seed.profiles.find((item) => item.id === id); return profile ? copyProfile(profile) : undefined; },
     projects() { return seed.projects.map((project) => ({ ...project })); },
   };
 }
@@ -76,7 +82,16 @@ function readCatalogSeed(path: string): CatalogSeed {
     // Profiles keep their own list, but ids the AI may not see are dropped from it.
     const visible = new Set(secrets.map((secret) => secret.id));
     attachGroupVariables(db, secrets);
-    const profiles = (db.prepare('SELECT id, name, description FROM profiles ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), description: String(row.description), secretIds: (db.prepare('SELECT secret_id FROM profile_secrets WHERE profile_id = ? ORDER BY position').all(String(row.id)) as Array<Record<string, unknown>>).map((item) => String(item.secret_id)).filter((id) => visible.has(id)) }));
+    const subsets = hasColumn(db, 'profile_secrets', 'variables_json');
+    const profiles = (db.prepare('SELECT id, name, description FROM profiles ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => {
+      const members = (db.prepare(`SELECT secret_id${subsets ? ', variables_json' : ''} FROM profile_secrets WHERE profile_id = ? ORDER BY position`).all(String(row.id)) as Array<Record<string, unknown>>).filter((item) => visible.has(String(item.secret_id)));
+      const variables: Record<string, string[]> = {};
+      for (const item of members) {
+        const names = subsets ? parseTags(item.variables_json) : [];
+        if (names.length > 0) variables[String(item.secret_id)] = names;
+      }
+      return { id: String(row.id), name: String(row.name), description: String(row.description), secretIds: members.map((item) => String(item.secret_id)), ...(Object.keys(variables).length > 0 ? { variables } : {}) };
+    });
     const projects = (db.prepare('SELECT id, path, display_name, last_used_at FROM projects ORDER BY last_used_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), path: String(row.path), displayName: String(row.display_name), lastUsedAt: Number(row.last_used_at) }));
     return { secrets, profiles, projects };
   } finally { db.close(); }
@@ -116,6 +131,10 @@ function attachGroupVariables(db: DatabaseSync, secrets: CatalogSecret[]) {
       return { name: String(row.name), secret, ...(!secret && allow ? { value: String(row.plain_value) } : {}) };
     });
   }
+}
+
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  try { return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<Record<string, unknown>>).some((row) => row.name === column); } catch { return false; }
 }
 
 function parseTags(value: unknown): string[] { try { const parsed = JSON.parse(String(value)); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } }

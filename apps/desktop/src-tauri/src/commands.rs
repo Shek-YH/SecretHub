@@ -80,6 +80,9 @@ pub struct ProfileRequest {
     pub name: String,
     pub description: String,
     pub secret_ids: Vec<String>,
+    /// Config group variable subsets by secret id; a group without an entry means every variable.
+    #[serde(default)]
+    pub variables: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -776,7 +779,7 @@ fn export_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>,
     entries_for(vault, ids, true)
 }
 
-fn entries_for(
+pub(crate) fn entries_for(
     vault: &VaultService,
     ids: &[String],
     with_capabilities: bool,
@@ -1331,6 +1334,11 @@ pub fn profile_save(request: ProfileRequest, state: State<'_, AppState>) -> Resu
             id: request.id,
             name: request.name,
             description: request.description,
+            variables: request
+                .variables
+                .into_iter()
+                .filter(|(id, names)| request.secret_ids.contains(id) && !names.is_empty())
+                .collect(),
             secret_ids: request.secret_ids,
             created_at: now,
             updated_at: now,
