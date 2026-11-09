@@ -3,11 +3,21 @@ use secrethub_storage::Database;
 use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
+mod caps;
+mod capture;
+mod catalog;
+mod catalog_update;
 mod commands;
+mod media;
+mod model_sync;
+mod plan;
+mod queue;
+mod sync;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
     pub policy: Mutex<AutoLockPolicy>,
+    pub capture: capture::CaptureState,
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -23,6 +33,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let path = database_path(app.handle()).map_err(Box::<dyn std::error::Error>::from)?;
+            if let Some(data_dir) = path.parent() {
+                // Best effort: MCP falls back to the bundled catalog when this file is missing.
+                let _ = catalog::write_effective_models(
+                    &catalog::models_path(data_dir),
+                    &catalog::current_models(),
+                );
+            }
             let database = Database::open(path)
                 .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
             let vault = VaultService::open(database)
@@ -36,11 +53,15 @@ pub fn run() {
                     settings.auto_lock_minutes as u64 * 60,
                     now_seconds(),
                 )),
+                capture: capture::CaptureState::default(),
             });
+            catalog_update::start(app.handle().clone());
+            sync::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
+            commands::vault_touch,
             commands::setup_master,
             commands::unlock,
             commands::lock,
@@ -52,11 +73,18 @@ pub fn run() {
             commands::secret_import,
             commands::mcp_pending_plans,
             commands::mcp_confirm_plan,
+            commands::mcp_plan_preview,
+            commands::mcp_pending_capability_suggestions,
+            commands::mcp_resolve_capability_suggestions,
             commands::secret_copy,
             commands::secret_copy_all,
             commands::secret_reveal,
             commands::secret_validate,
             commands::secret_validate_many,
+            commands::secret_sync_models,
+            commands::secret_models,
+            commands::secret_capability_models,
+            commands::secret_set_capability_models,
             commands::open_external_url,
             commands::export_preview,
             commands::export_conflicts,
@@ -65,12 +93,36 @@ pub fn run() {
             commands::profile_list,
             commands::profile_save,
             commands::profile_delete,
+            commands::tag_list,
+            commands::tag_create,
+            commands::tag_delete,
             commands::project_list,
             commands::project_record,
             commands::open_project_directory,
             commands::project_env_preview,
             commands::project_env_save,
             commands::audit_list,
+            commands::catalog_effective,
+            sync::mcp_pending_sync_requests,
+            capture::key_capture_start,
+            capture::key_capture_cancel,
+            capture::key_capture_status,
+            capture::mcp_pending_capture_requests,
+            capture::mcp_capture_decision,
+            media::media_list,
+            media::media_choose_files,
+            media::media_import,
+            media::media_create_text,
+            media::media_update,
+            media::media_delete,
+            media::media_copy_path,
+            media::media_reveal,
+            media::media_thumbnail,
+            media::mcp_pending_media_requests,
+            media::mcp_media_decision,
+            catalog_update::catalog_status,
+            catalog_update::catalog_set_auto_update,
+            catalog_update::catalog_check_now,
             commands::settings_get,
             commands::settings_update,
             commands::backup_export

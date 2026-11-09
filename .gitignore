@@ -13,3 +13,8 @@ apps/desktop/src-tauri/gen/
 test-results/
 playwright-report/
 .DS_Store
+
+# Model-catalog signing keys must never be committed
+*.key
+*.pem
+catalog-private-key*

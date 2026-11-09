@@ -1,12 +1,1449 @@
 [
-  {"id":"openai","name":"OpenAI","envKeys":["OPENAI_API_KEY"],"prefixes":["sk-"]},
-  {"id":"anthropic","name":"Anthropic","envKeys":["ANTHROPIC_API_KEY"],"prefixes":["sk-ant-"]},
-  {"id":"gemini","name":"Google Gemini","envKeys":["GEMINI_API_KEY"],"prefixes":["AIza"]},
-  {"id":"deepseek","name":"DeepSeek","envKeys":["DEEPSEEK_API_KEY"],"prefixes":["sk-deep-"]},
-  {"id":"xai","name":"xAI","envKeys":["XAI_API_KEY"],"prefixes":["xai-"]},
-  {"id":"openrouter","name":"OpenRouter","envKeys":["OPENROUTER_API_KEY"],"prefixes":["sk-or-"]},
-  {"id":"github","name":"GitHub","envKeys":["GITHUB_TOKEN"],"prefixes":["ghp_","github_pat_"]},
-  {"id":"supabase","name":"Supabase","envKeys":["SUPABASE_URL","SUPABASE_ANON_KEY"],"prefixes":["sbp_"]},
-  {"id":"cloudflare","name":"Cloudflare","envKeys":["CLOUDFLARE_API_TOKEN"],"prefixes":["cf_"]},
-  {"id":"generic","name":"Generic API Key","envKeys":["API_KEY"],"prefixes":[]}
+  {
+    "id": "xiaomi",
+    "name": "Xiaomi 小米",
+    "keyUrl": "https://platform.xiaomimimo.com/",
+    "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+    "envKeys": [
+      "MIMO_API_KEY"
+    ],
+    "baseUrlEnvKey": "XIAOMI_BASE_URL",
+    "modelEnvKey": "MIMO_MODEL",
+    "models": [
+      {
+        "id": "mimo-v2.5-pro"
+      }
+    ]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "keyUrl": "https://platform.deepseek.com/api_keys",
+    "baseUrl": "https://api.deepseek.com",
+    "envKeys": [
+      "DEEPSEEK_API_KEY"
+    ],
+    "baseUrlEnvKey": "DEEPSEEK_BASE_URL",
+    "modelEnvKey": "DEEPSEEK_MODEL",
+    "keyPrefixes": [
+      "sk-deep-"
+    ],
+    "validationUrl": "https://api.deepseek.com/models",
+    "models": [
+      {
+        "id": "deepseek-v4-flash",
+        "label": "DeepSeek V4 Flash"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "label": "DeepSeek V4 Pro"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "label": "DeepSeek V4 Flash Vision",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://api-docs.deepseek.com/api/create-chat-completion"
+  },
+  {
+    "id": "minimax-global",
+    "name": "MiniMax EN",
+    "keyUrl": "https://platform.minimax.io/",
+    "baseUrl": "https://api.minimax.io/v1",
+    "envKeys": [
+      "MINIMAX_API_KEY"
+    ],
+    "baseUrlEnvKey": "MINIMAX_GLOBAL_BASE_URL",
+    "modelEnvKey": "MINIMAX_MODEL",
+    "models": [
+      {
+        "id": "MiniMax-M2.7"
+      },
+      {
+        "id": "MiniMax-M2.7-highspeed"
+      },
+      {
+        "id": "MiniMax-M2.5"
+      },
+      {
+        "id": "MiniMax-M2.5-highspeed"
+      },
+      {
+        "id": "MiniMax-M2.1"
+      },
+      {
+        "id": "MiniMax-M2.1-highspeed"
+      },
+      {
+        "id": "MiniMax-M2"
+      }
+    ],
+    "docsUrl": "https://platform.minimax.io/docs/api-reference/text-chat-openai.md"
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax CN",
+    "keyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "baseUrl": "https://api.minimaxi.com/v1",
+    "envKeys": [
+      "MINIMAX_API_KEY"
+    ],
+    "baseUrlEnvKey": "MINIMAX_BASE_URL",
+    "modelEnvKey": "MINIMAX_MODEL",
+    "validationUrl": "https://api.minimaxi.com/v1/models",
+    "models": [
+      {
+        "id": "MiniMax-M2.7"
+      },
+      {
+        "id": "MiniMax-M2.7-highspeed"
+      },
+      {
+        "id": "MiniMax-M2.5"
+      },
+      {
+        "id": "MiniMax-M2.5-highspeed"
+      },
+      {
+        "id": "MiniMax-M2.1"
+      },
+      {
+        "id": "MiniMax-M2.1-highspeed"
+      },
+      {
+        "id": "MiniMax-M2"
+      }
+    ]
+  },
+  {
+    "id": "glm",
+    "name": "GLM 智谱",
+    "keyUrl": "https://bigmodel.cn/usercenter/apikeys",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "envKeys": [
+      "ZHIPUAI_API_KEY"
+    ],
+    "baseUrlEnvKey": "ZHIPUAI_BASE_URL",
+    "modelEnvKey": "GLM_MODEL",
+    "validationUrl": "https://open.bigmodel.cn/api/paas/v4/models",
+    "models": [
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "glm-5.1"
+      },
+      {
+        "id": "glm-5"
+      }
+    ],
+    "docsUrl": "https://docs.z.ai/api-reference/llm/chat-completion.md"
+  },
+  {
+    "id": "zai",
+    "name": "Z.ai",
+    "keyUrl": "https://z.ai/manage-apikey/apikey-list",
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "envKeys": [
+      "ZAI_API_KEY"
+    ],
+    "baseUrlEnvKey": "ZAI_BASE_URL",
+    "modelEnvKey": "ZAI_MODEL",
+    "models": [
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "glm-5.1"
+      },
+      {
+        "id": "glm-5"
+      }
+    ],
+    "docsUrl": "https://docs.z.ai/api-reference/introduction"
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi 月之暗面",
+    "keyUrl": "https://platform.moonshot.cn/console/api-keys",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "envKeys": [
+      "MOONSHOT_API_KEY"
+    ],
+    "baseUrlEnvKey": "MOONSHOT_BASE_URL",
+    "modelEnvKey": "MOONSHOT_MODEL",
+    "validationUrl": "https://api.moonshot.cn/v1/models",
+    "models": [
+      {
+        "id": "kimi-k3"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "kimi-k2.7-code-highspeed",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "kimi-k2.6"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://platform.kimi.com/docs/api/chat"
+  },
+  {
+    "id": "kimi-global",
+    "name": "Kimi Global",
+    "keyUrl": "https://platform.moonshot.ai/console/api-keys",
+    "baseUrl": "https://api.moonshot.ai/v1",
+    "envKeys": [
+      "MOONSHOT_API_KEY"
+    ],
+    "baseUrlEnvKey": "MOONSHOT_BASE_URL",
+    "modelEnvKey": "MOONSHOT_MODEL",
+    "models": [
+      {
+        "id": "kimi-k3"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "kimi-k2.7-code-highspeed",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "kimi-k2.6"
+      }
+    ]
+  },
+  {
+    "id": "longcat",
+    "name": "LongCat 美团",
+    "keyUrl": "https://longcat.chat/platform/",
+    "baseUrl": "https://api.longcat.chat/openai",
+    "envKeys": [
+      "LONGCAT_API_KEY"
+    ],
+    "baseUrlEnvKey": "LONGCAT_BASE_URL",
+    "modelEnvKey": "LONGCAT_MODEL",
+    "models": [
+      {
+        "id": "LongCat-2.0"
+      }
+    ]
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "keyUrl": "https://platform.openai.com/api-keys",
+    "baseUrl": "https://api.openai.com/v1",
+    "envKeys": [
+      "OPENAI_API_KEY"
+    ],
+    "baseUrlEnvKey": "OPENAI_BASE_URL",
+    "modelEnvKey": "OPENAI_MODEL",
+    "keyPrefixes": [
+      "sk-"
+    ],
+    "validationUrl": "https://api.openai.com/v1/models",
+    "models": [
+      {
+        "id": "gpt-5.6-sol"
+      },
+      {
+        "id": "gpt-5.6-terra"
+      },
+      {
+        "id": "gpt-5.6-luna"
+      },
+      {
+        "id": "gpt-5.5"
+      },
+      {
+        "id": "gpt-4.1"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "image_gen": {
+        "kind": "openai-images",
+        "path": "/images/generations"
+      },
+      "tts": {
+        "kind": "openai-audio-speech",
+        "path": "/audio/speech"
+      },
+      "asr": {
+        "kind": "openai-audio-transcriptions",
+        "path": "/audio/transcriptions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      }
+    },
+    "docsUrl": "https://developers.openai.com/api/docs/guides/text"
+  },
+  {
+    "id": "gemini",
+    "name": "Google Gemini",
+    "keyUrl": "https://aistudio.google.com/apikey",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "protocol": "gemini",
+    "envKeys": [
+      "GEMINI_API_KEY"
+    ],
+    "baseUrlEnvKey": "GEMINI_BASE_URL",
+    "modelEnvKey": "GEMINI_MODEL",
+    "keyPrefixes": [
+      "AIza"
+    ],
+    "validationUrl": "https://generativelanguage.googleapis.com/v1beta/models",
+    "aliases": [
+      "google"
+    ],
+    "models": [
+      {
+        "id": "gemini-3.8-flash"
+      },
+      {
+        "id": "gemini-3.7-flash"
+      },
+      {
+        "id": "gemini-3.6-flash"
+      },
+      {
+        "id": "gemini-3.5-flash"
+      },
+      {
+        "id": "gemini-3.5-flash-lite"
+      },
+      {
+        "id": "gemini-3.1-flash-lite"
+      },
+      {
+        "id": "gemini-3.1-pro-preview"
+      },
+      {
+        "id": "gemini-3-flash-preview"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      },
+      "image_gen": {
+        "kind": "openai-images",
+        "path": "/images/generations"
+      }
+    },
+    "docsUrl": "https://ai.google.dev/gemini-api/docs/openai"
+  },
+  {
+    "id": "byteplus",
+    "name": "BytePlus",
+    "keyUrl": "https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey",
+    "baseUrl": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+    "kind": "aggregator",
+    "envKeys": [
+      "BYTEPLUS_API_KEY"
+    ],
+    "baseUrlEnvKey": "BYTEPLUS_BASE_URL",
+    "modelEnvKey": "BYTEPLUS_MODEL",
+    "models": [
+      {
+        "id": "ark-code-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "doubao-seed-2.0-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "doubao-seed-2.0-pro"
+      },
+      {
+        "id": "doubao-seed-2.0-lite"
+      },
+      {
+        "id": "doubao-seed-2.0-mini"
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      },
+      {
+        "id": "minimax-m3"
+      },
+      {
+        "id": "minimax-m2.7"
+      },
+      {
+        "id": "kimi-k2.6"
+      }
+    ]
+  },
+  {
+    "id": "ernie",
+    "name": "ERNIE 百度千帆",
+    "keyUrl": "https://console.bce.baidu.com/qianfan/ais/console/apiKey",
+    "baseUrl": "https://qianfan.baidubce.com/v2/coding",
+    "kind": "aggregator",
+    "envKeys": [
+      "QIANFAN_API_KEY"
+    ],
+    "baseUrlEnvKey": "ERNIE_BASE_URL",
+    "modelEnvKey": "ERNIE_MODEL",
+    "models": [
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "glm-5.1"
+      },
+      {
+        "id": "kimi-k2.6"
+      },
+      {
+        "id": "ernie-5.1"
+      }
+    ],
+    "docsUrl": "https://cloud.baidu.com/doc/qianfan-api/s/3m7of64lb"
+  },
+  {
+    "id": "opencode-zen",
+    "name": "OpenCode Zen",
+    "keyUrl": "https://opencode.ai/zen",
+    "baseUrl": "https://opencode.ai/zen/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "OPENCODE_API_KEY"
+    ],
+    "baseUrlEnvKey": "OPENCODE_ZEN_BASE_URL",
+    "modelEnvKey": "OPENCODE_MODEL",
+    "models": [
+      {
+        "id": "claude-opus-5"
+      },
+      {
+        "id": "claude-sonnet-5"
+      },
+      {
+        "id": "claude-haiku-4-5"
+      },
+      {
+        "id": "gpt-5.5"
+      },
+      {
+        "id": "gemini-3.7-flash"
+      },
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "kimi-k3"
+      },
+      {
+        "id": "qwen3.8-max"
+      },
+      {
+        "id": "minimax-m3"
+      },
+      {
+        "id": "grok-4.5"
+      }
+    ]
+  },
+  {
+    "id": "opencode-go",
+    "name": "OpenCode Go",
+    "keyUrl": "https://opencode.ai/go",
+    "baseUrl": "https://opencode.ai/zen/go/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "OPENCODE_API_KEY"
+    ],
+    "baseUrlEnvKey": "OPENCODE_GO_BASE_URL",
+    "modelEnvKey": "OPENCODE_GO_MODEL",
+    "models": [
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "gpt-5.6-luna"
+      },
+      {
+        "id": "grok-4.5"
+      },
+      {
+        "id": "hy3"
+      },
+      {
+        "id": "kimi-k3"
+      },
+      {
+        "id": "mimo-v2.5-pro"
+      },
+      {
+        "id": "minimax-m3"
+      },
+      {
+        "id": "qwen3.8-max"
+      }
+    ]
+  },
+  {
+    "id": "qwen",
+    "name": "通义千问 / Qwen",
+    "keyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "envKeys": [
+      "DASHSCOPE_API_KEY"
+    ],
+    "baseUrlEnvKey": "DASHSCOPE_BASE_URL",
+    "modelEnvKey": "QWEN_MODEL",
+    "validationUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+    "models": [
+      {
+        "id": "qwen3.8-max"
+      },
+      {
+        "id": "qwen3.7-max"
+      },
+      {
+        "id": "qwen3.7-plus"
+      },
+      {
+        "id": "qwen3.6-flash"
+      },
+      {
+        "id": "qwen3.5-plus"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      }
+    },
+    "docsUrl": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope"
+  },
+  {
+    "id": "qianwen-platform",
+    "name": "千问AI平台",
+    "keyUrl": "https://platform.qianwenai.com/",
+    "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "envKeys": [
+      "QWEN_API_KEY"
+    ],
+    "baseUrlEnvKey": "QWEN_BASE_URL",
+    "modelEnvKey": "QWEN_MODEL",
+    "models": [
+      {
+        "id": "qwen3.8-max"
+      },
+      {
+        "id": "qwen3.8-max-preview"
+      },
+      {
+        "id": "qwen3.7-max"
+      },
+      {
+        "id": "qwen3.7-plus"
+      },
+      {
+        "id": "qwen3.6-flash"
+      },
+      {
+        "id": "qwen-audio-3.0-tts-plus",
+        "capabilities": [
+          "tts"
+        ]
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash-0731"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "keyUrl": "https://console.anthropic.com/settings/keys",
+    "baseUrl": "https://api.anthropic.com",
+    "protocol": "anthropic",
+    "envKeys": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "baseUrlEnvKey": "ANTHROPIC_BASE_URL",
+    "modelEnvKey": "ANTHROPIC_MODEL",
+    "keyPrefixes": [
+      "sk-ant-"
+    ],
+    "validationUrl": "https://api.anthropic.com/v1/models",
+    "aliases": [
+      "claude"
+    ],
+    "models": [
+      {
+        "id": "claude-fable-5-1"
+      },
+      {
+        "id": "claude-opus-5"
+      },
+      {
+        "id": "claude-sonnet-5"
+      },
+      {
+        "id": "claude-haiku-4-5-20251001"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "anthropic-messages",
+        "path": "/v1/messages"
+      }
+    },
+    "docsUrl": "https://platform.claude.com/docs/en/api/messages"
+  },
+  {
+    "id": "xai",
+    "name": "xAI Grok",
+    "keyUrl": "https://console.x.ai/",
+    "baseUrl": "https://api.x.ai/v1",
+    "envKeys": [
+      "XAI_API_KEY"
+    ],
+    "baseUrlEnvKey": "XAI_BASE_URL",
+    "modelEnvKey": "XAI_MODEL",
+    "keyPrefixes": [
+      "xai-"
+    ],
+    "validationUrl": "https://api.x.ai/v1/models",
+    "aliases": [
+      "grok"
+    ],
+    "models": [
+      {
+        "id": "grok-4.6"
+      },
+      {
+        "id": "grok-4.5"
+      },
+      {
+        "id": "grok-4.3"
+      },
+      {
+        "id": "grok-4"
+      }
+    ],
+    "invocations": {
+      "image_gen": {
+        "kind": "openai-images",
+        "path": "/images/generations"
+      }
+    },
+    "docsUrl": "https://docs.x.ai/developers/rest-api-reference/inference/images"
+  },
+  {
+    "id": "hunyuan",
+    "name": "Hunyuan 腾讯混元 TokenHub",
+    "keyUrl": "https://console.cloud.tencent.com/tokenhub/codingplan",
+    "baseUrl": "https://api.lkeap.cloud.tencent.com/plan/v3",
+    "kind": "aggregator",
+    "envKeys": [
+      "HUNYUAN_API_KEY"
+    ],
+    "baseUrlEnvKey": "HUNYUAN_BASE_URL",
+    "modelEnvKey": "HUNYUAN_MODEL",
+    "validationUrl": "https://api.hunyuan.cloud.tencent.com/v1/models",
+    "models": [
+      {
+        "id": "hy4-preview"
+      },
+      {
+        "id": "hy3"
+      },
+      {
+        "id": "hy-mt2-pro"
+      },
+      {
+        "id": "hy-mt2-plus"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "minimax-m2.7"
+      },
+      {
+        "id": "glm-5.1"
+      },
+      {
+        "id": "kimi-k2.6"
+      }
+    ],
+    "docsUrl": "https://cloud.tencent.com/document/product/1729/101848"
+  },
+  {
+    "id": "meta",
+    "name": "Meta AI",
+    "keyUrl": "https://ai.meta.com/",
+    "baseUrl": "https://api.llama.com/v1",
+    "envKeys": [
+      "META_API_KEY"
+    ],
+    "baseUrlEnvKey": "META_BASE_URL",
+    "modelEnvKey": "META_MODEL",
+    "models": [
+      {
+        "id": "Llama-4-Maverick-17B-128E-Instruct"
+      },
+      {
+        "id": "Llama-4-Scout-17B-16E-Instruct"
+      }
+    ]
+  },
+  {
+    "id": "perplexity",
+    "name": "Perplexity",
+    "keyUrl": "https://www.perplexity.ai/settings/api",
+    "baseUrl": "https://api.perplexity.ai",
+    "envKeys": [
+      "PERPLEXITY_API_KEY"
+    ],
+    "baseUrlEnvKey": "PERPLEXITY_BASE_URL",
+    "modelEnvKey": "PERPLEXITY_MODEL",
+    "models": [
+      {
+        "id": "sonar-pro"
+      },
+      {
+        "id": "sonar"
+      },
+      {
+        "id": "sonar-reasoning-pro"
+      },
+      {
+        "id": "sonar-reasoning"
+      }
+    ],
+    "docsUrl": "https://docs.perplexity.ai/api-reference/chat-completions-post"
+  },
+  {
+    "id": "stepfun",
+    "name": "Stepfun 阶跃星辰",
+    "keyUrl": "https://platform.stepfun.com/interface-key",
+    "baseUrl": "https://api.stepfun.com/v1",
+    "envKeys": [
+      "STEPFUN_API_KEY"
+    ],
+    "baseUrlEnvKey": "STEPFUN_BASE_URL",
+    "modelEnvKey": "STEPFUN_MODEL",
+    "validationUrl": "https://api.stepfun.com/v1/models",
+    "models": [
+      {
+        "id": "step-3.5-flash-2603"
+      },
+      {
+        "id": "step-3.5-flash"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://platform.stepfun.com/docs/api-reference/chat/chat-completion-create"
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral AI",
+    "keyUrl": "https://console.mistral.ai/api-keys",
+    "baseUrl": "https://api.mistral.ai/v1",
+    "envKeys": [
+      "MISTRAL_API_KEY"
+    ],
+    "baseUrlEnvKey": "MISTRAL_BASE_URL",
+    "modelEnvKey": "MISTRAL_MODEL",
+    "validationUrl": "https://api.mistral.ai/v1/models",
+    "models": [
+      {
+        "id": "mistral-medium-latest"
+      },
+      {
+        "id": "mistral-small-latest"
+      },
+      {
+        "id": "mistral-large-latest"
+      },
+      {
+        "id": "codestral-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "devstral-small-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "embedding": {
+        "kind": "openai-embeddings",
+        "path": "/embeddings"
+      }
+    },
+    "docsUrl": "https://docs.mistral.ai/api/endpoint/chat"
+  },
+  {
+    "id": "cohere",
+    "name": "Cohere",
+    "keyUrl": "https://dashboard.cohere.com/api-keys",
+    "baseUrl": "https://api.cohere.ai/compatibility/v1",
+    "envKeys": [
+      "COHERE_API_KEY"
+    ],
+    "baseUrlEnvKey": "COHERE_BASE_URL",
+    "modelEnvKey": "COHERE_MODEL",
+    "models": [
+      {
+        "id": "command-a-03-2025"
+      },
+      {
+        "id": "command-r-plus"
+      },
+      {
+        "id": "command-r"
+      },
+      {
+        "id": "c4ai-aya-expanse-32b"
+      }
+    ],
+    "docsUrl": "https://docs.cohere.com/reference/chat"
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "keyUrl": "https://console.groq.com/keys",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "envKeys": [
+      "GROQ_API_KEY"
+    ],
+    "baseUrlEnvKey": "GROQ_BASE_URL",
+    "modelEnvKey": "GROQ_MODEL",
+    "validationUrl": "https://api.groq.com/openai/v1/models",
+    "models": [
+      {
+        "id": "openai/gpt-oss-120b"
+      },
+      {
+        "id": "openai/gpt-oss-20b"
+      },
+      {
+        "id": "qwen/qwen3.8-27b"
+      },
+      {
+        "id": "qwen/qwen3.6-27b"
+      },
+      {
+        "id": "minimaxai/minimax-m2.7"
+      },
+      {
+        "id": "groq/compound"
+      },
+      {
+        "id": "groq/compound-mini"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      },
+      "asr": {
+        "kind": "openai-audio-transcriptions",
+        "path": "/audio/transcriptions"
+      },
+      "tts": {
+        "kind": "openai-audio-speech",
+        "path": "/audio/speech"
+      }
+    },
+    "docsUrl": "https://console.groq.com/docs/api-reference"
+  },
+  {
+    "id": "together",
+    "name": "Together AI",
+    "keyUrl": "https://api.together.ai/settings/api-keys",
+    "baseUrl": "https://api.together.xyz/v1",
+    "envKeys": [
+      "TOGETHER_API_KEY"
+    ],
+    "baseUrlEnvKey": "TOGETHER_BASE_URL",
+    "modelEnvKey": "TOGETHER_MODEL",
+    "models": [
+      {
+        "id": "Qwen/Qwen3.8-Next-80B-A3B-Instruct"
+      },
+      {
+        "id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V3"
+      },
+      {
+        "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+      }
+    ],
+    "docsUrl": "https://docs.together.ai/reference/chat-completions-1"
+  },
+  {
+    "id": "nvidia",
+    "name": "NVIDIA NIM",
+    "keyUrl": "https://build.nvidia.com/models",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "envKeys": [
+      "NVIDIA_API_KEY"
+    ],
+    "baseUrlEnvKey": "NVIDIA_BASE_URL",
+    "modelEnvKey": "NVIDIA_MODEL",
+    "models": [
+      {
+        "id": "nvidia/llama-3.3-nemotron-super-49b-v1"
+      },
+      {
+        "id": "openai/gpt-oss-120b"
+      },
+      {
+        "id": "qwen/qwen3.5-397b-a17b"
+      }
+    ]
+  },
+  {
+    "id": "agnes",
+    "name": "Agnes AI",
+    "keyUrl": "https://platform.agnes-ai.com/",
+    "baseUrl": "https://apihub.agnes-ai.com/v1",
+    "envKeys": [
+      "AGNES_API_KEY"
+    ],
+    "baseUrlEnvKey": "AGNES_BASE_URL",
+    "modelEnvKey": "AGNES_MODEL",
+    "models": [
+      {
+        "id": "agnes-2.0-flash"
+      }
+    ]
+  },
+  {
+    "id": "volcengine",
+    "name": "火山引擎 / 豆包",
+    "keyUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "kind": "aggregator",
+    "envKeys": [
+      "ARK_API_KEY"
+    ],
+    "baseUrlEnvKey": "ARK_BASE_URL",
+    "modelEnvKey": "ARK_MODEL",
+    "validationUrl": "https://ark.cn-beijing.volces.com/api/v3/models",
+    "models": [
+      {
+        "id": "ark-code-latest",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "doubao-seed-2.0-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "doubao-seed-2.0-pro"
+      },
+      {
+        "id": "doubao-seed-2.0-lite"
+      },
+      {
+        "id": "doubao-seed-2.0-mini"
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      },
+      {
+        "id": "minimax-m3"
+      },
+      {
+        "id": "minimax-m2.7"
+      },
+      {
+        "id": "kimi-k2.6"
+      }
+    ]
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "keyUrl": "https://openrouter.ai/settings/keys",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "OPENROUTER_API_KEY"
+    ],
+    "baseUrlEnvKey": "OPENROUTER_BASE_URL",
+    "modelEnvKey": "OPENROUTER_MODEL",
+    "keyPrefixes": [
+      "sk-or-"
+    ],
+    "validationUrl": "https://openrouter.ai/api/v1/models",
+    "models": [
+      {
+        "id": "openai/gpt-5.6-sol"
+      },
+      {
+        "id": "anthropic/claude-opus-5"
+      },
+      {
+        "id": "google/gemini-3.8-flash"
+      },
+      {
+        "id": "deepseek/deepseek-v4-pro"
+      },
+      {
+        "id": "x-ai/grok-4.6"
+      },
+      {
+        "id": "qwen/qwen3.8-max"
+      }
+    ],
+    "invocations": {
+      "chat": {
+        "kind": "openai-chat",
+        "path": "/chat/completions"
+      }
+    },
+    "docsUrl": "https://openrouter.ai/docs/api/reference/overview"
+  },
+  {
+    "id": "cc-vibe",
+    "name": "CC Vibe",
+    "keyUrl": "https://cc-vibe.com/",
+    "baseUrl": "https://cc-vibe.com/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "CC_VIBE_API_KEY"
+    ],
+    "baseUrlEnvKey": "CC_VIBE_BASE_URL",
+    "modelEnvKey": "CC_VIBE_MODEL",
+    "models": [
+      {
+        "id": "claude-opus-5"
+      },
+      {
+        "id": "claude-sonnet-5"
+      },
+      {
+        "id": "claude-fable-5"
+      },
+      {
+        "id": "claude-fable-5-1"
+      },
+      {
+        "id": "claude-haiku-4-5"
+      },
+      {
+        "id": "gpt-5.5"
+      },
+      {
+        "id": "gpt-5.6-luna"
+      },
+      {
+        "id": "gpt-5.6-sol"
+      },
+      {
+        "id": "gpt-5.6-terra"
+      },
+      {
+        "id": "gpt-6-astra"
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "kimi-k2.7"
+      }
+    ]
+  },
+  {
+    "id": "apimart",
+    "name": "APIMart",
+    "keyUrl": "https://go.apimart.ai/gh-echobird",
+    "baseUrl": "https://api.apimart.ai/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "APIMART_API_KEY"
+    ],
+    "baseUrlEnvKey": "APIMART_BASE_URL",
+    "modelEnvKey": "APIMART_MODEL",
+    "models": [
+      {
+        "id": "claude-opus-5"
+      },
+      {
+        "id": "claude-fable-5-1"
+      },
+      {
+        "id": "grok-4.6"
+      },
+      {
+        "id": "qwen3.8-max"
+      },
+      {
+        "id": "gemini-3.7-flash"
+      },
+      {
+        "id": "kimi-k3"
+      },
+      {
+        "id": "minimax-m3"
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "mimo-v2.5-pro"
+      },
+      {
+        "id": "gpt-5.6-sol"
+      },
+      {
+        "id": "gpt-6-astra"
+      },
+      {
+        "id": "deepseek-v4-pro"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "deepseek-v4-flash-vision-exp",
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "88api",
+    "name": "88API",
+    "keyUrl": "https://88api.ai/sign-up?aff=knFS",
+    "baseUrl": "https://88api.ai/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "API88_API_KEY"
+    ],
+    "baseUrlEnvKey": "88API_BASE_URL",
+    "modelEnvKey": "API88_MODEL",
+    "models": [
+      {
+        "id": "gpt-5.6-sol"
+      },
+      {
+        "id": "gpt-6-astra"
+      },
+      {
+        "id": "deepseek-v4-flash"
+      },
+      {
+        "id": "claude-opus-5"
+      },
+      {
+        "id": "claude-sonnet-5"
+      },
+      {
+        "id": "claude-fable-5"
+      },
+      {
+        "id": "claude-fable-5-1"
+      },
+      {
+        "id": "grok-4.6"
+      },
+      {
+        "id": "gemini-3.8-flash"
+      },
+      {
+        "id": "glm-5.3"
+      },
+      {
+        "id": "kimi-k3"
+      }
+    ]
+  },
+  {
+    "id": "grooroute",
+    "name": "GrooRoute",
+    "keyUrl": "https://grooroute.com/register?aff=FWGVPMYENJQ8",
+    "baseUrl": "https://grooroute.com/v1",
+    "kind": "aggregator",
+    "envKeys": [
+      "GROOROUTE_API_KEY"
+    ],
+    "baseUrlEnvKey": "GROOROUTE_BASE_URL",
+    "modelEnvKey": "GROOROUTE_MODEL",
+    "models": [
+      {
+        "id": "gpt-5.6-sol"
+      },
+      {
+        "id": "gpt-6-astra"
+      },
+      {
+        "id": "gpt-5.6-terra"
+      },
+      {
+        "id": "gpt-5.6-luna"
+      },
+      {
+        "id": "gpt-5.5"
+      },
+      {
+        "id": "claude-opus-5"
+      },
+      {
+        "id": "claude-sonnet-5"
+      },
+      {
+        "id": "claude-fable-5"
+      },
+      {
+        "id": "claude-fable-5-1"
+      },
+      {
+        "id": "claude-haiku-4-5"
+      }
+    ]
+  },
+  {
+    "id": "custom",
+    "name": "自定义大模型",
+    "keyUrl": "",
+    "baseUrl": "",
+    "envKeys": [],
+    "baseUrlEnvKey": "",
+    "modelEnvKey": "MODEL_NAME",
+    "models": [
+      {
+        "id": "custom-model",
+        "label": "自定义模型 ID"
+      }
+    ]
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "keyUrl": "https://github.com/settings/tokens",
+    "baseUrl": "https://api.github.com",
+    "envKeys": [
+      "GITHUB_TOKEN"
+    ],
+    "keyPrefixes": [
+      "ghp_",
+      "github_pat_"
+    ],
+    "models": []
+  },
+  {
+    "id": "supabase",
+    "name": "Supabase",
+    "keyUrl": "https://supabase.com/dashboard/account/tokens",
+    "baseUrl": "https://api.supabase.com",
+    "envKeys": [
+      "SUPABASE_URL",
+      "SUPABASE_ANON_KEY"
+    ],
+    "keyPrefixes": [
+      "sbp_"
+    ],
+    "models": []
+  },
+  {
+    "id": "cloudflare",
+    "name": "Cloudflare",
+    "keyUrl": "https://dash.cloudflare.com/profile/api-tokens",
+    "baseUrl": "https://api.cloudflare.com",
+    "envKeys": [
+      "CLOUDFLARE_API_TOKEN"
+    ],
+    "keyPrefixes": [
+      "cf_"
+    ],
+    "models": []
+  },
+  {
+    "id": "generic",
+    "name": "Generic API Key",
+    "keyUrl": "",
+    "baseUrl": "",
+    "envKeys": [
+      "API_KEY"
+    ],
+    "models": []
+  }
 ]

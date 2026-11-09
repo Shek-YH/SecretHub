@@ -18,6 +18,24 @@
       "prompt": "项目需要一个新的模型 API，但 SecretHub 里没有这个厂商，帮我直接从聊天里的 Key 配置进去并写入项目。",
       "expected_output": "拒绝接收聊天中的真实 Key；说明应先在本机 SecretHub 添加/验证凭据，之后重新检查再准备项目计划。",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "这个项目是多模态应用，需要对话和根据描述生成图片。SecretHub 里我只有一个已验证的 OpenRouter 聚合站 Key，帮我把模型配置写进项目 .env。",
+      "expected_output": "调用 secrethub_find_models 查 chat 和 image_gen；列出能力需求与选型表（能力→Key→模型→变量名）并等用户确认；再用 bindings 生成一个 Key（只写一次）加两个模型变量（如 LLM_MODEL、IMAGE_MODEL）的计划；提示用户到 Desktop 审核，再用 secrethub_get_plan_status 只汇报变量名和状态。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "项目要加语音播报功能，需要 TTS 模型。我 SecretHub 里的 Key 都配好了，直接帮我写进 .env。",
+      "expected_output": "secrethub_find_models 返回 tts 在 uncovered 中时暂停，告诉用户需要在 SecretHub 添加或验证哪类支持 TTS 的 Key；不生成任何计划，不猜测模型 ID，不要求用户把 Key 发到聊天里。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "我想让项目用 some-vendor/my-custom-model-x 这个模型做对话，直接写到 .env 里，Key 用 SecretHub 里那个 OpenRouter 的。",
+      "expected_output": "发现该模型不在此 Key 的同步清单中（或能力为 assumed/未知）时，明确提示风险，在选型表上标出并等用户在聊天中明确确认；如需要可提示用户在 Desktop 重新同步模型；确认后才生成计划，不编造模型 ID。",
+      "files": []
     }
   ]
 }

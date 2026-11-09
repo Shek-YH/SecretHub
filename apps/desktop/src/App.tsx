@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
-import { backend, isTauriRuntime, type PendingPlan, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
-import { defaultApiKeyEnvKey, defaultEndpointEnvKey, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
+import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal } from './McpReview';
+import { CaptureRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
+import { MediaLibrary } from './MediaLibrary';
+import { CaptureModal } from './KeyCapture';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { TagField } from './TagPicker';
+import { CatalogSettings } from './CatalogSettings';
+import { buildModelOptions } from './modelOptions';
+import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, providerKind, providerTemplate, providerTemplates, type ProviderTemplate } from './providers';
+import { CAPABILITY_ORDER, CapabilityModelsEditor, CapabilityModelsPanel, DEFAULT_CAPABILITY_ENV, capabilityError, capabilityLabel, needsCapabilitySection, normalizeRows } from './CapabilityModels';
 
 type SecretMetadata = {
   id: string;
@@ -21,9 +29,11 @@ type SecretMetadata = {
   modelEnvKey?: string;
   endpointUrl?: string;
   endpointEnvKey?: string;
+  modelsSyncedAt?: number;
+  modelsSyncStatus?: string;
 };
 type Profile = { id: string; name: string; description: string; secret_ids: string[] };
-type Navigation = 'all' | 'api_key' | 'token' | 'url' | 'password' | 'text' | 'providers' | 'profiles' | 'projects' | 'settings' | 'audit';
+type Navigation = 'all' | 'api_key' | 'token' | 'url' | 'password' | 'text' | 'providers' | 'profiles' | 'projects' | 'media' | 'settings' | 'audit';
 type CredentialPreset = { provider: string; name: string; envKey: string; modelId: string; modelEnvKey: string; endpointUrl: string; endpointEnvKey: string };
 
 const demoSecrets: SecretMetadata[] = [
@@ -40,6 +50,18 @@ export function App() {
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [pendingPlans, setPendingPlans] = useState<PendingPlan[]>([]);
+  const [reviewPlan, setReviewPlan] = useState<PendingPlan | null>(null);
+  const [capBatches, setCapBatches] = useState<CapabilitySuggestionBatch[]>([]);
+  const [reviewCaps, setReviewCaps] = useState<CapabilitySuggestionBatch | null>(null);
+  const [pendingSync, setPendingSync] = useState<PendingSyncRequest[]>([]);
+  const previousSyncCount = useRef(0);
+  const [captureRequests, setCaptureRequests] = useState<CaptureRequest[]>([]);
+  const [captureName, setCaptureName] = useState<string | null>(null);
+  const [mediaRequests, setMediaRequests] = useState<MediaRequest[]>([]);
+  const [mediaRevision, setMediaRevision] = useState(0);
+  const [modelsRevision, setModelsRevision] = useState(0);
+  const [, setCatalogRevision] = useState(0);
+  const [autoLocked, setAutoLocked] = useState(false);
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -56,6 +78,10 @@ export function App() {
   const [editingSecret, setEditingSecret] = useState<SecretMetadata | null>(null);
   const [validationMessage, setValidationMessage] = useState('');
   const [validationRunning, setValidationRunning] = useState(false);
+  const [models, setModels] = useState<BackendModel[]>([]);
+  const [capRows, setCapRows] = useState<CapabilityModelRow[]>([]);
+  const [modelSyncing, setModelSyncing] = useState(false);
+  const [modelMessage, setModelMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [activeNav, setActiveNav] = useState<Navigation>('all');
   const [credentialPreset, setCredentialPreset] = useState<CredentialPreset | null>(null);
@@ -63,7 +89,20 @@ export function App() {
   const [usageCounts, setUsageCounts] = useState<Record<string, number>>(demoUsageCounts);
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
-  useEffect(() => { setActionMessage(''); setValidationMessage(''); }, [selectedId]);
+  useEffect(() => { setActionMessage(''); setValidationMessage(''); setModelMessage(''); }, [selectedId]);
+  const selectedSyncedAt = secrets.find((item) => item.id === selectedId)?.modelsSyncedAt;
+  useEffect(() => {
+    if (!isTauriRuntime()) { setModels([]); return; }
+    let cancelled = false;
+    backend.models(selectedId).then((items) => { if (!cancelled) setModels(items); }).catch(() => { if (!cancelled) setModels([]); });
+    return () => { cancelled = true; };
+  }, [selectedId, selectedSyncedAt, modelsRevision]);
+  useEffect(() => {
+    if (!isTauriRuntime()) { setCapRows([]); return; }
+    let cancelled = false;
+    backend.capabilityModels(selectedId).then((rows) => { if (!cancelled) setCapRows(rows); }).catch(() => { if (!cancelled) setCapRows([]); });
+    return () => { cancelled = true; };
+  }, [selectedId, selectedSyncedAt, modelsRevision]);
   const filtered = useMemo(() => {
     const result = secrets.filter((secret) => `${secret.name} ${secret.envKey} ${secret.provider} ${secret.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && (activeNav === 'all' || activeNav === 'api_key' || activeNav === 'token' || activeNav === 'url' || activeNav === 'password' || activeNav === 'text' ? (activeNav === 'all' || secret.valueType === activeNav) : true) && (categoryFilter === 'all' || secret.category === categoryFilter) && (statusFilter === 'all' || secret.status === statusFilter) && (!favoriteOnly || Boolean(secret.favorite)) && (includeArchived || !secret.archived));
     return [...result].sort((left, right) => sortMode === 'name' ? left.name.localeCompare(right.name) : sortMode === 'usage' ? (usageCounts[right.id] ?? 0) - (usageCounts[left.id] ?? 0) : 0);
@@ -76,26 +115,98 @@ export function App() {
       const [items, audit] = await Promise.all([backend.list(query), backend.audit()]);
       const counts = audit.reduce<Record<string, number>>((result, event) => { if (event.operation === 'env_exported' && event.secret_id) result[event.secret_id] = (result[event.secret_id] ?? 0) + 1; return result; }, {});
       setUsageCounts(counts);
-      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key })));
+      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: 'now', valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status })));
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
   }
+
+  // Provider templates come from the effective catalog in the desktop app; demo/test mode keeps the static import.
+  const appliedCatalogSerial = useRef<number | null>(null);
+  const reloadCatalog = () => { backend.catalogEffective().then((effective) => { if (appliedCatalogSerial.current === effective.serial) return; appliedCatalogSerial.current = effective.serial; applyEffectiveCatalog(effective); setCatalogRevision((value) => value + 1); }).catch(() => undefined); };
+  // The backend may apply a verified remote catalog in the background; a cheap local poll picks it up.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    reloadCatalog();
+    const timer = window.setInterval(reloadCatalog, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
     backend.status().then((status) => { setVaultStatus(status); if (status.unlocked) { void refreshSecrets(); void validateAllApiKeys(); } else setSecrets([]); }).catch((error) => setRuntimeError(String(error)));
   }, []);
 
+  // Any backend call that hits the idle auto-lock drops back to the unlock screen
+  // and discards open forms (they may hold a plaintext value).
+  useEffect(() => {
+    const onAutoLock = () => { setVaultStatus({ initialized: true, unlocked: false }); setSecrets([]); setShowForm(false); setEditingSecret(null); setShowExport(false); setReviewPlan(null); setReviewCaps(null); setRuntimeError(null); setAutoLocked(true); };
+    window.addEventListener(AUTO_LOCK_EVENT, onAutoLock);
+    return () => window.removeEventListener(AUTO_LOCK_EVENT, onAutoLock);
+  }, []);
+
+  // Typing or clicking counts as activity for the idle timer (throttled to once a minute).
+  useEffect(() => {
+    if (!isTauriRuntime() || !vaultStatus?.unlocked) return;
+    let last = 0;
+    const onActivity = () => { const now = Date.now(); if (now - last < 60_000) return; last = now; void backend.touch().catch(() => undefined); };
+    window.addEventListener('keydown', onActivity);
+    window.addEventListener('pointerdown', onActivity);
+    return () => { window.removeEventListener('keydown', onActivity); window.removeEventListener('pointerdown', onActivity); };
+  }, [vaultStatus?.unlocked]);
+
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); };
+    const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); void backend.pendingCapabilitySuggestions().then(setCapBatches).catch((error) => setRuntimeError(String(error)));
+      // Queued AI sync requests run in the backend once unlocked; when the queue drains, reload what they changed.
+      void backend.pendingSyncRequests().then((items) => { setPendingSync(items); if (previousSyncCount.current > 0 && items.length === 0) { void refreshSecretsRef.current(); setModelsRevision((value) => value + 1); } previousSyncCount.current = items.length; }).catch(() => undefined);
+      void backend.pendingCaptureRequests().then(setCaptureRequests).catch(() => undefined);
+      void backend.pendingMediaRequests().then(setMediaRequests).catch(() => undefined); };
     loadPlans();
     const timer = window.setInterval(loadPlans, 2000);
     return () => window.clearInterval(timer);
   }, []);
 
-  async function confirmPlan(plan: PendingPlan) {
-    try { await backend.confirmPlan(plan.request_id, true); setPendingPlans((current) => current.filter((item) => item.request_id !== plan.request_id)); await refreshSecrets(); } catch (error) { setRuntimeError(String(error)); }
+  const refreshSecretsRef = useRef(refreshSecrets);
+  refreshSecretsRef.current = refreshSecrets;
+
+  // Capture opens the official key page and watches the clipboard in the backend; the UI only shows its state.
+  async function startCapture(providerId: string, providerName: string) {
+    if (!isTauriRuntime()) { setActionMessage(t.capture.desktopOnly); return; }
+    try { await backend.captureStart(providerId); setShowForm(false); setCaptureName(providerName); }
+    catch (error) { setRuntimeError(`${t.capture.failed}: ${String(error)}`); }
+  }
+
+  async function decideCapture(request: CaptureRequest, accept: boolean) {
+    try {
+      await backend.captureDecision(request.requestId, accept);
+      setCaptureRequests((current) => current.filter((item) => item.requestId !== request.requestId));
+      if (accept) setCaptureName(request.providerName);
+    } catch (error) { setRuntimeError(`${t.capture.failed}: ${String(error)}`); }
+  }
+
+  async function decideMedia(request: MediaRequest, accept: boolean) {
+    try {
+      await backend.mediaDecision(request.requestId, accept);
+      setMediaRequests((current) => current.filter((item) => item.requestId !== request.requestId));
+      setMediaRevision((value) => value + 1);
+    } catch (error) { setRuntimeError(`${t.media.failed}: ${String(error)}`); }
+  }
+
+  const captureDone = useRef<(secretId: string) => void>(() => undefined);
+  captureDone.current = (secretId: string) => { void refreshSecrets(); setActiveNav('all'); setSelectedId(secretId); setModelsRevision((value) => value + 1); };
+
+  function planReviewed() {
+    const id = reviewPlan?.request_id;
+    setReviewPlan(null);
+    if (id) setPendingPlans((current) => current.filter((item) => item.request_id !== id));
+    void refreshSecrets();
+  }
+
+  function capsReviewed() {
+    const id = reviewCaps?.requestId;
+    setReviewCaps(null);
+    if (id) setCapBatches((current) => current.filter((item) => item.requestId !== id));
+    setModelsRevision((value) => value + 1);
   }
 
   function runBackendAction(action: () => Promise<unknown>, successMessage?: string) {
@@ -109,7 +220,47 @@ export function App() {
       const status = await backend.validate(id);
       setSecrets((current) => current.map((secret) => secret.id === id ? { ...secret, status } : secret));
       setValidationMessage(statusText(status, t));
+      void refreshSecrets();
     } catch (error) { setValidationMessage(String(error)); }
+  }
+
+  async function syncModels(id: string) {
+    if (!isTauriRuntime()) { setModelMessage(t.models.desktopOnly); return; }
+    setModelSyncing(true);
+    try {
+      const result = await backend.syncModels(id);
+      setModelMessage(result.status === 'ok' ? `${t.models.ok} · ${result.count}` : modelStatusText(result.status, t));
+      await refreshSecrets();
+    } catch (error) { setModelMessage(String(error)); }
+    finally { setModelSyncing(false); }
+  }
+
+  // Reuses secret_update with an empty value, which only rewrites metadata and never touches the encrypted secret.
+  async function setDefaultModel(secret: SecretMetadata, modelId: string) {
+    if (!isTauriRuntime()) { setModelMessage(t.models.desktopOnly); return; }
+    try {
+      await backend.update(secret.id, { name: secret.name, provider_id: secret.provider, env_key: secret.envKey, description: secret.description ?? '', tags: secret.tags, value: '', value_type: secret.valueType ?? 'api_key', category: secret.category ?? 'other', scope: secret.scope ?? 'global', favorite: secret.favorite ?? false, archived: secret.archived ?? false, model_id: modelId, model_env_key: secret.modelEnvKey ?? '', endpoint_url: secret.endpointUrl ?? '', endpoint_env_key: secret.endpointEnvKey ?? '' });
+      setSecrets((current) => current.map((item) => item.id === secret.id ? { ...item, modelId } : item));
+      setModelMessage(`${t.models.defaultSet}: ${modelId}`);
+    } catch (error) { setModelMessage(String(error)); }
+  }
+
+  // Writes one capability row, keeping the user's env name or falling back to the default; the backend re-validates.
+  async function setCapabilityDefault(secret: SecretMetadata, capability: string, modelId: string) {
+    if (!isTauriRuntime()) { setModelMessage(t.models.desktopOnly); return; }
+    const existing = capRows.find((row) => row.capability === capability);
+    const next = normalizeRows([...capRows.filter((row) => row.capability !== capability), { capability, model_id: modelId, env_key: existing?.env_key || DEFAULT_CAPABILITY_ENV[capability] || '' }]);
+    const problem = capabilityError(t, next, [secret.envKey, secret.modelEnvKey ?? '', secret.endpointEnvKey ?? '']);
+    if (problem) { setModelMessage(problem); return; }
+    try { await backend.setCapabilityModels(secret.id, next); setCapRows(next); setModelMessage(`${t.cap.defaultSet}: ${capabilityLabel(t, capability)} · ${modelId}`); } catch (error) { setModelMessage(String(error)); }
+  }
+
+  // New aggregator keys: validate and sync right after saving, then show the detail with the capability section.
+  async function openAfterSync(id: string) {
+    setActiveNav('all'); setSelectedId(id); setModelSyncing(true);
+    try { await backend.validate(id); await refreshSecrets(); setModelsRevision((value) => value + 1); setModelMessage(t.cap.autoSyncDone); }
+    catch (error) { setModelMessage(String(error)); }
+    finally { setModelSyncing(false); }
   }
 
   async function validateAllApiKeys() {
@@ -118,7 +269,8 @@ export function App() {
     setActionMessage(t.actions.validatingAll);
     try {
       const results = await backend.validateMany();
-      setSecrets((current) => current.map((secret) => { const result = results.find((item) => item.id === secret.id); return result ? { ...secret, status: result.status } : secret; }));
+      setSecrets((current) => current.map((secret) => { const result = results.find((item) => item.id === secret.id); return result ? { ...secret, status: result.status, modelsSyncStatus: result.models_sync_status || secret.modelsSyncStatus } : secret; }));
+      void refreshSecrets();
       setActionMessage(results.length > 0 ? `${t.actions.validateAllDone} · ${results.length}` : t.actions.validateAllEmpty);
     } catch (error) { setActionMessage(`${t.actions.operationFailed}: ${String(error)}`); }
     finally { setValidationRunning(false); }
@@ -139,15 +291,21 @@ export function App() {
     setSelectedIds((current) => allVisibleSelected ? current.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...current, ...visibleIds])));
   }
 
-  async function saveSecret(request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) {
+  async function saveSecret(fullRequest: SecretRequest) {
+    const { capability_models: capabilityModels, ...request } = fullRequest;
     if (editingSecret) {
-      if (isTauriRuntime()) await backend.update(editingSecret.id, request);
+      if (isTauriRuntime()) { await backend.update(editingSecret.id, request); if (capabilityModels) await backend.setCapabilityModels(editingSecret.id, capabilityModels); }
       setSecrets((current) => current.map((secret) => secret.id === editingSecret.id ? { ...secret, name: request.name, envKey: request.env_key, provider: request.provider_id, description: request.description, tags: request.tags, updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key, endpointUrl: request.endpoint_url, endpointEnvKey: request.endpoint_env_key } : secret));
       setEditingSecret(null);
       if (isTauriRuntime()) await refreshSecrets();
       return;
     }
-    if (isTauriRuntime()) { await backend.create(request); await refreshSecrets(); return; }
+    if (isTauriRuntime()) {
+      const createdId = await backend.create(request);
+      await refreshSecrets();
+      if (request.value_type === 'api_key' && providerKind(request.provider_id) === 'aggregator') void openAfterSync(createdId);
+      return;
+    }
     const localSecret: SecretMetadata = { id: `local-${Date.now()}`, name: request.name, envKey: request.env_key, provider: request.provider_id, description: request.description, tags: request.tags, status: 'unknown', updated: 'now', valueType: request.value_type, category: request.category, scope: request.scope, favorite: request.favorite, archived: request.archived, modelId: request.model_id, modelEnvKey: request.model_env_key, endpointUrl: request.endpoint_url, endpointEnvKey: request.endpoint_env_key };
     setSecrets((current) => [localSecret, ...current]);
   }
@@ -177,6 +335,7 @@ export function App() {
           <NavItem active={activeNav === 'profiles'} label={t.nav.profiles} onClick={() => setActiveNav('profiles')} />
           <NavItem active={activeNav === 'projects'} label={t.nav.projects} onClick={() => setActiveNav('projects')} />
           <NavItem active={activeNav === 'providers'} label={t.nav.providers} dot="green" onClick={() => setActiveNav('providers')} />
+          <NavItem active={activeNav === 'media'} label={t.media.nav} onClick={() => setActiveNav('media')} />
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setActiveNav('settings')}><span className="nav-glyph">/</span>{t.nav.settings}</button>
@@ -198,9 +357,15 @@ export function App() {
         <section className="security-strip" aria-label="Security status">
           <span className="shield-icon" aria-hidden="true">◆</span><span>{t.security.localOnly}</span><span className="strip-divider" /><span>{t.security.encrypted}</span><span className="strip-divider" /><span>{t.security.audit}</span>
         </section>
-        {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onConfirm={() => void confirmPlan(plan)} />)}
+        {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onReview={() => setReviewPlan(plan)} />)}
+        {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
+        {vaultStatus?.unlocked && captureRequests.map((request) => <CaptureRequestBanner key={request.requestId} request={request} t={t} onStart={() => void decideCapture(request, true)} onDecline={() => void decideCapture(request, false)} />)}
+        {mediaRequests.map((request) => <MediaRequestBanner key={request.requestId} request={request} t={t} onAccept={() => void decideMedia(request, true)} onDecline={() => void decideMedia(request, false)} />)}
+        {capBatches.map((batch) => <CapabilitySuggestionBanner key={batch.requestId} batch={batch} t={t} onReview={() => setReviewCaps(batch)} />)}
+        {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}
+        {reviewCaps && <CapabilitySuggestionModal batch={reviewCaps} t={t} onClose={() => setReviewCaps(null)} onDone={capsReviewed} />}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked ? <VaultGate status={vaultStatus} t={t} onReady={() => { setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'settings' ? <SettingsPanel t={t} /> : activeNav === 'providers' ? <ProviderPanel t={t} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked && activeNav !== 'media' ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'media' ? <MediaLibrary t={t} revision={mediaRevision} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
               <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>⌘ K</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><select aria-label={t.list.sort} value={sortMode} onChange={(event) => setSortMode(event.target.value as 'updated' | 'usage' | 'name')}><option value="updated">{t.list.sortUpdated}</option><option value="usage">{t.list.sortUsage}</option><option value="name">{t.list.sortName}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
@@ -219,7 +384,7 @@ export function App() {
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {selected.provider.toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
                   <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value">••••••••••••••••Km2</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
                   <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} />{selected.modelId && <Field label={t.form.model} value={selected.modelId} />}{selected.endpointUrl && <Field label={t.form.endpointUrl} value={selected.endpointUrl} />}<div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
-                  <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
+                  <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}{selected.valueType === 'api_key' && <ModelSyncSection t={t} locale={locale} status={selected.modelsSyncStatus ?? ''} syncedAt={selected.modelsSyncedAt ?? 0} models={models} syncing={modelSyncing} message={modelMessage} onSync={() => void syncModels(selected.id)} currentModelId={selected.modelId} onSetDefault={(modelId) => void setDefaultModel(selected, modelId)} capabilityRows={capRows} onSetCapabilityDefault={(capability, modelId) => void setCapabilityDefault(selected, capability, modelId)} />}{selected.valueType === 'api_key' && needsCapabilitySection(providerKind(selected.provider), models) && <CapabilityModelsPanel key={selected.id} t={t} models={models} rows={capRows} primaryModelId={selected.modelId} reservedEnvKeys={[selected.envKey, selected.modelEnvKey ?? '', selected.endpointEnvKey ?? '']} onSave={async (rows) => { await backend.setCapabilityModels(selected.id, rows); setCapRows(rows); }} />}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
                   <div className="detail-note"><span className="lock-small">◆</span><span>{t.security.warning}</span></div>
                 </> : <div className="empty-detail">{t.detail.noSelection}</div>}
               </section>
@@ -228,7 +393,8 @@ export function App() {
         )}
         <footer className="app-footer"><span>SecretHub / {t.footer.version}</span><span>{t.footer.vault} · {t.footer.synced}</span></footer>
       </main>
-      {showForm && <SecretForm t={t} initial={editingSecret} preset={credentialPreset} onClose={() => { setShowForm(false); setEditingSecret(null); setCredentialPreset(null); }} onSave={saveSecret} />}
+      {captureName && <CaptureModal t={t} providerName={captureName} onCaptured={(secretId) => captureDone.current(secretId)} onClose={() => { setCaptureName(null); void refreshSecrets(); setModelsRevision((value) => value + 1); }} />}
+      {showForm && <SecretForm t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} preset={credentialPreset} syncedModels={editingSecret && editingSecret.id === selectedId ? models : []} capabilityRows={editingSecret && editingSecret.id === selectedId ? capRows : []} onCapture={(providerId, providerName) => void startCapture(providerId, providerName)} onClose={() => { setShowForm(false); setEditingSecret(null); setCredentialPreset(null); }} onSave={saveSecret} />}
       {showExport && <ExportPanel t={t} selectedIds={selectedIds} onClose={() => setShowExport(false)} onExported={() => void refreshSecrets()} />}
       {showImport && <ImportPanel t={t} onClose={() => setShowImport(false)} onDone={() => { setShowImport(false); void refreshSecrets(); }} />}
       {showProfilePrompt && <ProfilePrompt t={t} selectedIds={selectedIds} onClose={() => setShowProfilePrompt(false)} onSaved={() => { setShowProfilePrompt(false); setActiveNav('profiles'); }} />}
@@ -237,7 +403,7 @@ export function App() {
   );
 }
 
-function VaultGate({ status, t, onReady }: { status: VaultStatus; t: ReturnType<typeof getTranslation>; onReady: () => void }) {
+function VaultGate({ status, t, notice, onReady }: { status: VaultStatus; t: ReturnType<typeof getTranslation>; notice?: string; onReady: () => void }) {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState('');
@@ -245,10 +411,10 @@ function VaultGate({ status, t, onReady }: { status: VaultStatus; t: ReturnType<
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (setup && password !== confirmation) { setError(t.auth.mismatch); return; }
-    if (password.length < 12) { setError(t.auth.minLength); return; }
+    if (password.length < 9) { setError(t.auth.minLength); return; }
     try { if (setup) await backend.setupMaster(password); else await backend.unlock(password); onReady(); } catch (reason) { setError(String(reason)); }
   }
-  return <section className="vault-gate"><div className="gate-orb"><span /></div><span className="section-kicker">LOCAL VAULT / {setup ? 'FIRST RUN' : 'LOCKED'}</span><h2>{setup ? t.auth.setupTitle : t.auth.unlockTitle}</h2><p>{t.auth.subtitle}</p><form onSubmit={submit}><label>{t.auth.password}<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={setup ? 'new-password' : 'current-password'} /></label>{setup && <label>{t.auth.confirmPassword}<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>}{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" type="submit">{setup ? t.auth.setup : t.auth.unlock}</button></form></section>;
+  return <section className="vault-gate"><div className="gate-orb"><span /></div><span className="section-kicker">LOCAL VAULT / {setup ? 'FIRST RUN' : 'LOCKED'}</span><h2>{setup ? t.auth.setupTitle : t.auth.unlockTitle}</h2><p>{t.auth.subtitle}</p>{notice && <div className="form-error" role="status">{notice}</div>}<form onSubmit={submit}><label>{t.auth.password}<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={setup ? 'new-password' : 'current-password'} /></label>{setup && <label>{t.auth.confirmPassword}<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>}{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" type="submit">{setup ? t.auth.setup : t.auth.unlock}</button></form></section>;
 }
 
 function NavItem({ label, active, count, dot, onClick }: { label: string; active?: boolean; count?: string; dot?: string; onClick: () => void }) {
@@ -259,22 +425,47 @@ function statusText(status: string, t: ReturnType<typeof getTranslation>): strin
   return ({ valid: t.list.valid, invalid: t.list.invalid, unauthorized: t.list.unauthorized, rate_limited: t.list.rateLimited, network_error: t.list.networkError, unsupported: t.list.unsupported, unknown: t.list.unknown } as Record<string, string>)[status] ?? status;
 }
 
+const MODEL_DISPLAY_CAP = 200;
+
+function modelStatusText(status: string, t: ReturnType<typeof getTranslation>): string {
+  return ({ ok: t.models.ok, failed: t.models.failed, unsupported: t.models.unsupported } as Record<string, string>)[status] ?? t.models.never;
+}
+
+export function ModelSyncSection({ t, locale, status, syncedAt, models, syncing, message, onSync, currentModelId, onSetDefault, capabilityRows = [], onSetCapabilityDefault }: { t: ReturnType<typeof getTranslation>; locale: Locale; status: string; syncedAt: number; models: BackendModel[]; syncing: boolean; message: string; onSync: () => void; currentModelId?: string; onSetDefault?: (modelId: string) => void; capabilityRows?: CapabilityModelRow[]; onSetCapabilityDefault?: (capability: string, modelId: string) => void }) {
+  const shown = models.slice(0, MODEL_DISPLAY_CAP);
+  const synced = syncedAt > 0 ? new Date(syncedAt * 1000).toLocaleString(locale) : '—';
+  return <section className="model-sync" aria-label={t.models.title}>
+    <div className="model-sync-head"><strong>{t.models.title}</strong><button className="secondary-button" disabled={syncing} onClick={onSync}>{syncing ? t.models.syncing : t.models.sync}</button></div>
+    <div className="model-sync-meta"><span>{modelStatusText(status, t)}</span><span>{t.models.syncedAt}: {synced}</span><span>{t.models.count}: {models.length}</span></div>
+    {message && <div className="form-success model-message">{message}</div>}
+    <ul className="model-list">{shown.length === 0 ? <li className="model-empty">{t.models.empty}</li> : shown.map((model) => <li key={model.model_id}><code>{model.model_id}</code>{model.capabilities.map((cap) => <span className="tag" key={cap}>{cap}</span>)}<span className="model-source">{t.models.sourceLabel}: {model.capability_source}</span>{onSetDefault && (model.model_id === currentModelId ? <span className="model-default-mark">{t.models.currentDefault}</span> : <button type="button" className="secondary-button model-default-button" aria-label={`${t.models.setDefault} ${model.model_id}`} onClick={() => onSetDefault(model.model_id)}>{t.models.setDefault}</button>)}{onSetCapabilityDefault && <CapabilityDefaultMenu t={t} model={model} rows={capabilityRows} onPick={onSetCapabilityDefault} />}</li>)}</ul>
+    {models.length > MODEL_DISPLAY_CAP && <div className="model-more">+{models.length - MODEL_DISPLAY_CAP} {t.models.more}</div>}
+  </section>;
+}
+
+/** Per-row "set as <capability> default" menu; offers only the model's non-chat capabilities. */
+function CapabilityDefaultMenu({ t, model, rows, onPick }: { t: ReturnType<typeof getTranslation>; model: BackendModel; rows: CapabilityModelRow[]; onPick: (capability: string, modelId: string) => void }) {
+  const offered = CAPABILITY_ORDER.filter((capability) => model.capabilities.includes(capability));
+  if (offered.length === 0) return null;
+  return <select className="model-capability-menu" aria-label={`${t.cap.menuAria} ${model.model_id}`} value="" onChange={(event) => { if (event.target.value) onPick(event.target.value, model.model_id); }}><option value="">{t.cap.menuPlaceholder}</option>{offered.map((capability) => <option key={capability} value={capability}>{t.cap.setFor.replace('{cap}', capabilityLabel(t, capability))}{rows.some((row) => row.capability === capability && row.model_id === model.model_id) ? ' ✓' : ''}</option>)}</select>;
+}
+
 function SecretRow({ secret, selected, checked, t, onClick, onToggle }: { secret: SecretMetadata; selected: boolean; checked: boolean; t: ReturnType<typeof getTranslation>; onClick: () => void; onToggle: () => void }) {
   return <article className={`secret-row ${selected ? 'selected' : ''}`} onClick={onClick}><input type="checkbox" checked={checked} onChange={onToggle} onClick={(event) => event.stopPropagation()} aria-label={`${t.actions.export} ${secret.name}`} /><div className="row-avatar">{secret.provider.slice(0, 1)}</div><div className="row-copy"><strong>{secret.name}</strong><span>{secret.envKey}</span><small>{secret.provider} · {secret.updated}</small></div><span className={`row-status ${secret.status}`} />{secret.favorite && <span className="favorite">★</span>}</article>;
 }
 
 function Field({ label, value }: { label: string; value: string }) { return <div><span className="field-label">{label}</span><strong className="field-value">{value}</strong></div>; }
 
-function ProviderPanel({ t, onConfigure }: { t: ReturnType<typeof getTranslation>; onConfigure: (preset: CredentialPreset) => void }) {
+function ProviderPanel({ t, onConfigure, onCapture }: { t: ReturnType<typeof getTranslation>; onConfigure: (preset: CredentialPreset) => void; onCapture: (provider: ProviderTemplate) => void }) {
   async function openWebsite(url: string) { if (isTauriRuntime()) await backend.openExternalUrl(url); else window.open(url, '_blank', 'noopener,noreferrer'); }
   function configure(provider: ProviderTemplate) {
-    const model = provider.models[0];
+    const model = provider.models.find((item) => item.id === provider.defaultModel) ?? provider.models[0];
     onConfigure({ provider: provider.id, name: `${provider.name} · ${model.label}`, envKey: defaultApiKeyEnvKey(provider.id), modelId: model.id, modelEnvKey: model.envKey, endpointUrl: provider.baseUrl, endpointEnvKey: defaultEndpointEnvKey(provider.id) });
   }
-  return <section className="settings-panel provider-panel"><div className="settings-heading"><span className="section-kicker">{t.providerPanel.kicker}</span><h2>{t.nav.providers}</h2><p>{t.providerPanel.subtitle}</p></div><div className="provider-directory-grid">{providerTemplates.map((provider) => <article className="provider-directory-card" key={provider.id}><div className="provider-directory-heading"><div><strong>{provider.name}</strong><span>{provider.models.length} {t.providerPanel.templates}</span></div><span className="provider-dot green" /></div><div className="provider-models">{provider.models.slice(0, 4).map((model) => <span key={model.id}>{model.label}</span>)}{provider.models.length > 4 && <span>+ {provider.models.length - 4}</span>}</div><div className="provider-directory-url">{provider.baseUrl || t.providerPanel.endpoint}</div><div className="provider-card-actions"><button className="secondary-button" onClick={() => configure(provider)}>{t.providerPanel.configure}</button>{provider.keyUrl && <button className="inline-link" onClick={() => void openWebsite(provider.keyUrl)}>{t.providerPanel.officialKey}</button>}</div></article>)}</div><div className="form-security"><span>◆</span>{t.providerPanel.security}</div></section>;
+  return <section className="settings-panel provider-panel"><div className="settings-heading"><span className="section-kicker">{t.providerPanel.kicker}</span><h2>{t.nav.providers}</h2><p>{t.providerPanel.subtitle}</p></div><div className="provider-directory-grid">{providerTemplates.map((provider) => <article className="provider-directory-card" key={provider.id}><div className="provider-directory-heading"><div><strong>{provider.name}</strong><span>{provider.models.length} {t.providerPanel.templates}</span></div><span className="provider-dot green" /></div><div className="provider-models">{provider.models.slice(0, 4).map((model) => <span key={model.id}>{model.label}</span>)}{provider.models.length > 4 && <span>+ {provider.models.length - 4}</span>}</div><div className="provider-directory-url">{provider.baseUrl || t.providerPanel.endpoint}</div><div className="provider-card-actions"><button className="secondary-button" onClick={() => configure(provider)}>{t.providerPanel.configure}</button>{provider.keyUrl && <button className="inline-link" onClick={() => void openWebsite(provider.keyUrl)}>{t.providerPanel.officialKey}</button>}{provider.keyUrl && <button className="inline-link" onClick={() => onCapture(provider)}>{t.capture.button}</button>}</div></article>)}</div><div className="form-security"><span>◆</span>{t.providerPanel.security}</div></section>;
 }
 
-function SettingsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
+function SettingsPanel({ t, locale, onCatalogUpdated }: { t: ReturnType<typeof getTranslation>; locale: Locale; onCatalogUpdated: () => void }) {
   const [message, setMessage] = useState('');
   async function exportBackup() {
     const folder = isTauriRuntime() ? await backend.chooseFolder() : '.';
@@ -282,7 +473,7 @@ function SettingsPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
     if (isTauriRuntime()) await backend.backup(`${folder}/SecretHub.secrethub-backup`);
     setMessage(t.settings.backupSaved);
   }
-  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
+  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><CatalogSettings t={t} locale={locale} onUpdated={onCatalogUpdated} /><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
 }
 
 function ProfilePrompt({ t, selectedIds, onClose, onSaved }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void; onSaved: () => void }) {
@@ -352,16 +543,22 @@ function AuditPanel({ t }: { t: ReturnType<typeof getTranslation> }) {
   return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">SECURITY / TRACEABLE</span><h2>{t.auditPanel.title}</h2><p>{t.security.audit}</p></div><div className="audit-list">{events.length === 0 ? <div className="empty-state"><strong>{t.auditPanel.empty}</strong></div> : events.map((event) => <div className="audit-row" key={event.id}><strong>{event.operation}</strong><span>{event.result}</span></div>)}</div></section>;
 }
 
-function McpPlanBanner({ plan, t, onConfirm }: { plan: PendingPlan; t: ReturnType<typeof getTranslation>; onConfirm: () => void }) {
-  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{plan.secret_ids.length} {t.nav.secrets}</small></div><button className="primary-button" onClick={onConfirm}>{t.mcp.confirm}</button></section>;
+export function McpPlanBanner({ plan, t, onReview }: { plan: PendingPlan; t: ReturnType<typeof getTranslation>; onReview: () => void }) {
+  const [preview, setPreview] = useState<PlanPreview | null>(null);
+  useEffect(() => { if (isTauriRuntime()) void backend.planPreview(plan.request_id).then(setPreview).catch(() => setPreview(null)); }, [plan.request_id]); // plans are immutable per request id; avoid re-reading on every poll
+  const conflicts = preview?.entries.filter((entry) => entry.conflict).map((entry) => entry.key) ?? [];
+  const warningCount = preview?.entries.reduce((total, entry) => total + entry.warnings.length, 0) ?? 0;
+  const errors = preview?.errors ?? [];
+  const keyCount = preview ? preview.entries.length : plan.secret_ids.length;
+  return <section className="mcp-plan" aria-label={t.mcp.title}><div><span className="section-kicker">MCP / CONFIRMATION REQUIRED</span><strong>{t.mcp.title}</strong><p>{t.mcp.description}</p><code>{plan.project_path}</code><small>{keyCount} {t.nav.secrets}</small>{preview && preview.entries.length > 0 && <small>{preview.entries.map((entry) => entry.key).join(', ')}</small>}{conflicts.length > 0 && <div className="conflict-box">{t.mcp.overwrite}{conflicts.join(', ')}</div>}{warningCount > 0 && <div className="conflict-box">{warningCount} {t.mcp.warnings}</div>}{errors.length > 0 && <div className="form-error" role="alert">{t.mcp.errors}{errors.map((error) => error.code).join(', ')}</div>}</div><div className="mcp-plan-actions"><button className="primary-button" onClick={onReview}>{t.review.open}</button></div></section>;
 }
 
 function SettingGroup({ title, items }: { title: string; items: string[][] }) { return <div className="setting-group"><h3>{title}</h3>{items.map(([label, value]) => <div className="setting-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>; }
 
-type SecretRequest = { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string };
+type SecretRequest = { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; capability_models?: CapabilityModelRow[] };
 type CredentialType = 'api_key' | 'token' | 'url' | 'password' | 'text';
 
-function SecretForm({ t, initial, preset, onClose, onSave }: { t: ReturnType<typeof getTranslation>; initial: SecretMetadata | null; preset?: CredentialPreset | null; onClose: () => void; onSave: (request: SecretRequest) => Promise<void> }) {
+export function SecretForm({ t, knownTags, initial, preset, syncedModels = [], capabilityRows = [], onCapture, onClose, onSave }: { t: ReturnType<typeof getTranslation>; knownTags: string[]; initial: SecretMetadata | null; preset?: CredentialPreset | null; syncedModels?: BackendModel[]; capabilityRows?: CapabilityModelRow[]; onCapture?: (providerId: string, providerName: string) => void; onClose: () => void; onSave: (request: SecretRequest) => Promise<void> }) {
   const existingProvider = initial ? providerTemplates.find((item) => item.id === initial.provider || item.name === initial.provider)?.id ?? 'custom' : preset?.provider ?? '';
   const [mode, setMode] = useState<'type' | 'provider' | 'form'>(initial || preset ? 'form' : 'type');
   const [credentialType, setCredentialType] = useState<CredentialType>((initial?.valueType as CredentialType) ?? 'api_key');
@@ -374,19 +571,23 @@ function SecretForm({ t, initial, preset, onClose, onSave }: { t: ReturnType<typ
   const [category, setCategory] = useState(initial?.category ?? 'other');
   const [scope, setScope] = useState(initial?.scope ?? 'global');
   const [favorite, setFavorite] = useState(initial?.favorite ?? false);
-  const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
+  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [notes, setNotes] = useState(initial?.description ?? '');
   const [modelId, setModelId] = useState(initial?.modelId ?? preset?.modelId ?? '');
   const [modelEnvKey, setModelEnvKey] = useState(initial?.modelEnvKey ?? preset?.modelEnvKey ?? '');
   const [endpointUrl, setEndpointUrl] = useState(initial?.endpointUrl ?? preset?.endpointUrl ?? '');
   const [endpointEnvKey, setEndpointEnvKey] = useState(initial?.endpointEnvKey ?? preset?.endpointEnvKey ?? '');
+  const [capDraft, setCapDraft] = useState<CapabilityModelRow[]>(capabilityRows);
   const [error, setError] = useState('');
   const template: ProviderTemplate = providerTemplate(provider);
+  const showCaps = Boolean(initial) && credentialType === 'api_key' && needsCapabilitySection(providerKind(provider), syncedModels);
+  const modelOptional = credentialType === 'api_key' && providerKind(provider) === 'aggregator';
   const availableProviders = providerTemplates.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(providerQuery.toLowerCase()));
-  const isCustomModel = template.id === 'custom' || !template.models.some((model) => model.id === modelId);
+  const modelGroups = buildModelOptions(template.models, template.id === 'custom' ? [] : syncedModels, template.defaultModel);
+  const isCustomModel = template.id === 'custom' || ![...modelGroups.synced, ...modelGroups.recommended].some((model) => model.id === modelId);
 
   function selectTemplate(next: ProviderTemplate) {
-    const firstModel = next.models[0];
+    const firstModel = next.models.find((item) => item.id === next.defaultModel) ?? next.models[0];
     setProvider(next.id);
     setName((current) => current || next.name);
     setEnvKey((current) => current || defaultApiKeyEnvKey(next.id));
@@ -411,8 +612,14 @@ function SecretForm({ t, initial, preset, onClose, onSave }: { t: ReturnType<typ
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      if (credentialType === 'api_key' && (!modelId.trim() || !endpointUrl.trim())) throw new Error(t.form.apiKeyFieldsRequired);
-      await onSave({ name, provider_id: provider || 'custom', env_key: envKey.trim().toUpperCase(), description: notes, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean), value, value_type: valueType, category, scope, favorite, archived: initial?.archived ?? false, model_id: modelId.trim(), model_env_key: modelEnvKey.trim().toUpperCase(), endpoint_url: endpointUrl.trim(), endpoint_env_key: endpointEnvKey.trim().toUpperCase() });
+      if (credentialType === 'api_key' && ((!modelId.trim() && !modelOptional) || !endpointUrl.trim())) throw new Error(t.form.apiKeyFieldsRequired);
+      let capabilityModels: CapabilityModelRow[] | undefined;
+      if (showCaps) {
+        capabilityModels = normalizeRows(capDraft);
+        const problem = capabilityError(t, capabilityModels, [envKey.trim().toUpperCase(), modelEnvKey.trim().toUpperCase(), endpointEnvKey.trim().toUpperCase()]);
+        if (problem) throw new Error(problem);
+      }
+      await onSave({ ...(capabilityModels ? { capability_models: capabilityModels } : {}), name, provider_id: provider || 'custom', env_key: envKey.trim().toUpperCase(), description: notes, tags, value, value_type: valueType, category, scope, favorite, archived: initial?.archived ?? false, model_id: modelId.trim(), model_env_key: modelEnvKey.trim().toUpperCase(), endpoint_url: endpointUrl.trim(), endpoint_env_key: endpointEnvKey.trim().toUpperCase() });
       onClose();
     } catch (reason) { setError(String(reason)); }
   }
@@ -432,11 +639,12 @@ function SecretForm({ t, initial, preset, onClose, onSave }: { t: ReturnType<typ
     return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.form.addTitle}><div className="secret-form provider-picker"><div className="form-heading"><div><span className="section-kicker">API KEY / PROVIDER</span><h2>{t.form.addTitle}</h2><p className="form-intro">{t.form.providerIntro}</p></div><div className="form-heading-actions"><button type="button" className="back-button" onClick={() => setMode('type')}>{t.form.back}</button><button type="button" className="close-button" onClick={onClose}>×</button></div></div><input className="provider-search-input" aria-label={t.form.providerSearch} placeholder={t.form.providerSearch} value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} />{availableProviders.length === 0 ? <div className="empty-state provider-empty"><strong>{t.form.providerSearchEmpty}</strong></div> : <div className="provider-grid">{availableProviders.map((item) => <button type="button" className="provider-card" key={item.id} onClick={() => selectTemplate(item)}><strong>{item.name}</strong><span>{item.models.length} {t.providerPanel.templates}</span>{item.keyUrl && <small>{t.providerPanel.officialKey}</small>}</button>)}</div>}</div></div>;
   }
 
-  const modelOptions = template.models;
+  const modelOptions = [...modelGroups.synced, ...modelGroups.recommended];
+  const optionLabel = (model: { id: string; label: string; capabilities: string[] }) => `${model.label} · ${model.id}${model.capabilities.length ? ` [${model.capabilities.join(', ')}]` : ''}`;
   async function openExternal(url: string) {
     try { if (isTauriRuntime()) await backend.openExternalUrl(url); else window.open(url, '_blank', 'noopener,noreferrer'); } catch (reason) { setError(String(reason)); }
   }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">{credentialType === 'api_key' ? `API KEY / ${template.name.toUpperCase()}` : `${credentialType.toUpperCase()} / ${credentialType.toUpperCase()}`}</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2><p className="form-intro">{credentialType === 'api_key' ? t.form.presetIntro : t.form.plainIntro}</p></div><button type="button" className="close-button" onClick={onClose}>×</button></div>{credentialType === 'api_key' && <><label>{t.form.provider}<select value={provider} onChange={(event) => selectTemplate(providerTemplate(event.target.value))}>{providerTemplates.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>{template.keyUrl && <div className="provider-link-row"><span>API Key</span><a href={template.keyUrl} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openExternal(template.keyUrl); }}>{t.form.officialKeyLink}</a></div>}</>}<label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<span className="optional-label">{t.form.optional}</span><input value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.value}<input required={!initial} value={value} onChange={(event) => setValue(event.target.value)} type={credentialType === 'url' ? 'url' : credentialType === 'text' ? 'text' : 'password'} autoComplete="new-password" placeholder={initial ? t.form.keepExistingValue : undefined} />{credentialType === 'url' && value.trim() && <button type="button" className="inline-link" onClick={() => void openExternal(value.trim())}>{t.form.openUrl}</button>}</label>{credentialType === 'api_key' && <><div className="form-two-col"><label>{t.form.model}<select value={isCustomModel ? '__custom__' : modelId} onChange={(event) => { const next = event.target.value; if (next === '__custom__') { setModelId(''); setModelEnvKey('MODEL_NAME'); } else { const found = modelOptions.find((item) => item.id === next); setModelId(next); if (found) setModelEnvKey(found.envKey); } }}>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.label} · {model.id}</option>)}<option value="__custom__">{t.form.customModel}</option></select>{isCustomModel && <input value={modelId} onChange={(event) => setModelId(event.target.value)} placeholder="your-model-id" />}</label><label>{t.form.modelEnvKey}<input value={modelEnvKey} onChange={(event) => setModelEnvKey(event.target.value)} placeholder="OPENAI_MODEL" /></label></div><div className="form-two-col"><label>{t.form.endpointUrl}<input required value={endpointUrl} onChange={(event) => setEndpointUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label><label>{t.form.endpointEnvKey}<input required value={endpointEnvKey} onChange={(event) => setEndpointEnvKey(event.target.value)} placeholder="OPENAI_BASE_URL" /></label></div></>}<div className="form-two-col"><label>{t.form.valueType}<select value={valueType} onChange={(event) => { const next = event.target.value as CredentialType; setCredentialType(next); setValueType(next); }}>{credentialType === 'api_key' && <option value="api_key">API key</option>}{credentialType !== 'api_key' && <option value={credentialType}>{credentialType.toUpperCase()}</option>}</select></label><label>{t.form.category}<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select></label></div><label>{t.form.scope}<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="global">Global</option><option value="project">Project</option><option value="profile">Profile</option></select></label><label className="checkbox-label"><input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />{t.form.favorite}</label><label>{t.form.tags}<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="ai, production" /></label><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={initial ? t.form.editTitle : t.form.addTitle}><form className="secret-form" onSubmit={submit}><div className="form-heading"><div><span className="section-kicker">{credentialType === 'api_key' ? `API KEY / ${template.name.toUpperCase()}` : `${credentialType.toUpperCase()} / ${credentialType.toUpperCase()}`}</span><h2>{initial ? t.form.editTitle : t.form.addTitle}</h2><p className="form-intro">{credentialType === 'api_key' ? t.form.presetIntro : t.form.plainIntro}</p></div><button type="button" className="close-button" onClick={onClose}>×</button></div>{credentialType === 'api_key' && <><label>{t.form.provider}<select value={provider} onChange={(event) => selectTemplate(providerTemplate(event.target.value))}>{providerTemplates.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>{template.keyUrl && <div className="provider-link-row"><span>API Key</span><a href={template.keyUrl} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openExternal(template.keyUrl); }}>{t.form.officialKeyLink}</a>{onCapture && !initial && <button type="button" className="inline-link" onClick={() => onCapture(template.id, template.name)}>{t.capture.button}</button>}</div>}</>}<label>{t.form.name}<input required value={name} onChange={(event) => setName(event.target.value)} placeholder={t.form.required} /></label><label>{t.form.envKey}<span className="optional-label">{t.form.optional}</span><input value={envKey} onChange={(event) => setEnvKey(event.target.value)} placeholder="OPENAI_API_KEY" /></label><label>{t.form.value}<input required={!initial} value={value} onChange={(event) => setValue(event.target.value)} type={credentialType === 'url' ? 'url' : credentialType === 'text' ? 'text' : 'password'} autoComplete="new-password" placeholder={initial ? t.form.keepExistingValue : undefined} />{credentialType === 'url' && value.trim() && <button type="button" className="inline-link" onClick={() => void openExternal(value.trim())}>{t.form.openUrl}</button>}</label>{credentialType === 'api_key' && <><div className="form-two-col"><label>{t.form.model}<select value={isCustomModel ? '__custom__' : modelId} onChange={(event) => { const next = event.target.value; if (next === '__custom__') { setModelId(''); setModelEnvKey('MODEL_NAME'); } else { const found = modelOptions.find((item) => item.id === next); setModelId(next); if (found) setModelEnvKey(found.envKey); } }}>{modelGroups.synced.length > 0 ? <><optgroup label={t.form.syncedModelsGroup}>{modelGroups.synced.map((model) => <option value={model.id} key={model.id}>{optionLabel(model)}</option>)}</optgroup>{modelGroups.recommended.length > 0 && <optgroup label={t.form.recommendedModelsGroup}>{modelGroups.recommended.map((model) => <option value={model.id} key={model.id}>{optionLabel(model)}</option>)}</optgroup>}</> : modelGroups.recommended.map((model) => <option value={model.id} key={model.id}>{optionLabel(model)}</option>)}<option value="__custom__">{t.form.customModel}</option></select>{isCustomModel && <input value={modelId} onChange={(event) => setModelId(event.target.value)} placeholder="your-model-id" />}</label><label>{t.form.modelEnvKey}<input value={modelEnvKey} onChange={(event) => setModelEnvKey(event.target.value)} placeholder="OPENAI_MODEL" /></label></div>{modelOptional && !initial && <p className="cap-hint">{t.cap.newKeyHint}</p>}<div className="form-two-col"><label>{t.form.endpointUrl}<input required value={endpointUrl} onChange={(event) => setEndpointUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label><label>{t.form.endpointEnvKey}<input required value={endpointEnvKey} onChange={(event) => setEndpointEnvKey(event.target.value)} placeholder="OPENAI_BASE_URL" /></label></div>{showCaps && <div className="cap-section"><strong>{t.cap.title}</strong><p className="cap-hint">{t.cap.hint}</p><CapabilityModelsEditor t={t} models={syncedModels} value={capDraft} onChange={setCapDraft} primaryModelId={modelId} /></div>}</>}<div className="form-two-col"><label>{t.form.valueType}<select value={valueType} onChange={(event) => { const next = event.target.value as CredentialType; setCredentialType(next); setValueType(next); }}>{credentialType === 'api_key' && <option value="api_key">API key</option>}{credentialType !== 'api_key' && <option value={credentialType}>{credentialType.toUpperCase()}</option>}</select></label><label>{t.form.category}<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select></label></div><label>{t.form.scope}<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="global">Global</option><option value="project">Project</option><option value="profile">Profile</option></select></label><label className="checkbox-label"><input type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />{t.form.favorite}</label><TagField t={t} value={tags} onChange={setTags} knownTags={knownTags} /><label>{t.form.notes}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.encrypted}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button><button className="primary-button" type="submit">{t.form.save}</button></div></form></div>;
 }
 
 function ExportPanel({ t, selectedIds, onClose, onExported }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void; onExported: () => void }) {

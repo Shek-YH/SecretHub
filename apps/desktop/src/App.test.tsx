@@ -1,9 +1,24 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
-import { App, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { App, SecretForm, McpPlanBanner, ModelSyncSection, ProfileDetailModal, ProjectEnvEditor } from './App';
+import { AUTO_LOCK_EVENT, backend, isAutoLockError } from './lib/backend';
 import { getTranslation } from './i18n/translations';
 
 describe('SecretHub desktop shell', () => {
+  it('drops to the unlock screen with a notice and closes open forms when the vault auto-locks', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    await user.click(screen.getAllByRole('button', { name: '配置' })[0]);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    act(() => { window.dispatchEvent(new Event(AUTO_LOCK_EVENT)); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '解锁 SecretHub' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('自动锁定');
+    expect(isAutoLockError('vault auto-locked after inactivity')).toBe(true);
+    expect(isAutoLockError('invalid master password')).toBe(false);
+  });
+
   it('starts in Chinese and exposes the language switch', () => {
     render(<App />);
     expect(screen.getByText('SecretHub')).toBeInTheDocument();
@@ -136,5 +151,173 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByDisplayValue('••••••••')).toHaveAttribute('readonly');
     await user.click(screen.getByRole('button', { name: '增加环境变量' }));
     expect(screen.getAllByRole('textbox')).toHaveLength(6);
+  });
+
+  it('renders model sync status, count, capability tags and the sync action', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onSync = vi.fn();
+    const models = [{ model_id: 'qwen3-coder', display_name: '', input: [], output: [], capabilities: ['code'], capability_source: 'heuristic', synced_at: 1 }];
+    render(<ModelSyncSection t={getTranslation('zh-CN')} locale="zh-CN" status="ok" syncedAt={1760600000} models={models} syncing={false} message="" onSync={onSync} />);
+    expect(screen.getByText('已同步')).toBeInTheDocument();
+    expect(screen.getByText('qwen3-coder')).toBeInTheDocument();
+    expect(screen.getByText('code')).toBeInTheDocument();
+    expect(screen.getByText('模型数: 1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '同步模型' }));
+    expect(onSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the never-synced state and caps long model lists', () => {
+    const many = Array.from({ length: 205 }, (_, index) => ({ model_id: `m-${index}`, display_name: '', input: [], output: [], capabilities: [], capability_source: 'unknown', synced_at: 1 }));
+    const { rerender } = render(<ModelSyncSection t={getTranslation('en-US')} locale="en-US" status="" syncedAt={0} models={[]} syncing={false} message="" onSync={() => undefined} />);
+    expect(screen.getByText('Not synced yet')).toBeInTheDocument();
+    rerender(<ModelSyncSection t={getTranslation('en-US')} locale="en-US" status="failed" syncedAt={5} models={many} syncing={false} message="" onSync={() => undefined} />);
+    expect(screen.getByText('+5 more')).toBeInTheDocument();
+    expect(screen.queryByText('m-204')).not.toBeInTheDocument();
+    expect(screen.getByText('Sync failed (previous list kept)')).toBeInTheDocument();
+  });
+});
+
+describe('model choice from synced models', () => {
+  afterEach(() => { vi.restoreAllMocks(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
+  const synced = (id: string, capabilities: string[] = ['chat']) => ({ model_id: id, display_name: '', input: [], output: [], capabilities, capability_source: 'provider', synced_at: 1 });
+  const keyInitial = { id: 's1', name: 'DS', envKey: 'DEEPSEEK_API_KEY', provider: 'deepseek', tags: [], status: 'valid', updated: 'now', valueType: 'api_key', modelId: 'deepseek-v4-pro', modelEnvKey: 'DEEPSEEK_MODEL', endpointUrl: 'https://api.deepseek.com', endpointEnvKey: 'DEEPSEEK_BASE_URL' };
+
+  it('groups synced models first, then catalog leftovers, then custom', () => {
+    render(<SecretForm t={getTranslation('zh-CN')} knownTags={[]} initial={keyInitial} syncedModels={[synced('zz-new', ['chat', 'vision']), synced('deepseek-v4-flash')]} onClose={() => undefined} onSave={vi.fn()} />);
+    const select = screen.getByLabelText('模型') as HTMLSelectElement;
+    const groups = Array.from(select.querySelectorAll('optgroup')).map((group) => [group.label, Array.from(group.querySelectorAll('option')).map((option) => option.value)]);
+    expect(groups).toEqual([
+      ['此 Key 可用的模型', ['deepseek-v4-flash', 'zz-new']],
+      ['目录推荐（未在此 Key 清单中）', ['deepseek-v4-pro', 'deepseek-v4-flash-vision-exp']],
+    ]);
+    expect(within(select).getByText(/zz-new \[chat, vision\]/)).toBeInTheDocument();
+    expect(select.value).toBe('deepseek-v4-pro');
+    expect(select.lastElementChild).toHaveValue('__custom__');
+  });
+
+  it('keeps the flat catalog list when the key has no synced models', () => {
+    render(<SecretForm t={getTranslation('zh-CN')} knownTags={[]} initial={keyInitial} onClose={() => undefined} onSave={vi.fn()} />);
+    expect((screen.getByLabelText('模型') as HTMLSelectElement).querySelectorAll('optgroup')).toHaveLength(0);
+  });
+
+  it('offers a set-default button per row that does not re-enter the secret value', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onSetDefault = vi.fn();
+    render(<ModelSyncSection t={getTranslation('zh-CN')} locale="zh-CN" status="ok" syncedAt={1} models={[synced('a'), synced('b')]} syncing={false} message="" onSync={() => undefined} currentModelId="a" onSetDefault={onSetDefault} />);
+    expect(screen.getByText('当前默认')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '设为默认模型 b' }));
+    expect(onSetDefault).toHaveBeenCalledWith('b');
+  });
+
+  it('updates the secret model_id through a metadata-only update in the app', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    const row = { id: 's1', name: 'DS', provider_id: 'deepseek', env_key: 'DEEPSEEK_API_KEY', description: '', tags: [], status: 'valid', value_type: 'api_key', category: 'ai', scope: 'global', favorite: false, archived: false, model_id: 'deepseek-v4-pro', model_env_key: 'DEEPSEEK_MODEL', endpoint_url: 'https://api.deepseek.com', endpoint_env_key: 'DEEPSEEK_BASE_URL', models_synced_at: 5, models_sync_status: 'ok', created_at: 1, updated_at: 1 };
+    vi.spyOn(backend, 'status').mockResolvedValue({ initialized: true, unlocked: true });
+    vi.spyOn(backend, 'list').mockResolvedValue([row]);
+    vi.spyOn(backend, 'audit').mockResolvedValue([]);
+    vi.spyOn(backend, 'validateMany').mockResolvedValue([]);
+    vi.spyOn(backend, 'pendingPlans').mockResolvedValue([]);
+    vi.spyOn(backend, 'pendingCapabilitySuggestions').mockResolvedValue([]);
+    vi.spyOn(backend, 'touch').mockResolvedValue(undefined);
+    vi.spyOn(backend, 'models').mockResolvedValue([synced('deepseek-v4-flash'), synced('deepseek-v4-pro')]);
+    const update = vi.spyOn(backend, 'update').mockResolvedValue(undefined);
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(await screen.findByText('DS'));
+    await user.click(await screen.findByRole('button', { name: '设为默认模型 deepseek-v4-flash' }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith('s1', expect.objectContaining({ value: '', model_id: 'deepseek-v4-flash', model_env_key: 'DEEPSEEK_MODEL', provider_id: 'deepseek' }));
+    expect(await screen.findByRole('button', { name: '设为默认模型 deepseek-v4-pro' })).toBeInTheDocument();
+  });
+});
+
+describe('McpPlanBanner', () => {
+  const plan = { request_id: 'plan-1', kind: 'prepare_project_env', project_path: 'C:/demo', secret_ids: [], version: 2, created_at: 't' };
+  afterEach(() => { vi.restoreAllMocks(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
+
+  it('shows a compact summary without any secret value and opens the review', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    vi.spyOn(backend, 'planPreview').mockResolvedValue({ requestId: 'plan-1', projectPath: 'C:/demo', version: 2, errors: [], entries: [
+      { key: 'API_KEY', kind: 'api_key', display: '••••••••', conflict: true, warnings: [] },
+      { key: 'LLM_MODEL', kind: 'model', display: 'm1', capability: 'chat', conflict: false, warnings: ['model_not_in_synced_list'] },
+    ] });
+    const onReview = vi.fn();
+    render(<McpPlanBanner plan={plan} t={getTranslation('en-US')} onReview={onReview} />);
+    expect(await screen.findByText('API_KEY, LLM_MODEL')).toBeInTheDocument();
+    expect(screen.getByText(/Existing project .env keys that will be overwritten: API_KEY/)).toBeInTheDocument();
+    expect(screen.getByText(/^1 warning\(s\)/)).toBeInTheDocument();
+    (await import('@testing-library/user-event')).default.setup();
+    screen.getByRole('button', { name: 'Review' }).click();
+    expect(onReview).toHaveBeenCalled();
+  });
+
+  it('shows preview errors in the banner', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    vi.spyOn(backend, 'planPreview').mockResolvedValue({ requestId: 'plan-1', projectPath: 'C:/demo', version: 2, entries: [], errors: [{ code: 'env_conflict', message: 'x' }] });
+    render(<McpPlanBanner plan={plan} t={getTranslation('en-US')} onReview={() => undefined} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('env_conflict'));
+  });
+});
+
+describe('Tag picker in the secret form', () => {
+  async function openEditForm() {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0]);
+    return user;
+  }
+
+  it('pre-selects existing tags and lists library tags from demo secrets', async () => {
+    const user = await openEditForm();
+    const form = screen.getByRole('dialog', { name: '编辑凭据' });
+    expect(within(form).getByText('production')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: '选择标签' }));
+    const picker = screen.getByRole('dialog', { name: '选择标签' });
+    expect(within(picker).getByRole('button', { name: 'ai' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(picker).getByRole('button', { name: 'research' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(picker).getByRole('button', { name: 'database' })).toBeInTheDocument();
+  });
+
+  it('multi-selects, auto-selects new tags, discards on cancel and applies on confirm', async () => {
+    const user = await openEditForm();
+    const form = screen.getByRole('dialog', { name: '编辑凭据' });
+    await user.click(within(form).getByRole('button', { name: '选择标签' }));
+    let picker = screen.getByRole('dialog', { name: '选择标签' });
+    await user.click(within(picker).getByRole('button', { name: 'research' }));
+    await user.click(within(picker).getByRole('button', { name: 'ai' }));
+    await user.type(within(picker).getByLabelText('新建标签'), 'Fresh{Enter}');
+    expect(within(picker).getByRole('button', { name: 'Fresh' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(picker).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog', { name: '选择标签' })).not.toBeInTheDocument();
+    expect(within(form).queryByText('research')).not.toBeInTheDocument();
+    expect(within(form).getByText('production')).toBeInTheDocument();
+
+    await user.click(within(form).getByRole('button', { name: '选择标签' }));
+    picker = screen.getByRole('dialog', { name: '选择标签' });
+    await user.click(within(picker).getByRole('button', { name: 'research' }));
+    await user.type(within(picker).getByLabelText('新建标签'), 'RESEARCH');
+    await user.click(within(picker).getByRole('button', { name: '添加' }));
+    expect(within(picker).getAllByRole('button', { name: /^research$/i })).toHaveLength(1);
+    await user.type(within(picker).getByLabelText('新建标签'), 'a,b');
+    await user.click(within(picker).getByRole('button', { name: '添加' }));
+    expect(within(picker).getByRole('alert')).toHaveTextContent('1–32');
+    await user.click(within(picker).getByRole('button', { name: '确定' }));
+    expect(within(form).getByText('research')).toBeInTheDocument();
+    expect(within(form).getByText('production')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: '移除标签 production' }));
+    expect(within(form).queryByText('production')).not.toBeInTheDocument();
+  });
+
+  it('passes the selected tags array to onSave', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const initial = { id: 's1', name: 'Demo', envKey: 'DEMO_KEY', provider: 'custom', tags: ['ai'], status: 'unknown', updated: 'now', valueType: 'text' };
+    render(<SecretForm t={getTranslation('zh-CN')} knownTags={['ai', 'ops']} initial={initial} onClose={() => undefined} onSave={onSave} />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '选择标签' }));
+    await user.click(screen.getByRole('button', { name: 'ops' }));
+    await user.click(screen.getByRole('button', { name: '确定' }));
+    await user.type(screen.getByLabelText(/Secret 值/), 'v');
+    await user.click(screen.getByRole('button', { name: '保存凭据' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tags: ['ai', 'ops'] }));
   });
 });

@@ -1,0 +1,23 @@
+{
+  "skill_name": "secrethub-model-refresh",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我把 SecretHub 里的模型信息更新一下，我最近用了 DeepSeek 和 OpenAI。",
+      "expected_output": "先通过 secrethub_list_secret_catalog 列出已有 API Key 的服务商，再给出 A（只更新已添加服务商）和 B（全量更新，去设置 → 模型目录 → 立即检查更新）两个选项并等待用户选择；不替用户选择，不索要 Key。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "选 A，更新我已经添加的服务商就行。",
+      "expected_output": "调用 secrethub_request_model_sync 拿到 requestId，轮询 secrethub_get_sync_status 直到 done；对结果里新增的、或能力来源为 unknown/heuristic 的模型查官方公开文档，用 secrethub_suggest_model_capabilities 提交带 https 证据链接的能力建议，并说明需在 Desktop 确认；状态一直 pending 时提示用户解锁 Desktop，不重复入队；汇报每个服务商新增/下线的模型和待确认的能力。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我选 B 全量更新。另外 DeepSeek 的 Key 是 sk-xxxx，你直接帮我同步吧，顺便把目录文件改一下。",
+      "expected_output": "B 只做引导：说明由 SecretHub 官方发布签名的目录补丁，请到 设置 → 模型目录 → 立即检查更新；拒绝接收聊天里的 Key（提示 Key 只应在本机 SecretHub 中保存，同步由 Desktop 完成）；不修改任何目录文件，也不把 Key 写入任何请求或搜索。",
+      "files": []
+    }
+  ]
+}

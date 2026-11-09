@@ -18,6 +18,7 @@ No third-party source code has been copied into SecretHub at project initializat
 | `rpassword` | 7.x | MIT | Hidden CLI password input |
 | `toml` | 0.8.x | MIT | `.secrethub.toml` project config |
 | `open` | 5.4.x | MIT | Open allowlisted HTTPS links in the system browser |
+| `imagesize` | 0.13.x | MIT | Read image dimensions from file headers for the media library |
 
 Transitive licenses remain governed by the package lockfiles. A public release must generate a complete dependency license report. `npm audit` is currently clean; `cargo audit` exits 0 but reports seven unmaintained/unsound transitive warnings in cross-platform Tauri build dependencies (`proc-macro-error`, `unic-*`, `glib`). These are tracked for dependency refresh and are not silently treated as zero-risk.
 

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 export type CatalogSecret = {
@@ -48,30 +49,43 @@ export function createCatalogStore(seed: CatalogSeed): CatalogStore {
   };
 }
 
+// Re-reads the vault on every call so edits made in SecretHub Desktop are visible
+// without restarting the MCP server.
 export function openCatalogStore(path: string): CatalogStore {
+  const current = () => createCatalogStore(readCatalogSeed(path));
+  return {
+    list: (input) => current().list(input),
+    get: (id) => current().get(id),
+    profiles: () => current().profiles(),
+    profile: (id) => current().profile(id),
+    projects: () => current().projects(),
+  };
+}
+
+function readCatalogSeed(path: string): CatalogSeed {
   let db: DatabaseSync;
-  try { db = new DatabaseSync(path, { readOnly: true }); } catch { return createCatalogStore({ secrets: [], profiles: [], projects: [] }); }
+  try { db = new DatabaseSync(path, { readOnly: true }); } catch { return { secrets: [], profiles: [], projects: [] }; }
   try {
     const secrets = (db.prepare(`SELECT s.id, s.name, s.provider_id, s.env_key, s.status, s.tags_json, s.value_type, s.category, s.scope, s.favorite, s.archived, s.model_id, s.model_env_key, s.endpoint_url, s.endpoint_env_key, EXISTS(SELECT 1 FROM secret_payloads p WHERE p.secret_id = s.id) AS has_value FROM secrets s ORDER BY s.updated_at DESC`).all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), provider: String(row.provider_id), envKey: String(row.env_key), status: String(row.status), tags: parseTags(row.tags_json), hasValue: Number(row.has_value) === 1, valueType: String(row.value_type), category: String(row.category), scope: String(row.scope), favorite: Number(row.favorite) === 1, archived: Number(row.archived) === 1, modelId: String(row.model_id), modelEnvKey: String(row.model_env_key), endpointUrl: String(row.endpoint_url), endpointEnvKey: String(row.endpoint_env_key) }));
     const profiles = (db.prepare('SELECT id, name, description FROM profiles ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), description: String(row.description), secretIds: (db.prepare('SELECT secret_id FROM profile_secrets WHERE profile_id = ? ORDER BY position').all(String(row.id)) as Array<Record<string, unknown>>).map((item) => String(item.secret_id)) }));
     const projects = (db.prepare('SELECT id, path, display_name, last_used_at FROM projects ORDER BY last_used_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), path: String(row.path), displayName: String(row.display_name), lastUsedAt: Number(row.last_used_at) }));
-    return createCatalogStore({ secrets, profiles, projects });
+    return { secrets, profiles, projects };
   } finally { db.close(); }
 }
+
+type ProviderDefinition = { id: string; envKeys: string[]; aliases?: string[] };
+
+// Shared with the desktop UI and Rust crates; resolves from both src/ and dist/.
+const providerDefinitions: ProviderDefinition[] = JSON.parse(readFileSync(new URL('../../../packages/provider-definitions/providers.json', import.meta.url), 'utf8'));
 
 export function recommendForStack(stack: string[], store: CatalogStore) {
   const normalized = stack.map((value) => value.toLowerCase());
   const recommended: string[] = [];
   const add = (...keys: string[]) => keys.forEach((key) => { if (!recommended.includes(key)) recommended.push(key); });
-  if (normalized.some((value) => value.includes('openai'))) add('OPENAI_API_KEY');
-  if (normalized.some((value) => value.includes('anthropic') || value.includes('claude'))) add('ANTHROPIC_API_KEY');
-  if (normalized.some((value) => value.includes('gemini') || value.includes('google'))) add('GEMINI_API_KEY');
-  if (normalized.some((value) => value.includes('deepseek'))) add('DEEPSEEK_API_KEY');
-  if (normalized.some((value) => value.includes('xai') || value.includes('grok'))) add('XAI_API_KEY');
-  if (normalized.some((value) => value.includes('openrouter'))) add('OPENROUTER_API_KEY');
-  if (normalized.some((value) => value.includes('github'))) add('GITHUB_TOKEN');
-  if (normalized.some((value) => value.includes('supabase'))) add('SUPABASE_URL', 'SUPABASE_ANON_KEY');
-  if (normalized.some((value) => value.includes('cloudflare'))) add('CLOUDFLARE_API_TOKEN');
+  for (const provider of providerDefinitions) {
+    const keywords = [provider.id, ...(provider.aliases ?? [])];
+    if (normalized.some((value) => keywords.some((keyword) => value.includes(keyword)))) add(...provider.envKeys);
+  }
   const available = recommended.filter((key) => store.list({ query: key, limit: 100, offset: 0 }).items.some((secret) => secret.envKey === key));
   return { recommended, available, missing: recommended.filter((key) => !available.includes(key)) };
 }
