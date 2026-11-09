@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { aiVisibleCondition } from './visibility.js';
 
 export type CatalogSecret = {
   id: string;
@@ -66,8 +67,10 @@ function readCatalogSeed(path: string): CatalogSeed {
   let db: DatabaseSync;
   try { db = new DatabaseSync(path, { readOnly: true }); } catch { return { secrets: [], profiles: [], projects: [] }; }
   try {
-    const secrets = (db.prepare(`SELECT s.id, s.name, s.provider_id, s.env_key, s.status, s.tags_json, s.value_type, s.category, s.scope, s.favorite, s.archived, s.model_id, s.model_env_key, s.endpoint_url, s.endpoint_env_key, EXISTS(SELECT 1 FROM secret_payloads p WHERE p.secret_id = s.id) AS has_value FROM secrets s ORDER BY s.updated_at DESC`).all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), provider: String(row.provider_id), envKey: String(row.env_key), status: String(row.status), tags: parseTags(row.tags_json), hasValue: Number(row.has_value) === 1, valueType: String(row.value_type), category: String(row.category), scope: String(row.scope), favorite: Number(row.favorite) === 1, archived: Number(row.archived) === 1, modelId: String(row.model_id), modelEnvKey: String(row.model_env_key), endpointUrl: String(row.endpoint_url), endpointEnvKey: String(row.endpoint_env_key) }));
-    const profiles = (db.prepare('SELECT id, name, description FROM profiles ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), description: String(row.description), secretIds: (db.prepare('SELECT secret_id FROM profile_secrets WHERE profile_id = ? ORDER BY position').all(String(row.id)) as Array<Record<string, unknown>>).map((item) => String(item.secret_id)) }));
+    const secrets = (db.prepare(`SELECT s.id, s.name, s.provider_id, s.env_key, s.status, s.tags_json, s.value_type, s.category, s.scope, s.favorite, s.archived, s.model_id, s.model_env_key, s.endpoint_url, s.endpoint_env_key, EXISTS(SELECT 1 FROM secret_payloads p WHERE p.secret_id = s.id) AS has_value FROM secrets s WHERE ${aiVisibleCondition(db)} ORDER BY s.updated_at DESC`).all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), provider: String(row.provider_id), envKey: String(row.env_key), status: String(row.status), tags: parseTags(row.tags_json), hasValue: Number(row.has_value) === 1, valueType: String(row.value_type), category: String(row.category), scope: String(row.scope), favorite: Number(row.favorite) === 1, archived: Number(row.archived) === 1, modelId: String(row.model_id), modelEnvKey: String(row.model_env_key), endpointUrl: String(row.endpoint_url), endpointEnvKey: String(row.endpoint_env_key) }));
+    // Profiles keep their own list, but ids the AI may not see are dropped from it.
+    const visible = new Set(secrets.map((secret) => secret.id));
+    const profiles = (db.prepare('SELECT id, name, description FROM profiles ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), name: String(row.name), description: String(row.description), secretIds: (db.prepare('SELECT secret_id FROM profile_secrets WHERE profile_id = ? ORDER BY position').all(String(row.id)) as Array<Record<string, unknown>>).map((item) => String(item.secret_id)).filter((id) => visible.has(id)) }));
     const projects = (db.prepare('SELECT id, path, display_name, last_used_at FROM projects ORDER BY last_used_at DESC').all() as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), path: String(row.path), displayName: String(row.display_name), lastUsedAt: Number(row.last_used_at) }));
     return { secrets, profiles, projects };
   } finally { db.close(); }
