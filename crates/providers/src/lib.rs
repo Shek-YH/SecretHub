@@ -70,6 +70,9 @@ pub struct ProviderDefinition {
     pub id: String,
     pub name: String,
     pub env_keys: Vec<String>,
+    /// Common providers shown first in the UI; also preferred when an env name is shared.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub featured: bool,
     #[serde(rename = "keyPrefixes", default)]
     pub prefixes: Vec<String>,
     pub base_url: String,

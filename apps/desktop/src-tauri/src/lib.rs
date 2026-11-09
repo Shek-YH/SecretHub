@@ -8,10 +8,12 @@ mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
+mod import;
 mod media;
 mod model_sync;
 mod plan;
 mod queue;
+mod restore;
 mod sync;
 
 pub struct AppState {
@@ -20,7 +22,7 @@ pub struct AppState {
     pub capture: capture::CaptureState,
 }
 
-fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let data_dir = app
         .path()
         .app_data_dir()
@@ -71,6 +73,9 @@ pub fn run() {
             commands::secret_delete,
             commands::secret_import_preview,
             commands::secret_import,
+            commands::choose_import_file,
+            commands::secret_import_file_preview,
+            commands::secret_import_file,
             commands::mcp_pending_plans,
             commands::mcp_confirm_plan,
             commands::mcp_plan_preview,
@@ -125,7 +130,9 @@ pub fn run() {
             catalog_update::catalog_check_now,
             commands::settings_get,
             commands::settings_update,
-            commands::backup_export
+            commands::backup_export,
+            commands::choose_backup_file,
+            commands::backup_restore
         ])
         .run(tauri::generate_context!())
         .expect("error while running SecretHub");

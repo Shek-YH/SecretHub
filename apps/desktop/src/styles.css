@@ -197,3 +197,9 @@ body { background: #071126; color: #eef4ff; }
 .filterable-option:hover, .filterable-option[aria-selected="true"] { background: #1a2f66; }
 .filterable-note { padding: 6px 10px; color: #7d918a; font-size: 10px; }
 .cap-row .filterable-select input { margin-top: 0; }
+.restore-dialog { width: min(480px, calc(100vw - 48px)); }
+.restore-file-row, .import-file-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.restore-file-name { min-width: 0; overflow-wrap: anywhere; color: #9fb4ae; font-size: 11px; }
+.import-paste-title { display: block; margin-top: 16px; color: #89a198; font-size: 11px; }
+.gate-restore-link { margin: 14px auto 0; }
+.setting-row select { width: auto; min-width: 90px; }

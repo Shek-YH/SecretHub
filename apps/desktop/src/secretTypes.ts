@@ -12,6 +12,8 @@ export type SecretMetadata = {
   updated: string;
   /** Unix seconds of the last change. */
   updatedAt?: number;
+  /** Unix seconds of the last key validation; 0 or missing means never. */
+  validatedAt?: number;
   favorite?: boolean;
   valueType?: string;
   category?: string;

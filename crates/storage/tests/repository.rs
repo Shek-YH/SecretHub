@@ -219,6 +219,7 @@ fn migrates_an_existing_database_without_model_sync_columns() {
     let metadata = database.get_metadata("old-1").unwrap().unwrap();
     assert_eq!(metadata.models_synced_at, 0);
     assert_eq!(metadata.models_sync_status, "");
+    assert_eq!(metadata.validated_at, 0);
     assert!(database.list_provider_models("old-1").unwrap().is_empty());
     drop(database);
     // Re-opening is idempotent.
@@ -529,4 +530,17 @@ fn migrates_an_existing_database_without_the_media_table() {
     let database = Database::open(&path).unwrap();
     assert!(database.list_media().unwrap().is_empty());
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn validation_records_its_time_without_touching_the_update_time() {
+    let (_path, database) = temp_database();
+    let id = new_key(&database, "openai");
+    let before = database.get_metadata(&id).unwrap().unwrap();
+    assert_eq!(before.validated_at, 0);
+    assert!(database.update_status(&id, "valid").unwrap());
+    let after = database.get_metadata(&id).unwrap().unwrap();
+    assert_eq!(after.status, "valid");
+    assert!(after.validated_at > 0);
+    assert_eq!(after.updated_at, before.updated_at);
 }

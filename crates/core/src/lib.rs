@@ -505,13 +505,25 @@ impl VaultService {
             .set_catalog_auto_update(enabled)
             .map_err(Into::into)
     }
+    /// Whole database encrypted as an `SHB2` backup that embeds the vault salt, so the master
+    /// password alone is enough to restore it on any machine.
     pub fn encrypted_backup(&self) -> Result<Vec<u8>, VaultError> {
         let key = self.require_key()?;
+        let Some((salt, _)) = self.database.get_vault_meta()? else {
+            return Err(VaultError::NotInitialized);
+        };
         self.database.checkpoint()?;
         let contents =
             std::fs::read(self.database.path()).map_err(|_| VaultError::InvalidSecret)?;
-        secrethub_backup::create_backup(key, &contents)
+        secrethub_backup::create_backup_v2(key, &salt, &contents)
             .map_err(|error| VaultError::Storage(StorageError::InvalidData(error.to_string())))
+    }
+
+    /// Decrypts an old `SHB1` backup with this unlocked vault's own key. Fails for backups of
+    /// any other vault, because the key is not stored in the file.
+    pub fn decrypt_legacy_backup(&self, backup: &[u8]) -> Result<Vec<u8>, VaultError> {
+        let key = self.require_key()?;
+        secrethub_backup::restore_backup(key, backup).map_err(|_| VaultError::InvalidPassword)
     }
 
     fn require_key(&self) -> Result<&VaultKey, VaultError> {

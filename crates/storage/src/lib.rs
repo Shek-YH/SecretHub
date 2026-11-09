@@ -37,6 +37,8 @@ pub struct SecretMetadata {
     pub models_synced_at: i64,
     /// `""` (never), `ok`, `failed` or `unsupported`.
     pub models_sync_status: String,
+    /// Unix seconds of the last key validation; 0 means never.
+    pub validated_at: i64,
 }
 
 /// One synced model of one key, with any capability override already applied.
@@ -412,6 +414,12 @@ impl Database {
         )?;
         add_column_if_missing(
             &connection,
+            "secrets",
+            "validated_at",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
             "settings",
             "catalog_auto_update",
             "INTEGER NOT NULL DEFAULT 1",
@@ -479,14 +487,14 @@ impl Database {
 
     pub fn get_metadata(&self, id: &str) -> Result<Option<SecretMetadata>, StorageError> {
         self.connection.query_row(
-            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets WHERE id = ?1",
+            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at FROM secrets WHERE id = ?1",
             params![id],
             metadata_from_row,
         ).optional().map_err(Into::into)
     }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, StorageError> {
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at FROM secrets ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map([], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -495,7 +503,7 @@ impl Database {
 
     pub fn search_metadata(&self, query: &str) -> Result<Vec<SecretMetadata>, StorageError> {
         let pattern = format!("%{}%", query);
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map(params![pattern], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -830,7 +838,7 @@ impl Database {
 
     pub fn update_status(&self, id: &str, status: &str) -> Result<bool, StorageError> {
         Ok(self.connection.execute(
-            "UPDATE secrets SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE secrets SET status = ?1, validated_at = ?2 WHERE id = ?3",
             params![status, unix_time(), id],
         )? > 0)
     }
@@ -1070,6 +1078,7 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         endpoint_env_key: row.get(17)?,
         models_synced_at: row.get(18)?,
         models_sync_status: row.get(19)?,
+        validated_at: row.get(20)?,
     })
 }
 

@@ -4,10 +4,12 @@ import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal 
 import { CaptureRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
 import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { CatalogSettings } from './CatalogSettings';
 import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, groupProviders, providerKind, providerTemplates, resolveProviderId, type ProviderTemplate } from './providers';
 import { SecretForm } from './SecretForm';
+import { ImportPanel } from './ImportPanel';
+import { RestoreDialog } from './BackupRestore';
 import type { CredentialPreset, SecretMetadata, SecretRequest } from './secretTypes';
 import { formatRelativeTime } from './time';
 import { CAPABILITY_ORDER, CapabilityModelsPanel, DEFAULT_CAPABILITY_ENV, capabilityError, capabilityLabel, needsCapabilitySection, normalizeRows } from './CapabilityModels';
@@ -115,7 +117,7 @@ export function App() {
       const [items, audit] = await Promise.all([backend.list(query), backend.audit()]);
       const counts = audit.reduce<Record<string, number>>((result, event) => { if (event.operation === 'env_exported' && event.secret_id) result[event.secret_id] = (result[event.secret_id] ?? 0) + 1; return result; }, {});
       setUsageCounts(counts);
-      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: '', updatedAt: secret.updated_at, valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status })));
+      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: '', updatedAt: secret.updated_at, validatedAt: secret.validated_at, valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status })));
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
   }
@@ -133,7 +135,7 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    backend.status().then((status) => { setVaultStatus(status); if (status.unlocked) { void refreshSecrets(); void validateAllApiKeys(); } else setSecrets([]); }).catch((error) => setRuntimeError(String(error)));
+    backend.status().then((status) => { setVaultStatus(status); if (status.unlocked) { void refreshSecrets(); void validateAllApiKeys(true); } else setSecrets([]); }).catch((error) => setRuntimeError(String(error)));
   }, []);
 
   // Any backend call that hits the idle auto-lock drops back to the unlock screen
@@ -263,17 +265,32 @@ export function App() {
     finally { setModelSyncing(false); }
   }
 
-  async function validateAllApiKeys() {
-    if (!isTauriRuntime()) { setActionMessage(t.actions.validateAllDone); return; }
-    setValidationRunning(true);
-    setActionMessage(t.actions.validatingAll);
+  // Startup and unlock only re-check keys that were never checked or are a day old (`onlyStale`, silent);
+  // the toolbar button checks every API key.
+  async function validateAllApiKeys(onlyStale = false) {
+    if (!isTauriRuntime()) { if (!onlyStale) setActionMessage(t.actions.validateAllDone); return; }
+    if (!onlyStale) { setValidationRunning(true); setActionMessage(t.actions.validatingAll); }
     try {
-      const results = await backend.validateMany();
+      const results = await backend.validateMany(onlyStale);
       setSecrets((current) => current.map((secret) => { const result = results.find((item) => item.id === secret.id); return result ? { ...secret, status: result.status, modelsSyncStatus: result.models_sync_status || secret.modelsSyncStatus } : secret; }));
-      void refreshSecrets();
-      setActionMessage(results.length > 0 ? `${t.actions.validateAllDone} · ${results.length}` : t.actions.validateAllEmpty);
-    } catch (error) { setActionMessage(`${t.actions.operationFailed}: ${String(error)}`); }
-    finally { setValidationRunning(false); }
+      if (results.length > 0) void refreshSecrets();
+      if (!onlyStale) setActionMessage(results.length > 0 ? `${t.actions.validateAllDone} · ${results.length}` : t.actions.validateAllEmpty);
+    } catch (error) { if (!onlyStale) setActionMessage(`${t.actions.operationFailed}: ${String(error)}`); }
+    finally { if (!onlyStale) setValidationRunning(false); }
+  }
+
+  // After a restore the vault holds different data: drop selections and reload everything from the backend.
+  function vaultRestored() {
+    setAutoLocked(false);
+    setVaultStatus({ initialized: true, unlocked: true });
+    setSelectedId('');
+    setSelectedIds([]);
+    setModels([]);
+    setCapRows([]);
+    setProfileRevision((value) => value + 1);
+    setModelsRevision((value) => value + 1);
+    void refreshSecrets();
+    void validateAllApiKeys(true);
   }
 
   function changeLocale(next: Locale) {
@@ -365,7 +382,7 @@ export function App() {
         {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}
         {reviewCaps && <CapabilitySuggestionModal batch={reviewCaps} t={t} onClose={() => setReviewCaps(null)} onDone={capsReviewed} />}
         {runtimeError && <div className="runtime-error" role="alert">{runtimeError}</div>}
-        {vaultStatus && !vaultStatus.unlocked && activeNav !== 'media' ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(); }} /> : activeNav === 'media' ? <MediaLibrary t={t} revision={mediaRevision} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} /> : activeNav === 'providers' ? <ProviderPanel t={t} secrets={secrets} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
+        {vaultStatus && !vaultStatus.unlocked && activeNav !== 'media' ? <VaultGate status={vaultStatus} t={t} notice={autoLocked ? t.auth.autoLocked : undefined} onReady={() => { setAutoLocked(false); setVaultStatus({ initialized: true, unlocked: true }); void refreshSecrets(); void validateAllApiKeys(true); }} onRestored={vaultRestored} /> : activeNav === 'media' ? <MediaLibrary t={t} revision={mediaRevision} /> : activeNav === 'settings' ? <SettingsPanel t={t} locale={locale} onCatalogUpdated={reloadCatalog} onRestored={vaultRestored} /> : activeNav === 'providers' ? <ProviderPanel t={t} secrets={secrets} onCapture={(provider) => void startCapture(provider.id, provider.name)} onConfigure={(preset) => { setCredentialPreset(preset); setEditingSecret(null); setShowForm(true); }} /> : activeNav === 'profiles' ? <ProfilePanel t={t} secrets={secrets} revision={profileRevision} selectedIds={selectedIds} onEdit={setEditingProfile} onApply={(ids) => { setSelectedIds(ids); setActiveNav('all'); setShowExport(true); }} /> : activeNav === 'projects' ? <ProjectsPanel t={t} /> : activeNav === 'audit' ? <AuditPanel t={t} /> : (
           <>
             <div className="content-toolbar">
               <div className="toolbar-left"><label className="search-box"><span aria-hidden="true">/</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.header.search} aria-label={t.header.search} /><kbd>{SEARCH_SHORTCUT_LABEL}</kbd></label><div className="filter-row"><button className="filter-button" onClick={toggleSelectAllVisible} disabled={filtered.length === 0}>{allVisibleSelected ? t.actions.clearAll : t.actions.selectAll}</button><select aria-label={t.nav.providers} value={categoryFilter === 'all' ? 'all' : categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">{t.list.allCategories}</option><option value="ai">AI</option><option value="database">Database</option><option value="cloud">Cloud</option><option value="git">Git</option><option value="other">Other</option></select><select aria-label={t.list.allStatuses} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">{t.list.allStatuses}</option><option value="valid">{t.list.valid}</option><option value="invalid">{t.list.invalid}</option><option value="unauthorized">{t.list.unauthorized}</option><option value="rate_limited">{t.list.rateLimited}</option><option value="network_error">{t.list.networkError}</option><option value="unsupported">{t.list.unsupported}</option><option value="unknown">{t.list.unknown}</option></select><select aria-label={t.list.sort} value={sortMode} onChange={(event) => setSortMode(event.target.value as 'updated' | 'usage' | 'name')}><option value="updated">{t.list.sortUpdated}</option><option value="usage">{t.list.sortUsage}</option><option value="name">{t.list.sortName}</option></select><button className={favoriteOnly ? 'filter-button active' : 'filter-button'} onClick={() => setFavoriteOnly((value) => !value)}>{t.list.favoriteOnly}</button><button className={includeArchived ? 'filter-button active' : 'filter-button'} onClick={() => setIncludeArchived((value) => !value)}>{t.list.includeArchived}</button></div></div>
@@ -383,7 +400,7 @@ export function App() {
                 {selected ? <>
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {selected.provider.toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
                   <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value" aria-label={t.detail.masked}>••••••••••••••••</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
-                  <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} />{selected.modelId && <Field label={t.form.model} value={selected.modelId} />}{selected.endpointUrl && <Field label={t.form.endpointUrl} value={selected.endpointUrl} />}<div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
+                  <div className="detail-fields"><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} />{selected.valueType === 'api_key' && <Field label={t.tools.lastValidated} value={selected.validatedAt ? formatRelativeTime(selected.validatedAt, t.time) : t.tools.neverValidated} />}{selected.modelId && <Field label={t.form.model} value={selected.modelId} />}{selected.endpointUrl && <Field label={t.form.endpointUrl} value={selected.endpointUrl} />}<div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
                   <div className="detail-actions"><button className="secondary-button" onClick={() => runBackendAction(() => backend.copy(selected.id), t.detail.copyApiKeyDone)}>{selected.valueType === 'api_key' ? t.detail.copyApiKey : t.detail.copy}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.copyAll(selected.id), t.detail.copyAllDone)}>{t.detail.copyAll}</button><button className="secondary-button" onClick={() => runBackendAction(() => backend.reveal(selected.id))}>{t.detail.reveal}</button><button className="secondary-button" onClick={() => void validateSecret(selected.id)}>{t.detail.validate}</button></div>{actionMessage && <div className="form-success action-message">{actionMessage}</div>}{validationMessage && <div className="form-success validation-message">{validationMessage}</div>}{selected.valueType === 'api_key' && <ModelSyncSection t={t} locale={locale} status={selected.modelsSyncStatus ?? ''} syncedAt={selected.modelsSyncedAt ?? 0} models={models} syncing={modelSyncing} message={modelMessage} onSync={() => void syncModels(selected.id)} currentModelId={selected.modelId} onSetDefault={(modelId) => void setDefaultModel(selected, modelId)} capabilityRows={capRows} onSetCapabilityDefault={(capability, modelId) => void setCapabilityDefault(selected, capability, modelId)} />}{selected.valueType === 'api_key' && needsCapabilitySection(providerKind(selected.provider), models) && <CapabilityModelsPanel key={selected.id} t={t} models={models} rows={capRows} primaryModelId={selected.modelId} reservedEnvKeys={[selected.envKey, selected.modelEnvKey ?? '', selected.endpointEnvKey ?? '']} onSave={async (rows) => { await backend.setCapabilityModels(selected.id, rows); setCapRows(rows); }} />}<button className="edit-button" onClick={() => { setEditingSecret(selected); setShowForm(true); }}>{t.detail.edit}</button><button className="delete-button" onClick={() => void removeSelected()}>{t.detail.delete}</button>
                   <div className="detail-note"><span className="lock-small">◆</span><span>{t.security.warning}</span></div>
                 </> : <div className="empty-detail">{t.detail.noSelection}</div>}
@@ -403,10 +420,11 @@ export function App() {
   );
 }
 
-function VaultGate({ status, t, notice, onReady }: { status: VaultStatus; t: ReturnType<typeof getTranslation>; notice?: string; onReady: () => void }) {
+function VaultGate({ status, t, notice, onReady, onRestored }: { status: VaultStatus; t: ReturnType<typeof getTranslation>; notice?: string; onReady: () => void; onRestored: () => void }) {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState('');
+  const [restoring, setRestoring] = useState(false);
   const setup = !status.initialized;
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -414,7 +432,7 @@ function VaultGate({ status, t, notice, onReady }: { status: VaultStatus; t: Ret
     if (password.length < 9) { setError(t.auth.minLength); return; }
     try { if (setup) await backend.setupMaster(password); else await backend.unlock(password); onReady(); } catch (reason) { setError(String(reason)); }
   }
-  return <section className="vault-gate"><div className="gate-orb"><span /></div><span className="section-kicker">LOCAL VAULT / {setup ? 'FIRST RUN' : 'LOCKED'}</span><h2>{setup ? t.auth.setupTitle : t.auth.unlockTitle}</h2><p>{t.auth.subtitle}</p>{notice && <div className="form-error" role="status">{notice}</div>}<form onSubmit={submit}><label>{t.auth.password}<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={setup ? 'new-password' : 'current-password'} /></label>{setup && <label>{t.auth.confirmPassword}<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>}{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" type="submit">{setup ? t.auth.setup : t.auth.unlock}</button></form></section>;
+  return <><section className="vault-gate"><div className="gate-orb"><span /></div><span className="section-kicker">LOCAL VAULT / {setup ? 'FIRST RUN' : 'LOCKED'}</span><h2>{setup ? t.auth.setupTitle : t.auth.unlockTitle}</h2><p>{t.auth.subtitle}</p>{notice && <div className="form-error" role="status">{notice}</div>}<form onSubmit={submit}><label>{t.auth.password}<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={setup ? 'new-password' : 'current-password'} /></label>{setup && <label>{t.auth.confirmPassword}<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>}{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" type="submit">{setup ? t.auth.setup : t.auth.unlock}</button></form><button type="button" className="inline-link gate-restore-link" onClick={() => setRestoring(true)}>{t.tools.restoreOpen}</button></section>{restoring && <RestoreDialog t={t} onClose={() => setRestoring(false)} onRestored={() => { setRestoring(false); onRestored(); }} />}</>;
 }
 
 function NavItem({ label, active, count, dot, onClick }: { label: string; active?: boolean; count?: string; dot?: string; onClick: () => void }) {
@@ -482,15 +500,41 @@ function ProviderPanel({ t, secrets, onConfigure, onCapture }: { t: ReturnType<t
   </section>;
 }
 
-function SettingsPanel({ t, locale, onCatalogUpdated }: { t: ReturnType<typeof getTranslation>; locale: Locale; onCatalogUpdated: () => void }) {
+const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60];
+
+function SettingsPanel({ t, locale, onCatalogUpdated, onRestored }: { t: ReturnType<typeof getTranslation>; locale: Locale; onCatalogUpdated: () => void; onRestored: () => void }) {
   const [message, setMessage] = useState('');
-  async function exportBackup() {
-    const folder = isTauriRuntime() ? await backend.chooseFolder() : '.';
-    if (!folder) return;
-    if (isTauriRuntime()) await backend.backup(`${folder}/SecretHub.secrethub-backup`);
-    setMessage(t.settings.backupSaved);
+  const [error, setError] = useState('');
+  const [settings, setSettings] = useState<BackendSettings | null>(null);
+  const [autoLock, setAutoLock] = useState(15);
+  const [showRestore, setShowRestore] = useState(false);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void backend.settingsGet().then((value) => { setSettings(value); setAutoLock(value.auto_lock_minutes); }).catch((reason) => setError(String(reason)));
+  }, []);
+  // The backend rewrites the running auto-lock policy as part of settings_update, so the change applies at once.
+  async function changeAutoLock(minutes: number) {
+    const previous = autoLock;
+    setAutoLock(minutes);
+    if (!isTauriRuntime() || !settings) return;
+    try {
+      const next = { ...settings, auto_lock_minutes: minutes };
+      await backend.settingsUpdate(next);
+      setSettings(next);
+      setError('');
+    } catch (reason) { setAutoLock(previous); setError(String(reason)); }
   }
-  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><SettingGroup title={t.settings.general} items={[[t.settings.theme, 'Dark / Light'], [t.settings.defaultExport, '.env']]}/><SettingGroup title={t.settings.security} items={[[t.settings.autoLock, '15 min'], [t.settings.requireAuth, t.settings.on]]}/><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US'], ['Metadata access', t.settings.on]]}/></div><CatalogSettings t={t} locale={locale} onUpdated={onCatalogUpdated} /><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button>{message && <span className="form-success">{message}</span>}</div></section>;
+  async function exportBackup() {
+    try {
+      const folder = isTauriRuntime() ? await backend.chooseFolder() : '.';
+      if (!folder) return;
+      const written = isTauriRuntime() ? await backend.backup(folder) : '';
+      setMessage(written ? `${t.tools.backupSavedTo}${written}` : t.settings.backupSaved);
+      setError('');
+    } catch (reason) { setError(String(reason)); }
+  }
+  const choices = AUTO_LOCK_CHOICES.includes(autoLock) ? AUTO_LOCK_CHOICES : [...AUTO_LOCK_CHOICES, autoLock].sort((left, right) => left - right);
+  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><div className="setting-group"><h3>{t.settings.security}</h3><div className="setting-row"><label htmlFor="auto-lock-minutes">{t.settings.autoLock}</label><select id="auto-lock-minutes" value={autoLock} onChange={(event) => void changeAutoLock(Number(event.target.value))}>{choices.map((minutes) => <option key={minutes} value={minutes}>{minutes} {t.tools.autoLockUnit}</option>)}</select></div><p className="cap-hint">{t.tools.autoLockHint}</p></div><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US']]}/></div><CatalogSettings t={t} locale={locale} onUpdated={onCatalogUpdated} /><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button><button className="secondary-button" onClick={() => setShowRestore(true)}>{t.tools.restoreOpen}</button>{message && <span className="form-success">{message}</span>}{error && <span className="form-error" role="alert">{error}</span>}</div>{showRestore && <RestoreDialog t={t} onClose={() => setShowRestore(false)} onRestored={() => { setShowRestore(false); setMessage(t.tools.restoreDone); onRestored(); }} />}</section>;
 }
 
 function ProfilePrompt({ t, selectedIds, onClose, onSaved }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void; onSaved: () => void }) {
@@ -579,11 +623,4 @@ function ExportPanel({ t, selectedIds, onClose, onExported }: { t: ReturnType<ty
   async function showPreview() { try { if (selectedIds.length === 0) throw new Error('select at least one secret'); if (isTauriRuntime()) { setPreview(await backend.preview(request)); setConflicts(await backend.conflicts(request)); } else { setPreview(selectedIds.map((id) => `${id.toUpperCase()}="••••••••"`).join('\n')); setConflicts([]); } setError(''); } catch (reason) { setError(`${t.actions.operationFailed}: ${String(reason)}`); } }
   async function exportFiles() { try { if (selectedIds.length === 0) throw new Error('select at least one secret'); if (isTauriRuntime()) await backend.export(request); onExported(); setMessage(t.actions.exportDone); setError(''); } catch (reason) { setError(`${t.actions.operationFailed}: ${String(reason)}`); } }
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.actions.export}><div className="secret-form export-form"><div className="form-heading"><div><span className="section-kicker">PROJECT OUTPUT / SAFE WRITE</span><h2>{t.actions.export}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.actions.chooseFolder}<div className="folder-row"><input value={directory} onChange={(event) => setDirectory(event.target.value)} /><button type="button" className="secondary-button" onClick={chooseFolder}>...</button></div></label><div className="preview-box">{preview || 'Select Preview to inspect masked output.'}</div>{conflicts.length > 0 && <div className="conflict-box">Conflict keys: {conflicts.join(', ')}</div>}{error && <div className="form-error" role="alert">{error}</div>}<div className="form-security"><span>◆</span>{t.security.warning}</div>{message && <div className="form-success">{message}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={() => void showPreview()}>{t.actions.preview}</button><button className="primary-button" type="button" onClick={() => void exportFiles()}>{t.actions.export}</button></div></div></div>;
-}
-
-function ImportPanel({ t, onClose, onDone }: { t: ReturnType<typeof getTranslation>; onClose: () => void; onDone: () => void }) {
-  const [format, setFormat] = useState<'env' | 'json'>('env'); const [contents, setContents] = useState(''); const [keys, setKeys] = useState<string[]>([]); const [error, setError] = useState(''); const [message, setMessage] = useState('');
-  async function preview() { try { if (isTauriRuntime()) setKeys(await backend.importPreview({ format, contents, confirmed: false })); else setKeys(format === 'env' ? contents.split(/\r?\n/).map((line) => line.split('=')[0].trim()).filter(Boolean) : Object.keys(JSON.parse(contents))); setError(''); } catch (reason) { setError(String(reason)); setKeys([]); } }
-  async function confirm() { try { if (isTauriRuntime()) await backend.importSecrets({ format, contents, confirmed: true }); setMessage(t.actions.imported); setTimeout(onDone, 500); } catch (reason) { setError(String(reason)); } }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.actions.import}><form className="secret-form import-form" onSubmit={(event) => { event.preventDefault(); void preview(); }}><div className="form-heading"><div><span className="section-kicker">IMPORT / ENCRYPTED</span><h2>{t.actions.import}</h2></div><button type="button" className="close-button" onClick={onClose}>×</button></div><label>{t.actions.importFormat}<select value={format} onChange={(event) => setFormat(event.target.value as 'env' | 'json')}><option value="env">.env</option><option value="json">JSON</option></select></label><label>{t.actions.importContent}<textarea className="import-textarea" rows={8} value={contents} onChange={(event) => setContents(event.target.value)} /></label>{keys.length > 0 && <div className="preview-box">{keys.map((key) => `${key} = [encrypted]`).join('\n')}</div>}{error && <div className="form-error" role="alert">{error}</div>}{message && <div className="form-success">{message}</div>}<div className="form-security"><span>◆</span>{t.security.warning}</div><div className="form-actions"><button type="button" className="secondary-button" onClick={preview}>{t.actions.importPreview}</button><button type="button" className="primary-button" disabled={keys.length === 0} onClick={() => void confirm()}>{t.actions.confirmImport}</button></div></form></div>;
 }

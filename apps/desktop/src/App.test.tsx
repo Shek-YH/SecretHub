@@ -220,7 +220,7 @@ describe('model choice from synced models', () => {
 
   it('updates the secret model_id through a metadata-only update in the app', async () => {
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
-    const row = { id: 's1', name: 'DS', provider_id: 'deepseek', env_key: 'DEEPSEEK_API_KEY', description: '', tags: [], status: 'valid', value_type: 'api_key', category: 'ai', scope: 'global', favorite: false, archived: false, model_id: 'deepseek-v4-pro', model_env_key: 'DEEPSEEK_MODEL', endpoint_url: 'https://api.deepseek.com', endpoint_env_key: 'DEEPSEEK_BASE_URL', models_synced_at: 5, models_sync_status: 'ok', created_at: 1, updated_at: 1 };
+    const row = { id: 's1', name: 'DS', provider_id: 'deepseek', env_key: 'DEEPSEEK_API_KEY', description: '', tags: [], status: 'valid', value_type: 'api_key', category: 'ai', scope: 'global', favorite: false, archived: false, model_id: 'deepseek-v4-pro', model_env_key: 'DEEPSEEK_MODEL', endpoint_url: 'https://api.deepseek.com', endpoint_env_key: 'DEEPSEEK_BASE_URL', models_synced_at: 5, models_sync_status: 'ok', created_at: 1, updated_at: 1, validated_at: 0 };
     vi.spyOn(backend, 'status').mockResolvedValue({ initialized: true, unlocked: true });
     vi.spyOn(backend, 'list').mockResolvedValue([row]);
     vi.spyOn(backend, 'audit').mockResolvedValue([]);

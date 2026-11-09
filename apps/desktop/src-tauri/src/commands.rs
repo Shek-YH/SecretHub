@@ -1,11 +1,13 @@
 use super::caps;
+use super::import::{self, ImportPreviewRow};
 use super::plan::{self, PendingPlan, PlanError, PlanPreview, PlanResult, WriteOptions};
+use super::restore;
 use super::AppState;
 use arboard::Clipboard;
 use secrethub_core::{NewSecretInput, VaultService};
 use secrethub_exporter::{
     detect_conflicts, parse_env_entries, parse_json_entries, render_env, validate_export_directory,
-    write_atomic, EnvEntry,
+    write_atomic, EnvEntry, ExportError,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -390,22 +392,43 @@ pub struct ValidationResult {
     pub models_sync_status: String,
 }
 
+/// A key is checked again after a day; `0` means it was never checked.
+const STALE_AFTER_SECONDS: i64 = 24 * 60 * 60;
+
+fn needs_validation(validated_at: i64, now: i64) -> bool {
+    validated_at <= 0 || now - validated_at >= STALE_AFTER_SECONDS
+}
+
+/// All API keys, or with `only_stale` just the active ones that were never checked or whose
+/// last check is a day old.
+fn validation_targets(
+    items: Vec<secrethub_storage::SecretMetadata>,
+    only_stale: bool,
+    now: i64,
+) -> Vec<String> {
+    items
+        .into_iter()
+        .filter(|item| item.value_type == "api_key")
+        .filter(|item| !only_stale || (!item.archived && needs_validation(item.validated_at, now)))
+        .map(|item| item.id)
+        .collect()
+}
+
 #[tauri::command]
 pub async fn secret_validate_many(
+    only_stale: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ValidationResult>, String> {
     touch_activity(&state)?;
+    let now = super::now_seconds() as i64;
     let ids = {
         let vault = vault_from_state(&state)?;
-        vault
+        let items = vault
             .as_ref()
             .ok_or_else(|| "vault unavailable".to_owned())?
             .list_metadata()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .filter(|item| item.value_type == "api_key")
-            .map(|item| item.id)
-            .collect::<Vec<_>>()
+            .map_err(|error| error.to_string())?;
+        validation_targets(items, only_stale.unwrap_or(false), now)
     };
     let mut results = Vec::with_capacity(ids.len());
     for id in ids {
@@ -789,52 +812,138 @@ fn entry_with_optional_comment(key: &str, value: String, comment: &str) -> EnvEn
     }
 }
 
-fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {
-    match request.format.as_str() {
-        "env" => parse_env_entries(&request.contents),
-        "json" => parse_json_entries(&request.contents),
-        _ => return Err("import format must be env or json".to_owned()),
+/// Parser errors can echo the offending line of the file, so they are replaced by a generic text.
+fn import_error_message(error: ExportError) -> String {
+    match error {
+        ExportError::Parse(_) => "dotenv parse failed: check the syntax of the file".to_owned(),
+        other => other.to_string(),
     }
-    .map_err(|error| error.to_string())
 }
 
+fn parse_entries(format: &str, contents: &str) -> Result<Vec<EnvEntry>, String> {
+    match format {
+        "env" => parse_env_entries(contents),
+        "json" => parse_json_entries(contents),
+        _ => return Err("import format must be env or json".to_owned()),
+    }
+    .map_err(import_error_message)
+}
+
+fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {
+    parse_entries(&request.format, &request.contents)
+}
+
+fn preview_rows_for(entries: &[EnvEntry]) -> Vec<ImportPreviewRow> {
+    let registry = crate::catalog::effective_registry();
+    import::preview_rows(&import::plan_import(entries, &registry), &registry)
+}
+
+/// Previews list variable names only, grouped the way they will be imported.
 #[tauri::command]
-pub fn secret_import_preview(request: ImportRequest) -> Result<Vec<String>, String> {
-    Ok(parse_import(&request)?
+pub fn secret_import_preview(request: ImportRequest) -> Result<Vec<ImportPreviewRow>, String> {
+    Ok(preview_rows_for(&parse_import(&request)?))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOutcome {
+    pub ids: Vec<String>,
+    /// New provider API keys, which the UI validates one by one afterwards.
+    pub api_key_ids: Vec<String>,
+}
+
+fn import_entries(
+    entries: &[EnvEntry],
+    state: &State<'_, AppState>,
+) -> Result<ImportOutcome, String> {
+    touch_activity(state)?;
+    let vault = vault_from_state(state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    let existing: Vec<String> = vault
+        .list_metadata()
+        .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|entry| entry.key)
-        .collect())
+        .map(|item| item.name)
+        .collect();
+    let mut planned = import::plan_import(entries, &crate::catalog::effective_registry());
+    import::assign_names(&mut planned, &existing);
+    let mut outcome = ImportOutcome {
+        ids: Vec::new(),
+        api_key_ids: Vec::new(),
+    };
+    for secret in planned {
+        let attributes = if secret.provider_credential {
+            secrethub_storage::SecretAttributes {
+                category: "ai".into(),
+                model_id: secret.model_id,
+                model_env_key: secret.model_env_key,
+                endpoint_url: secret.endpoint_url,
+                endpoint_env_key: secret.endpoint_env_key,
+                ..Default::default()
+            }
+        } else {
+            secrethub_storage::SecretAttributes::default()
+        };
+        let id = vault
+            .create_secret_with_attributes(
+                NewSecretInput {
+                    name: secret.name,
+                    provider_id: secret.provider_id,
+                    env_key: secret.env_key,
+                    description: "Imported locally".to_owned(),
+                    tags: vec!["imported".to_owned()],
+                    value: secret.value,
+                },
+                attributes,
+            )
+            .map_err(|error| error.to_string())?;
+        if secret.provider_credential {
+            outcome.api_key_ids.push(id.clone());
+        }
+        outcome.ids.push(id);
+    }
+    Ok(outcome)
 }
 
 #[tauri::command]
 pub fn secret_import(
     request: ImportRequest,
     state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<ImportOutcome, String> {
     if !request.confirmed {
         return Err("import requires explicit confirmation after preview".to_owned());
     }
-    touch_activity(&state)?;
-    let entries = parse_import(&request)?;
-    let vault = vault_from_state(&state)?;
-    let vault = vault
-        .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?;
-    entries
-        .into_iter()
-        .map(|entry| {
-            vault
-                .create_secret(NewSecretInput {
-                    name: entry.key.clone(),
-                    provider_id: "generic".to_owned(),
-                    env_key: entry.key,
-                    description: "Imported locally".to_owned(),
-                    tags: vec!["imported".to_owned()],
-                    value: entry.value,
-                })
-                .map_err(|error| error.to_string())
-        })
-        .collect()
+    import_entries(&parse_import(&request)?, &state)
+}
+
+#[tauri::command]
+pub fn choose_import_file() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("Env / JSON", &["env", "json"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// The file is read here, so its contents never reach the WebView.
+fn entries_from_file(path: &str) -> Result<Vec<EnvEntry>, String> {
+    let (contents, format) = import::read_import_file(path)?;
+    parse_entries(format, &contents)
+}
+
+#[tauri::command]
+pub fn secret_import_file_preview(path: String) -> Result<Vec<ImportPreviewRow>, String> {
+    Ok(preview_rows_for(&entries_from_file(&path)?))
+}
+
+#[tauri::command]
+pub fn secret_import_file(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<ImportOutcome, String> {
+    import_entries(&entries_from_file(&path)?, &state)
 }
 
 fn plan_directory(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1304,31 +1413,110 @@ pub fn settings_update(
     Ok(())
 }
 
+/// `SecretHub-YYYYMMDD-HHmm`; a numeric suffix is added when the name is already taken.
+fn backup_file_stem(now: chrono::NaiveDateTime) -> String {
+    format!("SecretHub-{}", now.format("%Y%m%d-%H%M"))
+}
+
+/// Creates the file with `create_new`, so an existing backup is never overwritten.
+fn write_new_backup(directory: &Path, stem: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    for attempt in 1u32.. {
+        let name = if attempt == 1 {
+            format!("{stem}.secrethub-backup")
+        } else {
+            format!("{stem}-{attempt}.secrethub-backup")
+        };
+        let target = directory.join(name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                file.sync_all()?;
+                return Ok(target);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the attempt counter does not run out")
+}
+
+/// Writes an SHB2 backup into `directory` and returns the file path.
 #[tauri::command]
-pub fn backup_export(path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn backup_export(directory: String, state: State<'_, AppState>) -> Result<String, String> {
     touch_activity(&state)?;
     let bytes = vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
         .encrypted_backup()
         .map_err(|error| error.to_string())?;
-    let target = Path::new(&path);
-    if target.file_name().and_then(|value| value.to_str()) != Some("SecretHub.secrethub-backup") {
-        return Err("backup must use .secrethub-backup extension".to_owned());
-    }
-    let parent = target
-        .parent()
-        .ok_or_else(|| "backup parent directory is required".to_owned())?;
-    let directory = validate_export_directory(parent).map_err(|error| error.to_string())?;
-    std::fs::write(directory.join("SecretHub.secrethub-backup"), bytes)
+    let directory =
+        validate_export_directory(Path::new(&directory)).map_err(|error| error.to_string())?;
+    let stem = backup_file_stem(chrono::Local::now().naive_local());
+    write_new_backup(&directory, &stem, &bytes)
+        .map(|path| path.to_string_lossy().into_owned())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn choose_backup_file() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("SecretHub backup", &["secrethub-backup"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Replaces the vault with a backup. Works from the lock screen too (no activity check):
+/// the current vault files are moved to `vault-backup-<stamp>`, never deleted.
+#[tauri::command]
+pub fn backup_restore(
+    path: String,
+    password: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db_path = super::database_path(&app)?;
+    let backup = restore::read_backup_file(Path::new(&path)).map_err(|error| error.to_string())?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut guard = vault_from_state(&state)?;
+    restore::restore_vault(
+        &mut guard,
+        &db_path,
+        &backup,
+        &password,
+        &stamp,
+        restore::Retry::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    if let Some(vault) = guard.as_ref() {
+        let _ = vault.record_action("backup_restored", None, "{\"source\":\"desktop\"}");
+        let minutes = vault
+            .get_settings()
+            .map(|settings| settings.auto_lock_minutes)
+            .unwrap_or(15);
+        *state
+            .policy
+            .lock()
+            .map_err(|_| "vault policy is unavailable".to_owned())? =
+            secrethub_core::AutoLockPolicy::new(minutes as u64 * 60, super::now_seconds());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_env_key, plan_writes, selected_entries_from_metadata, ModelsWrite};
+    use super::{
+        backup_file_stem, is_env_key, parse_entries, plan_writes, selected_entries_from_metadata,
+        validation_targets, write_new_backup, ModelsWrite,
+    };
     use crate::model_sync::Fetched;
     use secrethub_providers::{DiscoveredModel, ModelsEndpoint, Protocol};
+    use std::fs;
 
     fn endpoint(is_fallback: bool) -> ModelsEndpoint {
         ModelsEndpoint {
@@ -1399,6 +1587,7 @@ mod tests {
             endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
             models_synced_at: 0,
             models_sync_status: String::new(),
+            validated_at: 0,
         };
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
@@ -1418,6 +1607,100 @@ mod tests {
         assert!(rendered.find("DEEPSEEK_MODEL").unwrap() < rendered.find("IMAGE_MODEL").unwrap());
         assert!(!rendered.contains("value_type"));
         assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH=\""));
+    }
+
+    fn stale_candidate(
+        id: &str,
+        validated_at: i64,
+        archived: bool,
+        value_type: &str,
+    ) -> secrethub_storage::SecretMetadata {
+        secrethub_storage::SecretMetadata {
+            id: id.into(),
+            name: id.into(),
+            provider_id: "openai".into(),
+            env_key: "OPENAI_API_KEY".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            status: "valid".into(),
+            created_at: 0,
+            updated_at: 0,
+            value_type: value_type.into(),
+            category: "ai".into(),
+            scope: "global".into(),
+            favorite: false,
+            archived,
+            model_id: String::new(),
+            model_env_key: String::new(),
+            endpoint_url: String::new(),
+            endpoint_env_key: String::new(),
+            models_synced_at: 0,
+            models_sync_status: String::new(),
+            validated_at,
+        }
+    }
+
+    #[test]
+    fn stale_only_validation_skips_recent_archived_and_non_api_keys() {
+        let now = 1_000_000;
+        let day = 24 * 60 * 60;
+        let items = || {
+            vec![
+                stale_candidate("never", 0, false, "api_key"),
+                stale_candidate("old", now - day, false, "api_key"),
+                stale_candidate("fresh", now - day + 1, false, "api_key"),
+                stale_candidate("archived", 0, true, "api_key"),
+                stale_candidate("token", 0, false, "token"),
+            ]
+        };
+        assert_eq!(validation_targets(items(), true, now), ["never", "old"]);
+        // "Validate all" keeps checking every API key, archived ones included.
+        assert_eq!(
+            validation_targets(items(), false, now),
+            ["never", "old", "fresh", "archived"]
+        );
+    }
+
+    #[test]
+    fn backup_files_get_a_timestamped_name_and_are_never_overwritten() {
+        let when = chrono::NaiveDate::from_ymd_opt(2026, 11, 9)
+            .unwrap()
+            .and_hms_opt(8, 5, 59)
+            .unwrap();
+        let stem = backup_file_stem(when);
+        assert_eq!(stem, "SecretHub-20261109-0805");
+        let directory = tempfile::tempdir().unwrap();
+        let first = write_new_backup(directory.path(), &stem, b"one").unwrap();
+        let second = write_new_backup(directory.path(), &stem, b"two").unwrap();
+        assert_eq!(
+            first.file_name().unwrap(),
+            "SecretHub-20261109-0805.secrethub-backup"
+        );
+        assert_eq!(
+            second.file_name().unwrap(),
+            "SecretHub-20261109-0805-2.secrethub-backup"
+        );
+        assert_eq!(fs::read(&first).unwrap(), b"one");
+        assert_eq!(fs::read(&second).unwrap(), b"two");
+    }
+
+    #[test]
+    fn import_parse_errors_never_echo_file_content() {
+        let bad_inputs = [
+            "KEY=\"unterminated fake-secret-value",
+            "lower case key=fake-secret-value",
+            "=fake-secret-value",
+            "A=\"ok\" fake-secret-value ===",
+        ];
+        let messages: Vec<String> = bad_inputs
+            .iter()
+            .filter_map(|input| parse_entries("env", input).err())
+            .collect();
+        assert!(!messages.is_empty(), "at least one input must be rejected");
+        assert!(messages
+            .iter()
+            .all(|message| !message.contains("fake-secret-value")));
+        assert!(parse_entries("xml", "").is_err());
     }
 
     #[test]

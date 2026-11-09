@@ -17,7 +17,10 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   }
 }
 
-export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number };
+export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number; validated_at: number };
+export type ImportPreviewRow = { label: string; generic: boolean; keys: string[] };
+export type ImportOutcome = { ids: string[]; apiKeyIds: string[] };
+export type BackendSettings = { locale: string; theme: string; auto_lock_minutes: number; clipboard_timeout_seconds: number; require_auth_before_export: boolean; require_auth_before_reveal: boolean };
 export type VaultStatus = { initialized: boolean; unlocked: boolean };
 export type PendingPlan = { request_id: string; kind: string; project_path: string; secret_ids: string[]; version?: number; bindings?: unknown[]; created_at: string };
 export type PlanPreviewEntry = { key: string; secretName?: string; kind: 'api_key' | 'base_url' | 'model' | 'v1'; display: string; capability?: string; conflict: boolean; warnings: string[] };
@@ -54,13 +57,16 @@ export const backend = {
   create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<string>('secret_create', { request }),
   update: (id: string, request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<void>('secret_update', { id, request }),
   remove: (id: string) => invoke<boolean>('secret_delete', { id }),
-  importPreview: (request: { format: 'env' | 'json'; contents: string; confirmed: false }) => invoke<string[]>('secret_import_preview', { request }),
-  importSecrets: (request: { format: 'env' | 'json'; contents: string; confirmed: true }) => invoke<string[]>('secret_import', { request }),
+  importPreview: (request: { format: 'env' | 'json'; contents: string; confirmed: false }) => invoke<ImportPreviewRow[]>('secret_import_preview', { request }),
+  importSecrets: (request: { format: 'env' | 'json'; contents: string; confirmed: true }) => invoke<ImportOutcome>('secret_import', { request }),
+  chooseImportFile: () => invoke<string | null>('choose_import_file'),
+  importFilePreview: (path: string) => invoke<ImportPreviewRow[]>('secret_import_file_preview', { path }),
+  importFile: (path: string) => invoke<ImportOutcome>('secret_import_file', { path }),
   copy: (id: string) => invoke<void>('secret_copy', { id }),
   copyAll: (id: string) => invoke<void>('secret_copy_all', { id }),
   reveal: (id: string) => invoke<void>('secret_reveal', { id }),
   validate: (id: string) => invoke<string>('secret_validate', { id }),
-  validateMany: () => invoke<BackendValidationResult[]>('secret_validate_many'),
+  validateMany: (onlyStale = false) => invoke<BackendValidationResult[]>('secret_validate_many', { onlyStale }),
   syncModels: (id: string) => invoke<BackendModelSync>('secret_sync_models', { id }),
   models: (id: string) => invoke<BackendModel[]>('secret_models', { id }),
   capabilityModels: (id: string) => invoke<CapabilityModelRow[]>('secret_capability_models', { id }),
@@ -86,7 +92,11 @@ export const backend = {
   catalogSetAutoUpdate: (enabled: boolean) => invoke<CatalogStatus>('catalog_set_auto_update', { enabled }),
   catalogCheckNow: () => invoke<CatalogCheckResult>('catalog_check_now'),
   audit: () => invoke<BackendAuditEvent[]>('audit_list'),
-  backup: (path: string) => invoke<void>('backup_export', { path }),
+  backup: (directory: string) => invoke<string>('backup_export', { directory }),
+  chooseBackupFile: () => invoke<string | null>('choose_backup_file'),
+  restoreBackup: (path: string, password: string) => invoke<void>('backup_restore', { path, password }),
+  settingsGet: () => invoke<BackendSettings>('settings_get'),
+  settingsUpdate: (settings: BackendSettings) => invoke<void>('settings_update', { settings }),
   pendingPlans: () => invoke<PendingPlan[]>('mcp_pending_plans'),
   planPreview: (request_id: string) => invoke<PlanPreview>('mcp_plan_preview', { requestId: request_id }),
   pendingCapabilitySuggestions: () => invoke<CapabilitySuggestionBatch[]>('mcp_pending_capability_suggestions'),
