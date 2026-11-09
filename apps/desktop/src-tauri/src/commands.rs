@@ -384,6 +384,8 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
         }
         if metadata.value_type == "login" {
             login_entries(vault, &metadata)?
+        } else if metadata.value_type == "env_group" {
+            group_entries(vault, &id, None)?
         } else {
             let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
             let rows = vault
@@ -745,6 +747,21 @@ fn login_entries(
     ])
 }
 
+/// `NAME=value` entries of a config group, all variables or just the named ones, in the
+/// group's own order. Secret values are decrypted here, right before they are written.
+pub(crate) fn group_entries(
+    vault: &VaultService,
+    id: &str,
+    names: Option<&[String]>,
+) -> Result<Vec<EnvEntry>, String> {
+    Ok(vault
+        .group_values(id, names)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(name, value, _)| EnvEntry::new(name, value))
+        .collect())
+}
+
 /// Entries for legacy plans: key, primary model and endpoint only (plan previews rely on this).
 pub(crate) fn selected_entries(
     vault: &VaultService,
@@ -778,6 +795,16 @@ fn entries_for(
         let separator_before = group_start > 0;
         if item.value_type == "login" {
             for (index, entry) in login_entries(vault, item)?.into_iter().enumerate() {
+                entries.push(if separator_before && index == 0 {
+                    entry.with_separator_before()
+                } else {
+                    entry
+                });
+            }
+            continue;
+        }
+        if item.value_type == "env_group" {
+            for (index, entry) in group_entries(vault, id, None)?.into_iter().enumerate() {
                 entries.push(if separator_before && index == 0 {
                     entry.with_separator_before()
                 } else {
@@ -1708,6 +1735,7 @@ mod tests {
             validated_at: 0,
             subtitle: String::new(),
             dev_use: false,
+            ai_values: true,
         };
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
@@ -1759,6 +1787,7 @@ mod tests {
             validated_at,
             subtitle: String::new(),
             dev_use: false,
+            ai_values: true,
         }
     }
 

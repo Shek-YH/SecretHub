@@ -8,6 +8,7 @@ mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
+mod groups;
 mod import;
 mod items;
 mod media;
@@ -76,6 +77,14 @@ pub fn run() {
             items::item_field_reveal,
             items::item_field_copy,
             items::item_note_body,
+            groups::group_create,
+            groups::group_update,
+            groups::group_public,
+            groups::group_var_reveal,
+            groups::group_var_copy,
+            groups::group_notes,
+            groups::group_choose_key_path,
+            groups::group_export_key_file,
             commands::secret_list,
             commands::secret_create,
             commands::secret_update,

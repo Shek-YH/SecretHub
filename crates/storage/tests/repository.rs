@@ -729,3 +729,69 @@ fn item_migrations_apply_together_or_not_at_all() {
     drop(database);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn group_variables_are_transactional_ordered_and_cascade_on_delete() {
+    use secrethub_storage::{GroupVariableRow, SecretAttributes, UpdatedSecret};
+    let (path, database) = temp_database();
+    let secret = || NewSecret {
+        name: "Fake group".into(),
+        provider_id: "group".into(),
+        env_key: String::new(),
+        description: String::new(),
+        tags: Vec::new(),
+        ciphertext: vec![1],
+        nonce: vec![2; 12],
+    };
+    let attributes = |ai_values| SecretAttributes {
+        value_type: "env_group".into(),
+        ai_values,
+        ..Default::default()
+    };
+    let row = |name: &str, secret: bool, value: &str| GroupVariableRow {
+        name: name.into(),
+        secret,
+        plain_value: value.into(),
+    };
+    let id = database
+        .create_group(
+            secret(),
+            attributes(false),
+            &[row("B_HOST", false, "h"), row("A_PASSWORD", true, "")],
+        )
+        .unwrap();
+    let metadata = database.get_metadata(&id).unwrap().unwrap();
+    assert!(!metadata.ai_values && metadata.ai_visible());
+    let rows = database.list_group_variables(&id).unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        ["B_HOST", "A_PASSWORD"]
+    );
+
+    // A duplicate name fails the whole update and leaves the old rows in place.
+    let failed = database.update_group(
+        &id,
+        UpdatedSecret {
+            name: "Renamed".into(),
+            provider_id: "group".into(),
+            env_key: String::new(),
+            description: String::new(),
+            tags: Vec::new(),
+            ciphertext: vec![9],
+            nonce: vec![2; 12],
+        },
+        attributes(true),
+        &[row("X", false, "1"), row("X", false, "2")],
+    );
+    assert!(failed.is_err());
+    assert_eq!(database.list_group_variables(&id).unwrap().len(), 2);
+    assert_eq!(
+        database.get_metadata(&id).unwrap().unwrap().name,
+        "Fake group"
+    );
+    assert_eq!(database.get_payload(&id).unwrap().unwrap().0, vec![1]);
+
+    assert!(database.delete_secret(&id).unwrap());
+    assert!(database.list_group_variables(&id).unwrap().is_empty());
+    let _ = std::fs::remove_file(path);
+}

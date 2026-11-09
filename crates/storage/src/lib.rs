@@ -43,10 +43,21 @@ pub struct SecretMetadata {
     pub subtitle: String,
     /// Login items only: exposed to AI/exports as `{env_key}_USERNAME` and `{env_key}_PASSWORD`.
     pub dev_use: bool,
+    /// Config groups only: whether AI may read the values of the plain (non-secret) variables.
+    pub ai_values: bool,
 }
 
-/// Item types whose encrypted payload is a JSON document of fields.
-pub const JSON_ITEM_TYPES: [&str; 3] = ["login", "bank_card", "note"];
+/// Item types whose encrypted payload is a JSON document (typed items and config groups).
+pub const JSON_ITEM_TYPES: [&str; 4] = ["login", "bank_card", "note", "env_group"];
+
+/// One variable of a config group. Secret variables keep their value in the encrypted payload,
+/// so `plain_value` is always empty for them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GroupVariableRow {
+    pub name: String,
+    pub secret: bool,
+    pub plain_value: String,
+}
 
 impl SecretMetadata {
     /// Whether the payload is a JSON field document rather than a raw string.
@@ -57,7 +68,7 @@ impl SecretMetadata {
     /// Typed-items design section 6. The MCP server applies the same rule in SQL.
     pub fn ai_visible(&self) -> bool {
         match self.value_type.as_str() {
-            "api_key" | "dev_secret" | "token" => true,
+            "api_key" | "dev_secret" | "token" | "env_group" => true,
             "url" | "password" | "text" => !self.env_key.is_empty(),
             "login" => self.dev_use,
             _ => false,
@@ -101,7 +112,7 @@ pub struct MediaAsset {
     pub created_at: i64,
 }
 
-const METADATA_COLUMNS: &str = "id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at, subtitle, dev_use";
+const METADATA_COLUMNS: &str = "id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at, subtitle, dev_use, ai_values";
 
 const MEDIA_COLUMNS: &str = "id, kind, filename, stored_path, sha256, size_bytes, mime, width, height, duration_ms, description, tags_json, source, created_at";
 
@@ -184,6 +195,7 @@ pub struct SecretAttributes {
     pub endpoint_env_key: String,
     pub subtitle: String,
     pub dev_use: bool,
+    pub ai_values: bool,
 }
 
 impl Default for SecretAttributes {
@@ -200,6 +212,7 @@ impl Default for SecretAttributes {
             endpoint_env_key: String::new(),
             subtitle: String::new(),
             dev_use: false,
+            ai_values: true,
         }
     }
 }
@@ -345,6 +358,14 @@ impl Database {
                 display_name TEXT NOT NULL,
                 last_used_at INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS group_variables (
+                secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                secret INTEGER NOT NULL,
+                plain_value TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (secret_id, name)
+             );
              CREATE TABLE IF NOT EXISTS provider_models (
                 secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
                 model_id TEXT NOT NULL,
@@ -487,6 +508,12 @@ impl Database {
         )?;
         add_column_if_missing(
             &connection,
+            "secrets",
+            "ai_values",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &connection,
             "settings",
             "catalog_auto_update",
             "INTEGER NOT NULL DEFAULT 1",
@@ -541,9 +568,9 @@ impl Database {
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
         self.connection.execute(
-            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, subtitle, dev_use, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
-            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, now],
+            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, subtitle, dev_use, ai_values, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?19)",
+            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, attributes.ai_values as i64, now],
         )?;
         self.connection.execute(
             "INSERT INTO secret_payloads(secret_id, ciphertext, nonce) VALUES (?1, ?2, ?3)",
@@ -600,6 +627,81 @@ impl Database {
             > 0)
     }
 
+    /// Creates a config group row, its payload and its variable rows in one transaction.
+    pub fn create_group(
+        &self,
+        secret: NewSecret,
+        attributes: SecretAttributes,
+        variables: &[GroupVariableRow],
+    ) -> Result<String, StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let id = self.create_secret_with_attributes(secret, attributes)?;
+        self.write_group_variables(&id, variables)?;
+        transaction.commit()?;
+        Ok(id)
+    }
+
+    /// Rewrites a config group (row, payload, variables) in one transaction.
+    pub fn update_group(
+        &self,
+        id: &str,
+        secret: UpdatedSecret,
+        attributes: SecretAttributes,
+        variables: &[GroupVariableRow],
+    ) -> Result<bool, StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        if !self.update_secret_with_attributes(id, secret, attributes)? {
+            return Ok(false);
+        }
+        self.write_group_variables(id, variables)?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    fn write_group_variables(
+        &self,
+        secret_id: &str,
+        variables: &[GroupVariableRow],
+    ) -> Result<(), StorageError> {
+        self.connection.execute(
+            "DELETE FROM group_variables WHERE secret_id = ?1",
+            params![secret_id],
+        )?;
+        let mut insert = self.connection.prepare(
+            "INSERT INTO group_variables(secret_id, position, name, secret, plain_value) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for (position, variable) in variables.iter().enumerate() {
+            insert.execute(params![
+                secret_id,
+                position as i64,
+                variable.name,
+                variable.secret as i64,
+                variable.plain_value
+            ])?;
+        }
+        Ok(())
+    }
+
+    /// Variables of one config group in display order.
+    pub fn list_group_variables(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<GroupVariableRow>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT name, secret, plain_value FROM group_variables WHERE secret_id = ?1 ORDER BY position",
+        )?;
+        let rows = statement
+            .query_map(params![secret_id], |row| {
+                Ok(GroupVariableRow {
+                    name: row.get(0)?,
+                    secret: row.get::<_, i64>(1)? != 0,
+                    plain_value: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn update_secret(&self, id: &str, secret: UpdatedSecret) -> Result<bool, StorageError> {
         self.update_secret_with_attributes(id, secret, SecretAttributes::default())
     }
@@ -613,7 +715,7 @@ impl Database {
         let now = unix_time();
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
-        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, subtitle = ?15, dev_use = ?16, updated_at = ?17 WHERE id = ?18", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, now, id])?;
+        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, subtitle = ?15, dev_use = ?16, ai_values = ?17, updated_at = ?18 WHERE id = ?19", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, attributes.ai_values as i64, now, id])?;
         if updated == 0 {
             return Ok(false);
         }
@@ -634,8 +736,8 @@ impl Database {
         let tags_json = serde_json::to_string(&metadata.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
         Ok(self.connection.execute(
-            "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, subtitle = ?15, dev_use = ?16, updated_at = ?17 WHERE id = ?18",
-            params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, now, id],
+            "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, subtitle = ?15, dev_use = ?16, ai_values = ?17, updated_at = ?18 WHERE id = ?19",
+            params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, attributes.ai_values as i64, now, id],
         )? > 0)
     }
 
@@ -1245,6 +1347,7 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         validated_at: row.get(20)?,
         subtitle: row.get(21)?,
         dev_use: row.get::<_, i64>(22)? != 0,
+        ai_values: row.get::<_, i64>(23)? != 0,
     })
 }
 

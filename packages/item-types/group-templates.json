@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "secretRules": {
+    "plainContains": ["PUBLIC"],
+    "plainSuffixes": ["_ID", "_KEY_ID"],
+    "secretContains": ["PASSWORD", "PASSWD", "PWD", "SECRET", "TOKEN", "PRIVATE", "CREDENTIAL"],
+    "secretSuffixes": ["_SK", "_KEY", "API_KEY", "ACCESS_KEY"]
+  },
+  "categories": ["server", "database", "storage", "other"],
+  "templates": [
+    {
+      "key": "server",
+      "category": "server",
+      "label": { "zh-CN": "服务器", "en": "Server" },
+      "variables": [
+        { "name": "SSH_HOST", "secret": false },
+        { "name": "SSH_PORT", "secret": false, "default": "22" },
+        { "name": "SSH_USER", "secret": false },
+        { "name": "SSH_PASSWORD", "secret": true },
+        { "name": "SSH_PRIVATE_KEY", "secret": true },
+        { "name": "BT_PANEL_URL", "secret": false },
+        { "name": "BT_PANEL_USERNAME", "secret": false },
+        { "name": "BT_PANEL_PASSWORD", "secret": true },
+        { "name": "BT_PANEL_API_TOKEN", "secret": true }
+      ]
+    },
+    {
+      "key": "database",
+      "category": "database",
+      "label": { "zh-CN": "数据库", "en": "Database" },
+      "variables": [
+        { "name": "DB_HOST", "secret": false },
+        { "name": "DB_PORT", "secret": false },
+        { "name": "DB_USER", "secret": false },
+        { "name": "DB_PASSWORD", "secret": true },
+        { "name": "DB_NAME", "secret": false }
+      ]
+    },
+    {
+      "key": "storage",
+      "category": "storage",
+      "label": { "zh-CN": "对象存储", "en": "Object storage" },
+      "variables": [
+        { "name": "OSS_ENDPOINT", "secret": false },
+        { "name": "OSS_REGION", "secret": false },
+        { "name": "OSS_BUCKET", "secret": false },
+        { "name": "OSS_ACCESS_KEY_ID", "secret": false },
+        { "name": "OSS_ACCESS_KEY_SECRET", "secret": true }
+      ]
+    },
+    {
+      "key": "custom",
+      "category": "other",
+      "label": { "zh-CN": "自定义", "en": "Custom" },
+      "variables": []
+    }
+  ]
+}

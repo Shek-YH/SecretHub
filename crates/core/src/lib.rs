@@ -2,16 +2,18 @@
 
 use secrethub_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError, VaultKey};
 use secrethub_storage::{
-    CapabilityModelRow, Database, ItemMigration, MediaAsset, NewSecret, ProviderModelRow,
-    RekeyedPayload, SecretAttributes, SecretMetadata, StorageError, UpdatedSecret,
-    CAPABILITY_MODEL_ORDER, JSON_ITEM_TYPES,
+    CapabilityModelRow, Database, GroupVariableRow, ItemMigration, MediaAsset, NewSecret,
+    ProviderModelRow, RekeyedPayload, SecretAttributes, SecretMetadata, StorageError,
+    UpdatedSecret, CAPABILITY_MODEL_ORDER, JSON_ITEM_TYPES,
 };
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+pub mod groups;
 pub mod items;
 mod lock;
+pub use groups::{GroupPublic, GroupUpdate, NewGroup, NewVariable, PublicVariable, VariableUpdate};
 pub use items::Fields;
 pub use lock::AutoLockPolicy;
 
@@ -468,6 +470,267 @@ impl VaultService {
             .remove(field)
             .filter(|value| !value.is_empty())
             .ok_or(VaultError::InvalidSecret)
+    }
+
+    fn group_metadata(&self, id: &str) -> Result<SecretMetadata, VaultError> {
+        match self.database.get_metadata(id)? {
+            Some(metadata) if metadata.value_type == "env_group" => Ok(metadata),
+            _ => Err(VaultError::InvalidSecret),
+        }
+    }
+
+    fn read_group_payload(&self, id: &str) -> Result<groups::GroupPayload, VaultError> {
+        groups::GroupPayload::decode(&self.read_secret(id)?)
+    }
+
+    fn encrypt_group_payload(
+        &self,
+        payload: &groups::GroupPayload,
+    ) -> Result<(Vec<u8>, Vec<u8>), VaultError> {
+        let key = self.require_key()?;
+        let encrypted = encrypt(key, payload.encode().as_bytes(), PAYLOAD_AAD)?;
+        Ok((encrypted.ciphertext, encrypted.nonce.to_vec()))
+    }
+
+    /// Creates a config group. Plain values go to `group_variables`, secret values and the
+    /// notes into the encrypted payload. Returns the new id.
+    pub fn create_group(&self, input: NewGroup) -> Result<String, VaultError> {
+        self.require_key()?;
+        if input.name.trim().is_empty() {
+            return Err(VaultError::InvalidSecret);
+        }
+        if !groups::valid_category(&input.category) {
+            return Err(VaultError::InvalidField("category".into()));
+        }
+        groups::check_names(
+            input
+                .variables
+                .iter()
+                .map(|variable| variable.name.as_str()),
+        )?;
+        groups::check_notes(&input.notes)?;
+        let mut secrets = std::collections::BTreeMap::new();
+        let mut rows = Vec::new();
+        for variable in &input.variables {
+            groups::check_value(&variable.name, &variable.value)?;
+            if variable.secret {
+                secrets.insert(variable.name.clone(), variable.value.clone());
+            }
+            rows.push(GroupVariableRow {
+                name: variable.name.clone(),
+                secret: variable.secret,
+                plain_value: if variable.secret {
+                    String::new()
+                } else {
+                    variable.value.clone()
+                },
+            });
+        }
+        let (ciphertext, nonce) =
+            self.encrypt_group_payload(&groups::GroupPayload::new(secrets, input.notes))?;
+        let id = self.database.create_group(
+            NewSecret {
+                name: input.name.trim().to_owned(),
+                provider_id: "group".into(),
+                env_key: String::new(),
+                description: String::new(),
+                tags: input.tags,
+                ciphertext,
+                nonce,
+            },
+            SecretAttributes {
+                value_type: "env_group".into(),
+                category: input.category,
+                favorite: input.favorite,
+                subtitle: groups::subtitle_for(rows.len()),
+                ai_values: input.ai_values,
+                ..Default::default()
+            },
+            &rows,
+        )?;
+        self.database.record_audit(
+            "create_group",
+            Some(&id),
+            None,
+            "success",
+            "{\"source\":\"desktop\",\"type\":\"env_group\"}",
+        )?;
+        Ok(id)
+    }
+
+    /// Replaces the variable list of a group. Secret variables without a value keep the stored
+    /// one (looked up under `from` after a rename); plain variables must carry their value.
+    pub fn update_group(&self, id: &str, update: GroupUpdate) -> Result<(), VaultError> {
+        self.require_key()?;
+        let metadata = self.group_metadata(id)?;
+        if update.name.trim().is_empty() {
+            return Err(VaultError::InvalidSecret);
+        }
+        if !groups::valid_category(&update.category) {
+            return Err(VaultError::InvalidField("category".into()));
+        }
+        groups::check_names(
+            update
+                .variables
+                .iter()
+                .map(|variable| variable.name.as_str()),
+        )?;
+        let old_rows = self.database.list_group_variables(id)?;
+        let old_payload = self.read_group_payload(id)?;
+        let mut secrets = std::collections::BTreeMap::new();
+        let mut rows = Vec::new();
+        for variable in &update.variables {
+            let source = variable.from.as_deref().unwrap_or(&variable.name);
+            let kept = old_rows.iter().find(|row| row.name == source).map(|row| {
+                if row.secret {
+                    old_payload.secrets.get(source).cloned().unwrap_or_default()
+                } else {
+                    row.plain_value.clone()
+                }
+            });
+            let value = match (&variable.value, variable.secret) {
+                (Some(value), _) => value.clone(),
+                (None, true) => kept.unwrap_or_default(),
+                (None, false) => return Err(VaultError::InvalidField(variable.name.clone())),
+            };
+            groups::check_value(&variable.name, &value)?;
+            if variable.secret {
+                secrets.insert(variable.name.clone(), value.clone());
+            }
+            rows.push(GroupVariableRow {
+                name: variable.name.clone(),
+                secret: variable.secret,
+                plain_value: if variable.secret {
+                    String::new()
+                } else {
+                    value
+                },
+            });
+        }
+        let notes = match update.notes {
+            Some(notes) => {
+                groups::check_notes(&notes)?;
+                notes
+            }
+            None => old_payload.notes,
+        };
+        let (ciphertext, nonce) =
+            self.encrypt_group_payload(&groups::GroupPayload::new(secrets, notes))?;
+        if !self.database.update_group(
+            id,
+            UpdatedSecret {
+                name: update.name.trim().to_owned(),
+                provider_id: metadata.provider_id.clone(),
+                env_key: String::new(),
+                description: String::new(),
+                tags: update.tags,
+                ciphertext,
+                nonce,
+            },
+            SecretAttributes {
+                value_type: "env_group".into(),
+                category: update.category,
+                scope: metadata.scope.clone(),
+                favorite: update.favorite,
+                archived: metadata.archived,
+                subtitle: groups::subtitle_for(rows.len()),
+                ai_values: update.ai_values,
+                ..Default::default()
+            },
+            &rows,
+        )? {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database.record_audit(
+            "update_group",
+            Some(id),
+            None,
+            "success",
+            "{\"source\":\"desktop\",\"type\":\"env_group\"}",
+        )?;
+        Ok(())
+    }
+
+    /// Variable names and flags of a group (no decryption).
+    pub fn group_variables(&self, id: &str) -> Result<Vec<GroupVariableRow>, VaultError> {
+        self.require_key()?;
+        self.group_metadata(id)?;
+        self.database.list_group_variables(id).map_err(Into::into)
+    }
+
+    /// What the UI may show without a reveal: plain values, names and secret flags.
+    pub fn group_public(&self, id: &str) -> Result<GroupPublic, VaultError> {
+        let metadata = self.group_metadata(id)?;
+        let variables = self
+            .group_variables(id)?
+            .into_iter()
+            .map(|row| PublicVariable {
+                value: (!row.secret).then_some(row.plain_value),
+                name: row.name,
+                secret: row.secret,
+            })
+            .collect();
+        Ok(GroupPublic {
+            variables,
+            has_notes: !self.read_group_payload(id)?.notes.is_empty(),
+            ai_values: metadata.ai_values,
+        })
+    }
+
+    /// Value of one variable, plain or secret. Reveal, copy and export are built on this.
+    pub fn group_variable_value(&self, id: &str, name: &str) -> Result<String, VaultError> {
+        let row = self
+            .group_variables(id)?
+            .into_iter()
+            .find(|row| row.name == name)
+            .ok_or_else(|| VaultError::InvalidField(name.to_owned()))?;
+        if !row.secret {
+            return Ok(row.plain_value);
+        }
+        Ok(self
+            .read_group_payload(id)?
+            .secrets
+            .get(name)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Values of the given variables (all when `names` is `None`) in display order, decrypted.
+    /// Unknown names are an error. Callers decide what may leave the process.
+    pub fn group_values(
+        &self,
+        id: &str,
+        names: Option<&[String]>,
+    ) -> Result<Vec<(String, String, bool)>, VaultError> {
+        let rows = self.group_variables(id)?;
+        if let Some(names) = names {
+            if let Some(unknown) = names
+                .iter()
+                .find(|name| !rows.iter().any(|row| &row.name == *name))
+            {
+                return Err(VaultError::InvalidField(unknown.clone()));
+            }
+        }
+        let payload = self.read_group_payload(id)?;
+        Ok(rows
+            .into_iter()
+            .filter(|row| names.is_none_or(|names| names.contains(&row.name)))
+            .map(|row| {
+                let value = if row.secret {
+                    payload.secrets.get(&row.name).cloned().unwrap_or_default()
+                } else {
+                    row.plain_value
+                };
+                (row.name, value, row.secret)
+            })
+            .collect())
+    }
+
+    /// The notes text; only for the moment the user asks to read or edit it.
+    pub fn group_notes(&self, id: &str) -> Result<String, VaultError> {
+        self.require_key()?;
+        self.group_metadata(id)?;
+        Ok(self.read_group_payload(id)?.notes)
     }
 
     /// Converts pre-typed-items rows (typed-items design section 7). Single transaction and
