@@ -116,8 +116,8 @@ describe('SecretHub desktop shell', () => {
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
     const picker = screen.getByRole('dialog', { name: '你要保存什么？' });
-    for (const name of [/API Key（开发/, /开发密钥/, /账号密码/, /银行卡/, /安全笔记/]) expect(within(picker).getByRole('button', { name })).toBeInTheDocument();
-    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('credential-type-card'))).toHaveLength(5);
+    for (const name of [/API Key（开发/, /开发密钥/, /配置组（服务器/, /账号密码/, /银行卡/, /安全笔记/]) expect(within(picker).getByRole('button', { name })).toBeInTheDocument();
+    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('credential-type-card'))).toHaveLength(6);
     expect(screen.queryByLabelText('粘贴 API Key')).not.toBeInTheDocument();
     await user.click(within(picker).getByRole('button', { name: /开发密钥/ }));
     const form = screen.getByRole('dialog', { name: '添加开发密钥' });

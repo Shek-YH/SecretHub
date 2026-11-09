@@ -229,3 +229,13 @@ body { background: #071126; color: #eef4ff; }
 .detail-subtitle { display: block; margin-top: 6px; color: #7da095; font-size: 11px; }
 .change-password-form { width: min(440px, calc(100vw - 48px)); }
 .setting-row .secondary-button { padding: 6px 10px; }
+
+/* Config groups */
+.group-template-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.group-template-row .cap-hint { grid-column: 1 / -1; margin: 0; }
+.group-variables { border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.group-variables legend { padding: 0 6px; font-size: 12px; }
+.group-variable-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto auto; gap: 6px; align-items: start; }
+.group-variable-row .secret-input label:first-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.group-secret-switch { white-space: nowrap; }
+.group-fields .field-label small { opacity: .6; margin-left: 6px; }

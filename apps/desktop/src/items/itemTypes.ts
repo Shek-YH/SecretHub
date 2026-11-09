@@ -6,11 +6,11 @@ export type FieldDef = { key: string; kind: FieldKind; sensitive: boolean; requi
 export type ItemTypeDef = { key: string; personal: boolean; storage: string; label: Record<string, string>; fields: FieldDef[] };
 
 /** The four kinds of item added from the type picker, plus API keys. */
-export type ItemKind = 'api_key' | 'dev_secret' | 'login' | 'bank_card' | 'note';
+export type ItemKind = 'api_key' | 'dev_secret' | 'env_group' | 'login' | 'bank_card' | 'note';
 export type PersonalKind = 'login' | 'bank_card' | 'note';
 
 export const ITEM_TYPES = (definitions as { types: ItemTypeDef[] }).types;
-export const PICKER_ORDER: ItemKind[] = ['api_key', 'dev_secret', 'login', 'bank_card', 'note'];
+export const PICKER_ORDER: ItemKind[] = ['api_key', 'dev_secret', 'env_group', 'login', 'bank_card', 'note'];
 
 export function itemType(key: string): ItemTypeDef | undefined { return ITEM_TYPES.find((item) => item.key === key); }
 export function fieldDef(type: string, key: string): FieldDef | undefined { return itemType(type)?.fields.find((field) => field.key === key); }
@@ -19,12 +19,12 @@ export function fieldDef(type: string, key: string): FieldDef | undefined { retu
 export function fieldLabel(field: FieldDef, locale: string): string { return field.label[locale === 'zh-CN' ? 'zh-CN' : 'en'] ?? field.key; }
 
 /** Payload is a JSON document and the item never leaves the vault through developer features. */
-export function isJsonItem(valueType: string | undefined): boolean { return valueType === 'login' || valueType === 'bank_card' || valueType === 'note'; }
+export function isJsonItem(valueType: string | undefined): boolean { return valueType === 'login' || valueType === 'bank_card' || valueType === 'note' || valueType === 'env_group'; }
 
 /** Mirrors `SecretMetadata::ai_visible` in Rust: whether AI tools, exports and profiles may include it. */
 export function isAiVisible(secret: Pick<SecretMetadata, 'valueType' | 'envKey' | 'devUse'>): boolean {
   switch (secret.valueType ?? 'api_key') {
-    case 'api_key': case 'dev_secret': case 'token': return true;
+    case 'api_key': case 'dev_secret': case 'token': case 'env_group': return true;
     case 'url': case 'password': case 'text': return Boolean(secret.envKey);
     case 'login': return Boolean(secret.devUse);
     default: return false;
@@ -35,7 +35,7 @@ export function isAiVisible(secret: Pick<SecretMetadata, 'valueType' | 'envKey' 
 export function itemGroup(secret: Pick<SecretMetadata, 'valueType' | 'envKey'>): ItemKind {
   const type = secret.valueType ?? 'api_key';
   switch (type) {
-    case 'api_key': case 'dev_secret': case 'login': case 'bank_card': case 'note': return type;
+    case 'api_key': case 'dev_secret': case 'env_group': case 'login': case 'bank_card': case 'note': return type;
     case 'token': return 'dev_secret';
     case 'url': return secret.envKey ? 'dev_secret' : 'login';
     case 'password': return secret.envKey ? 'dev_secret' : 'login';

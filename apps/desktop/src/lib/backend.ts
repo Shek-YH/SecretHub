@@ -17,10 +17,15 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   }
 }
 
-export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number; validated_at: number; subtitle?: string; dev_use?: boolean };
+export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number; validated_at: number; subtitle?: string; dev_use?: boolean; ai_values?: boolean };
 /** Create/update payloads of typed items. `fields` carries only what the user typed; secrets are never read back. */
 export type ItemCreateRequest = { itemType: string; name: string; fields: Record<string, string>; tags: string[]; favorite: boolean; devUse?: boolean; envKey?: string };
 export type ItemUpdateRequest = { name: string; fields: Record<string, string>; clear: string[]; tags: string[]; favorite: boolean; devUse?: boolean; envKey?: string };
+/** Config groups: `value` is set for plain variables only; secret values never reach the web view. */
+export type GroupPublic = { variables: Array<{ name: string; secret: boolean; value?: string }>; hasNotes: boolean; aiValues: boolean };
+export type GroupCreateRequest = { name: string; category: string; variables: Array<{ name: string; value: string; secret: boolean }>; notes: string; tags: string[]; favorite: boolean; aiValues: boolean };
+/** `variables` is the full target list; a secret variable without `value` keeps its stored value (looked up under `from`). */
+export type GroupUpdateRequest = { name: string; category: string; variables: Array<{ name: string; secret: boolean; value?: string; from?: string }>; notes?: string; tags: string[]; favorite: boolean; aiValues: boolean };
 export type ImportPreviewRow = { label: string; generic: boolean; keys: string[] };
 export type ImportOutcome = { ids: string[]; apiKeyIds: string[] };
 export type BackendSettings = { locale: string; theme: string; auto_lock_minutes: number; clipboard_timeout_seconds: number; require_auth_before_export: boolean; require_auth_before_reveal: boolean };
@@ -67,6 +72,14 @@ export const backend = {
   itemFieldReveal: (id: string, field: string) => invoke<void>('item_field_reveal', { id, field }),
   itemFieldCopy: (id: string, field: string) => invoke<void>('item_field_copy', { id, field }),
   itemNoteBody: (id: string) => invoke<string>('item_note_body', { id }),
+  groupCreate: (request: GroupCreateRequest) => invoke<string>('group_create', { request }),
+  groupUpdate: (id: string, request: GroupUpdateRequest) => invoke<void>('group_update', { id, request }),
+  groupPublic: (id: string) => invoke<GroupPublic>('group_public', { id }),
+  groupVarReveal: (id: string, name: string) => invoke<void>('group_var_reveal', { id, name }),
+  groupVarCopy: (id: string, name: string) => invoke<void>('group_var_copy', { id, name }),
+  groupNotes: (id: string) => invoke<string>('group_notes', { id }),
+  groupChooseKeyPath: (suggested: string) => invoke<string | null>('group_choose_key_path', { suggested }),
+  groupExportKeyFile: (id: string, name: string, path: string) => invoke<void>('group_export_key_file', { id, name, path }),
   changePassword: (current: string, newPassword: string) => invoke<void>('vault_change_password', { current, newPassword }),
   importPreview: (request: { format: 'env' | 'json'; contents: string; confirmed: false }) => invoke<ImportPreviewRow[]>('secret_import_preview', { request }),
   importSecrets: (request: { format: 'env' | 'json'; contents: string; confirmed: true }) => invoke<ImportOutcome>('secret_import', { request }),

@@ -4,7 +4,7 @@ import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal 
 import { CaptureRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
 import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { CatalogSettings } from './CatalogSettings';
 import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, groupProviders, providerKind, providerTemplates, resolveProviderId, type ProviderTemplate } from './providers';
 import { SecretForm } from './SecretForm';
@@ -12,6 +12,9 @@ import { BankCardForm } from './items/BankCardForm';
 import { ChangePasswordDialog } from './items/ChangePasswordDialog';
 import { DevSecretForm } from './items/DevSecretForm';
 import { ItemDetail } from './items/ItemDetail';
+import { GroupDetail } from './items/GroupDetail';
+import { GroupForm, type GroupSavePayload } from './items/GroupForm';
+import { variableCountOf } from './items/groupTemplates';
 import { ItemTypePicker } from './items/ItemTypePicker';
 import { LoginForm } from './items/LoginForm';
 import { NoteForm } from './items/NoteForm';
@@ -36,7 +39,7 @@ const demoSecrets: SecretMetadata[] = [
   { id: 'supabase-cuecut', name: 'Supabase CueCut', envKey: 'SUPABASE_URL', provider: 'Supabase', tags: ['database', 'cuecut'], status: 'unknown', updated: '', updatedAt: nowSeconds - 259200, valueType: 'dev_secret', category: 'database', scope: 'project' },
   { id: 'github-build', name: 'GitHub Build', envKey: 'GITHUB_TOKEN', provider: 'GitHub', tags: ['ci', 'developer'], status: 'valid', updated: '', updatedAt: nowSeconds - 432000, valueType: 'dev_secret', category: 'git', scope: 'global' },
 ];
-const KIND_NAVS: Navigation[] = ['api_key', 'dev_secret', 'login', 'bank_card', 'note'];
+const KIND_NAVS: Navigation[] = ['api_key', 'dev_secret', 'env_group', 'login', 'bank_card', 'note'];
 const demoUsageCounts: Record<string, number> = { 'openai-main': 4, 'anthropic-lab': 2, 'supabase-cuecut': 1, 'github-build': 3 };
 
 export function App() {
@@ -83,6 +86,7 @@ export function App() {
   // "What do you want to save?" step and the typed forms; `editFields` holds the non-secret fields (and the note body) of the item being edited.
   const [addStep, setAddStep] = useState<'picker' | Exclude<ItemKind, 'api_key'> | null>(null);
   const [editFields, setEditFields] = useState<Record<string, string>>({});
+  const [editGroup, setEditGroup] = useState<GroupPublic | undefined>(undefined);
   
   const [sortMode, setSortMode] = useState<'updated' | 'usage' | 'name'>('updated');
   const [usageCounts, setUsageCounts] = useState<Record<string, number>>(demoUsageCounts);
@@ -134,7 +138,7 @@ export function App() {
       const [items, audit] = await Promise.all([backend.list(query), backend.audit()]);
       const counts = audit.reduce<Record<string, number>>((result, event) => { if (event.operation === 'env_exported' && event.secret_id) result[event.secret_id] = (result[event.secret_id] ?? 0) + 1; return result; }, {});
       setUsageCounts(counts);
-      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: '', updatedAt: secret.updated_at, validatedAt: secret.validated_at, valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status, subtitle: secret.subtitle ?? '', devUse: secret.dev_use ?? false })));
+      setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: '', updatedAt: secret.updated_at, validatedAt: secret.validated_at, valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status, subtitle: secret.subtitle ?? '', devUse: secret.dev_use ?? false, aiValues: secret.ai_values ?? true })));
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
   }
@@ -332,11 +336,21 @@ export function App() {
     if (kind === 'api_key') { setAddStep(null); setShowForm(true); } else setAddStep(kind);
   }
 
-  function closeItemForm() { setAddStep(null); setEditingSecret(null); setEditFields({}); }
+  function closeItemForm() { setAddStep(null); setEditingSecret(null); setEditFields({}); setEditGroup(undefined); }
 
   async function startEdit(secret: SecretMetadata) {
     const group = itemGroup(secret);
     if (group === 'api_key') { setEditingSecret(secret); setShowForm(true); return; }
+    if (group === 'env_group') {
+      let loaded: GroupPublic | undefined;
+      if (isTauriRuntime()) {
+        try { loaded = await backend.groupPublic(secret.id); } catch (error) { setActionMessage(`${t.items.loadFailed}: ${String(error)}`); return; }
+      }
+      setEditGroup(loaded);
+      setEditingSecret(secret);
+      setAddStep('env_group');
+      return;
+    }
     let fields: Record<string, string> = {};
     if (isJsonItem(secret.valueType) && isTauriRuntime()) {
       try {
@@ -348,6 +362,22 @@ export function App() {
     setEditFields(fields);
     setEditingSecret(secret);
     setAddStep(group);
+  }
+
+  async function saveGroup(payload: GroupSavePayload) {
+    if (isTauriRuntime()) {
+      if (editingSecret) await backend.groupUpdate(editingSecret.id, payload);
+      else {
+        const id = await backend.groupCreate({ ...payload, notes: payload.notes ?? '', variables: payload.variables.map((variable) => ({ name: variable.name, secret: variable.secret, value: variable.value ?? '' })) });
+        setActiveNav('all');
+        setSelectedId(id);
+      }
+      await refreshSecrets();
+      return;
+    }
+    // Browser demo mode keeps only list-level data.
+    const local: SecretMetadata = { id: editingSecret?.id ?? `local-${Date.now()}`, name: payload.name, envKey: '', provider: 'group', tags: payload.tags, status: 'unknown', updated: '', updatedAt: Math.floor(Date.now() / 1000), valueType: 'env_group', category: payload.category, scope: 'global', favorite: payload.favorite, aiValues: payload.aiValues, subtitle: `${payload.variables.length} 个变量` };
+    setSecrets((current) => editingSecret ? current.map((secret) => (secret.id === editingSecret.id ? local : secret)) : [local, ...current]);
   }
 
   async function saveItem(payload: ItemSavePayload) {
@@ -404,6 +434,7 @@ export function App() {
           <NavItem active={activeNav === 'all'} label={t.nav.all} onClick={() => setActiveNav('all')} count={String(secrets.length)} />
           <NavItem active={activeNav === 'api_key'} label={t.nav.apiKey} onClick={() => setActiveNav('api_key')} />
           <NavItem active={activeNav === 'dev_secret'} label={t.nav.devSecret} onClick={() => setActiveNav('dev_secret')} />
+          <NavItem active={activeNav === 'env_group'} label={t.nav.group} onClick={() => setActiveNav('env_group')} />
           <NavItem active={activeNav === 'login'} label={t.nav.login} onClick={() => setActiveNav('login')} />
           <NavItem active={activeNav === 'bank_card'} label={t.nav.bankCard} onClick={() => setActiveNav('bank_card')} />
           <NavItem active={activeNav === 'note'} label={t.nav.note} onClick={() => setActiveNav('note')} />
@@ -456,7 +487,7 @@ export function App() {
                 <div className="list-footer"><span>{secrets.length} {t.list.title.toLowerCase()}</span><span className="live-indicator"><i />{t.list.active}</span></div>
               </section>
               <section className="detail-panel" aria-label={t.detail.title}>
-                {selected && isJsonItem(selected.valueType) ? <ItemDetail key={selected.id} t={t} secret={selected} onEdit={() => void startEdit(selected)} onDelete={() => void removeSelected()} /> : selected ? <>
+                {selected?.valueType === 'env_group' ? <GroupDetail key={selected.id} t={t} secret={selected} onEdit={() => void startEdit(selected)} onDelete={() => void removeSelected()} /> : selected && isJsonItem(selected.valueType) ? <ItemDetail key={selected.id} t={t} secret={selected} onEdit={() => void startEdit(selected)} onDelete={() => void removeSelected()} /> : selected ? <>
                   <div className="detail-heading"><div><span className="section-kicker">SECRET / {(itemGroup(selected) === 'api_key' ? selected.provider : t.items.types[itemGroup(selected)].name).toUpperCase()}</span><h2>{selected.name}</h2></div><button className="more-button" aria-label="More actions">•••</button></div>
                   <div className="secret-visual"><div className="secret-orb"><span /></div><div><span className="field-label">{t.detail.envKey}</span><strong>{selected.envKey || '—'}</strong><span className="masked-value" aria-label={t.detail.masked}>••••••••••••••••</span></div><span className="valid-badge">{statusText(selected.status, t)}</span></div>
                   <div className="detail-fields">{selected.valueType === 'api_key' && <><Field label={t.detail.provider} value={selected.provider} /><Field label={t.detail.status} value={statusText(selected.status, t)} /></>}{selected.valueType === 'api_key' && <Field label={t.tools.lastValidated} value={selected.validatedAt ? formatRelativeTime(selected.validatedAt, t.time) : t.tools.neverValidated} />}{selected.modelId && <Field label={t.form.model} value={selected.modelId} />}{selected.endpointUrl && <Field label={t.form.endpointUrl} value={selected.endpointUrl} />}<div><span className="field-label">{t.detail.tags}</span><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div><Field label={t.detail.notes} value={selected.description || (locale === 'zh-CN' ? '仅用于本地开发环境。' : 'For local development only.')} /></div>
@@ -471,6 +502,7 @@ export function App() {
       </main>
       {captureName && <CaptureModal t={t} providerName={captureName} onCaptured={(secretId) => captureDone.current(secretId)} onClose={() => { setCaptureName(null); void refreshSecrets(); setModelsRevision((value) => value + 1); }} />}
       {addStep === 'picker' && <ItemTypePicker t={t} onPick={pickKind} onClose={() => setAddStep(null)} />}
+      {addStep === 'env_group' && <GroupForm key={editingSecret?.id ?? 'new'} t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} initialPublic={editGroup} onBack={() => setAddStep('picker')} onClose={closeItemForm} onSave={saveGroup} />}
       {addStep === 'login' && <LoginForm key={editingSecret?.id ?? 'new'} t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} initialFields={editFields} onBack={() => setAddStep('picker')} onClose={closeItemForm} onSave={saveItem} />}
       {addStep === 'bank_card' && <BankCardForm key={editingSecret?.id ?? 'new'} t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} initialFields={editFields} onBack={() => setAddStep('picker')} onClose={closeItemForm} onSave={saveItem} />}
       {addStep === 'note' && <NoteForm key={editingSecret?.id ?? 'new'} t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} initialFields={editFields} onBack={() => setAddStep('picker')} onClose={closeItemForm} onSave={saveItem} />}
@@ -532,10 +564,16 @@ function CapabilityDefaultMenu({ t, model, rows, onPick }: { t: ReturnType<typeo
   return <select className="model-capability-menu" aria-label={`${t.cap.menuAria} ${model.model_id}`} value="" onChange={(event) => { if (event.target.value) onPick(event.target.value, model.model_id); }}><option value="">{t.cap.menuPlaceholder}</option>{offered.map((capability) => <option key={capability} value={capability}>{t.cap.setFor.replace('{cap}', capabilityLabel(t, capability))}{rows.some((row) => row.capability === capability && row.model_id === model.model_id) ? ' ✓' : ''}</option>)}</select>;
 }
 
+/** Localized "N variables" line for a config group, from the count in the plaintext subtitle. */
+function groupCount(secret: SecretMetadata, t: ReturnType<typeof getTranslation>) {
+  const count = variableCountOf(secret.subtitle);
+  return count === undefined ? secret.subtitle ?? '' : t.groups.count.replace('{n}', String(count));
+}
+
 function SecretRow({ secret, selected, checked, t, onClick, onToggle }: { secret: SecretMetadata; selected: boolean; checked: boolean; t: ReturnType<typeof getTranslation>; onClick: () => void; onToggle: () => void }) {
   const group = itemGroup(secret);
   const age = secret.updatedAt ? formatRelativeTime(secret.updatedAt, t.time) : secret.updated;
-  return <article className={`secret-row ${selected ? 'selected' : ''}`} onClick={onClick}>{isAiVisible(secret) ? <input type="checkbox" checked={checked} onChange={onToggle} onClick={(event) => event.stopPropagation()} aria-label={`${t.actions.export} ${secret.name}`} /> : <span className="row-check-spacer" aria-hidden="true" />}<div className="row-avatar"><TypeIcon kind={group} /></div><div className="row-copy"><strong>{secret.name}</strong><span>{group === 'api_key' ? secret.envKey : secret.subtitle ?? ''}</span><small>{group === 'api_key' ? `${secret.provider} · ${age}` : age}</small></div><span className={`row-status ${secret.status}`} />{secret.favorite && <span className="favorite">★</span>}</article>;
+  return <article className={`secret-row ${selected ? 'selected' : ''}`} onClick={onClick}>{isAiVisible(secret) ? <input type="checkbox" checked={checked} onChange={onToggle} onClick={(event) => event.stopPropagation()} aria-label={`${t.actions.export} ${secret.name}`} /> : <span className="row-check-spacer" aria-hidden="true" />}<div className="row-avatar"><TypeIcon kind={group} /></div><div className="row-copy"><strong>{secret.name}</strong><span>{group === 'api_key' ? secret.envKey : group === 'env_group' ? groupCount(secret, t) : secret.subtitle ?? ''}</span><small>{group === 'api_key' ? `${secret.provider} · ${age}` : age}</small></div><span className={`row-status ${secret.status}`} />{secret.favorite && <span className="favorite">★</span>}</article>;
 }
 
 function Field({ label, value }: { label: string; value: string }) { return <div><span className="field-label">{label}</span><strong className="field-value">{value}</strong></div>; }

@@ -29,6 +29,8 @@ export type SecretMetadata = {
   subtitle?: string;
   /** Logins only: exposed to AI and exports as PREFIX_USERNAME / PREFIX_PASSWORD. */
   devUse?: boolean;
+  /** Config groups only: AI may read the values of plain variables. */
+  aiValues?: boolean;
 };
 
 export type CredentialPreset = { provider: string; name: string; envKey: string; modelId: string; modelEnvKey: string; endpointUrl: string; endpointEnvKey: string };
