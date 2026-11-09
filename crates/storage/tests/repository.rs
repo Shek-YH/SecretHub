@@ -544,3 +544,188 @@ fn validation_records_its_time_without_touching_the_update_time() {
     assert!(after.validated_at > 0);
     assert_eq!(after.updated_at, before.updated_at);
 }
+
+fn raw_secret(database: &Database, name: &str, value_type: &str, env_key: &str) -> String {
+    database
+        .create_secret_with_attributes(
+            NewSecret {
+                name: name.into(),
+                provider_id: "generic".into(),
+                env_key: env_key.into(),
+                description: String::new(),
+                tags: Vec::new(),
+                ciphertext: vec![1, 2, 3],
+                nonce: vec![0; 12],
+            },
+            secrethub_storage::SecretAttributes {
+                value_type: value_type.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+}
+
+#[test]
+fn old_databases_gain_subtitle_and_dev_use_columns() {
+    let path = std::env::temp_dir().join(format!("secrethub-old-{}.sqlite", uuid::Uuid::new_v4()));
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider_id TEXT NOT NULL, env_key TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'unknown', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                 INSERT INTO secrets(id, name, provider_id, env_key, created_at, updated_at) VALUES ('s1', 'Old', 'openai', 'OPENAI_API_KEY', 1, 1);",
+            )
+            .unwrap();
+    }
+    let database = Database::open(&path).unwrap();
+    let metadata = database.get_metadata("s1").unwrap().unwrap();
+    assert_eq!(metadata.subtitle, "");
+    assert!(!metadata.dev_use);
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn subtitle_and_dev_use_are_stored_listed_and_searchable() {
+    let (path, database) = temp_database();
+    let id = database
+        .create_secret_with_attributes(
+            NewSecret {
+                name: "Fake login".into(),
+                provider_id: "personal".into(),
+                env_key: "FAKE_TEST".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                ciphertext: vec![1],
+                nonce: vec![0; 12],
+            },
+            secrethub_storage::SecretAttributes {
+                value_type: "login".into(),
+                subtitle: "accounts.example.com".into(),
+                dev_use: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let metadata = database.get_metadata(&id).unwrap().unwrap();
+    assert_eq!(metadata.subtitle, "accounts.example.com");
+    assert!(metadata.dev_use && metadata.is_json_item() && metadata.ai_visible());
+    assert_eq!(
+        database.search_metadata("accounts.example").unwrap().len(),
+        1
+    );
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn ai_visibility_follows_the_design_rules() {
+    let (path, database) = temp_database();
+    let visible = |value_type: &str, env_key: &str, dev_use: bool| {
+        let id = raw_secret(&database, "x", value_type, env_key);
+        let mut metadata = database.get_metadata(&id).unwrap().unwrap();
+        metadata.dev_use = dev_use;
+        metadata.ai_visible()
+    };
+    for value_type in ["api_key", "dev_secret", "token"] {
+        assert!(visible(value_type, "", false), "{value_type}");
+    }
+    for value_type in ["url", "password", "text"] {
+        assert!(visible(value_type, "FAKE_ENV", false), "{value_type}");
+        assert!(!visible(value_type, "", false), "{value_type}");
+    }
+    assert!(visible("login", "FAKE_TEST", true));
+    for value_type in ["login", "bank_card", "note", "mystery"] {
+        assert!(!visible(value_type, "FAKE_ENV", false), "{value_type}");
+    }
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn rekey_swaps_payloads_and_meta_or_changes_nothing() {
+    let (path, database) = temp_database();
+    database.set_vault_meta(&[1; 16], &[2; 32]).unwrap();
+    let first = raw_secret(&database, "a", "api_key", "");
+    let second = raw_secret(&database, "b", "api_key", "");
+    let rekeyed = |id: &str, byte: u8| secrethub_storage::RekeyedPayload {
+        secret_id: id.into(),
+        ciphertext: vec![byte; 4],
+        nonce: vec![byte; 12],
+    };
+
+    // A set that misses one payload, or names an unknown one, is rejected and rolled back.
+    assert!(database
+        .rekey(&[9; 16], &[9; 32], &[rekeyed(&first, 7)])
+        .is_err());
+    assert!(database
+        .rekey(
+            &[9; 16],
+            &[9; 32],
+            &[rekeyed(&first, 7), rekeyed("nope", 7)]
+        )
+        .is_err());
+    assert_eq!(database.get_vault_meta().unwrap().unwrap().0, vec![1; 16]);
+    assert_eq!(
+        database.get_payload(&first).unwrap().unwrap().0,
+        vec![1, 2, 3]
+    );
+
+    database
+        .rekey(
+            &[9; 16],
+            &[8; 32],
+            &[rekeyed(&first, 7), rekeyed(&second, 6)],
+        )
+        .unwrap();
+    assert_eq!(
+        database.get_vault_meta().unwrap().unwrap(),
+        (vec![9; 16], vec![8; 32])
+    );
+    assert_eq!(database.get_payload(&first).unwrap().unwrap().0, vec![7; 4]);
+    assert_eq!(
+        database.get_payload(&second).unwrap().unwrap().0,
+        vec![6; 4]
+    );
+    assert_eq!(database.list_payloads().unwrap().len(), 2);
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn item_migrations_apply_together_or_not_at_all() {
+    let (path, database) = temp_database();
+    let first = raw_secret(&database, "a", "password", "");
+    let second = raw_secret(&database, "b", "text", "");
+    let legacy = database.list_legacy_items().unwrap();
+    assert_eq!(legacy.len(), 2);
+    let migration = |id: &str, value_type: &str| secrethub_storage::ItemMigration {
+        id: id.into(),
+        value_type: value_type.into(),
+        category: Some("personal".into()),
+        subtitle: String::new(),
+        payload: Some((vec![5], vec![0; 12])),
+    };
+    assert!(database
+        .apply_item_migrations(&[migration(&first, "login"), migration("missing", "note")])
+        .is_err());
+    assert_eq!(
+        database.get_metadata(&first).unwrap().unwrap().value_type,
+        "password"
+    );
+    assert_eq!(
+        database.get_payload(&first).unwrap().unwrap().0,
+        vec![1, 2, 3]
+    );
+
+    database
+        .apply_item_migrations(&[migration(&first, "login"), migration(&second, "note")])
+        .unwrap();
+    assert!(database.list_legacy_items().unwrap().is_empty());
+    assert_eq!(
+        database.get_metadata(&second).unwrap().unwrap().category,
+        "personal"
+    );
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}

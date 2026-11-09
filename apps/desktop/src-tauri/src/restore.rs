@@ -404,6 +404,52 @@ mod tests {
     }
 
     #[test]
+    fn restoring_converts_legacy_items_to_the_typed_model() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = new_vault(source_dir.path(), PASSWORD, None);
+        let create = |name: &str, value_type: &str, env_key: &str, value: &str| {
+            source
+                .create_secret_with_attributes(
+                    NewSecretInput {
+                        name: name.into(),
+                        provider_id: "generic".into(),
+                        env_key: env_key.into(),
+                        description: String::new(),
+                        tags: Vec::new(),
+                        value: value.into(),
+                    },
+                    secrethub_storage::SecretAttributes {
+                        value_type: value_type.into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+        };
+        let password = create("old password", "password", "", "fake-password");
+        let token = create("old token", "token", "", "fake-token");
+        let backup = source.encrypted_backup().unwrap();
+        drop(source);
+
+        let fresh = tempfile::tempdir().unwrap();
+        let db_path = fresh.path().join("vault.sqlite");
+        let mut slot = None;
+        restore_vault(&mut slot, &db_path, &backup, PASSWORD, STAMP, FAST).unwrap();
+        let vault = slot.as_ref().unwrap();
+        let types: std::collections::HashMap<String, String> = vault
+            .list_metadata()
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.id, item.value_type))
+            .collect();
+        assert_eq!(types[&password], "login");
+        assert_eq!(types[&token], "dev_secret");
+        assert_eq!(
+            vault.item_field(&password, "password").unwrap(),
+            "fake-password"
+        );
+    }
+
+    #[test]
     fn replaced_vault_is_moved_to_a_backup_folder_and_never_deleted() {
         let source_dir = tempfile::tempdir().unwrap();
         let source = new_vault(

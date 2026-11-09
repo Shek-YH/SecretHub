@@ -9,6 +9,7 @@ mod catalog;
 mod catalog_update;
 mod commands;
 mod import;
+mod items;
 mod media;
 mod model_sync;
 mod plan;
@@ -67,6 +68,13 @@ pub fn run() {
             commands::setup_master,
             commands::unlock,
             commands::lock,
+            commands::vault_change_password,
+            items::item_create,
+            items::item_update,
+            items::item_public_fields,
+            items::item_field_reveal,
+            items::item_field_copy,
+            items::item_note_body,
             commands::secret_list,
             commands::secret_create,
             commands::secret_update,

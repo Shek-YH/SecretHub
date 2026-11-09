@@ -2,7 +2,7 @@
 //! writing and result files. Plan files and results never contain secret values;
 //! API keys are decrypted only inside `resolve_entries`, right before writing.
 
-use crate::commands::{selected_entries, selected_entries_from_metadata};
+use crate::commands::{login_env_names, selected_entries, selected_entries_from_metadata};
 use secrethub_core::{VaultError, VaultService};
 use secrethub_exporter::{
     detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, merge_env,
@@ -475,6 +475,16 @@ fn expand_for_plan(
     if plan.bindings.is_empty() {
         return Ok(Vec::new());
     }
+    // Bindings are for API keys: personal items and login payloads never become env values.
+    for binding in &plan.bindings {
+        let unavailable = metadata
+            .iter()
+            .find(|item| item.id == binding.secret_id)
+            .is_some_and(|item| !item.ai_visible() || item.is_json_item());
+        if unavailable {
+            return Err(PlanError::new("secret_unavailable", "secret not found"));
+        }
+    }
     let ids = plan
         .bindings
         .iter()
@@ -499,6 +509,17 @@ fn legacy_keys(
             .iter()
             .find(|item| item.id == *id)
             .ok_or_else(|| PlanError::new("secret_unavailable", "secret not found"))?;
+        if !item.ai_visible() {
+            return Err(PlanError::new("secret_unavailable", "secret not found"));
+        }
+        if item.value_type == "login" {
+            keys.extend(
+                login_env_names(&item.env_key)
+                    .into_iter()
+                    .map(|key| (key, item.id.clone())),
+            );
+            continue;
+        }
         keys.extend(
             selected_entries_from_metadata(item, String::new(), &[])
                 .into_iter()
@@ -1368,6 +1389,113 @@ mod tests {
                 .code,
             "vault_locked"
         );
+    }
+
+    fn typed_plan(
+        project: &Path,
+        secret_ids: Vec<String>,
+        bindings: Vec<PlanBinding>,
+    ) -> PendingPlan {
+        PendingPlan {
+            request_id: "plan-9-zz".to_owned(),
+            kind: "prepare_project_env".to_owned(),
+            project_path: project.to_string_lossy().into_owned(),
+            secret_ids,
+            version: if bindings.is_empty() { 1 } else { 2 },
+            bindings,
+            created_at: "t".to_owned(),
+        }
+    }
+
+    fn typed_item(vault: &VaultService, item_type: &str, dev: Option<&str>) -> String {
+        let input: std::collections::BTreeMap<String, String> = match item_type {
+            "login" => [("username", "fake-user"), ("password", "fake-password")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+            _ => [("bank", "Fake Bank"), ("card_number", "4111111111111111")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+        };
+        vault
+            .create_item(secrethub_core::NewItem {
+                item_type: item_type.to_owned(),
+                name: "Personal fake".to_owned(),
+                fields: input,
+                tags: Vec::new(),
+                favorite: false,
+                dev_use: dev.is_some(),
+                env_key: dev.unwrap_or_default().to_owned(),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn plans_reject_personal_items_in_ids_and_bindings() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let (vault, _) = vault_with_key(data.path());
+        let card = typed_item(&vault, "bank_card", None);
+        let login = typed_item(&vault, "login", None);
+        let dev_login = typed_item(&vault, "login", Some("DOUYIN_TEST"));
+        for plan in [
+            typed_plan(project.path(), vec![card.clone()], Vec::new()),
+            typed_plan(project.path(), vec![login.clone()], Vec::new()),
+            typed_plan(
+                project.path(),
+                Vec::new(),
+                vec![binding(&card, "chat", "", env(Some("K"), None, None))],
+            ),
+            // Even a dev-use login is not an API key: bindings refuse it.
+            typed_plan(
+                project.path(),
+                Vec::new(),
+                vec![binding(&dev_login, "chat", "", env(Some("K"), None, None))],
+            ),
+        ] {
+            let preview = preview_plan(&plan, &vault);
+            assert!(preview.entries.is_empty());
+            assert_eq!(preview.errors.len(), 1);
+            assert_eq!(preview.errors[0].code, "secret_unavailable");
+            assert_eq!(
+                process_plan(&plan, &HashSet::new(), &vault)
+                    .err()
+                    .unwrap()
+                    .code,
+                "secret_unavailable"
+            );
+        }
+        assert!(!project.path().join(".env").exists());
+    }
+
+    #[test]
+    fn dev_use_logins_write_username_and_password_variables() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let (vault, key) = vault_with_key(data.path());
+        let login = typed_item(&vault, "login", Some("DOUYIN_TEST"));
+        let plan = typed_plan(project.path(), vec![key, login], Vec::new());
+        let preview = preview_plan(&plan, &vault);
+        assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+        let keys: Vec<&str> = preview.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "OPENROUTER_API_KEY",
+                "DOUYIN_TEST_USERNAME",
+                "DOUYIN_TEST_PASSWORD"
+            ]
+        );
+        let shown = serde_json::to_string(&preview).unwrap();
+        assert!(!shown.contains("fake-password") && !shown.contains("fake-user"));
+        let outcome = process_plan(&plan, &HashSet::new(), &vault).unwrap();
+        assert_eq!(outcome.written.len(), 3);
+        let env_text = fs::read_to_string(project.path().join(".env")).unwrap();
+        assert!(env_text.contains("DOUYIN_TEST_USERNAME=\"fake-user\""));
+        assert!(env_text.contains("DOUYIN_TEST_PASSWORD=\"fake-password\""));
+        let example = fs::read_to_string(project.path().join(".env.example")).unwrap();
+        assert!(!example.contains("fake-password") && !example.contains("fake-user"));
     }
 
     #[test]

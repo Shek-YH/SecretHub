@@ -2,14 +2,17 @@
 
 use secrethub_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError, VaultKey};
 use secrethub_storage::{
-    CapabilityModelRow, Database, MediaAsset, NewSecret, ProviderModelRow, SecretMetadata,
-    StorageError, UpdatedSecret, CAPABILITY_MODEL_ORDER,
+    CapabilityModelRow, Database, ItemMigration, MediaAsset, NewSecret, ProviderModelRow,
+    RekeyedPayload, SecretAttributes, SecretMetadata, StorageError, UpdatedSecret,
+    CAPABILITY_MODEL_ORDER, JSON_ITEM_TYPES,
 };
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+pub mod items;
 mod lock;
+pub use items::Fields;
 pub use lock::AutoLockPolicy;
 
 const PAYLOAD_AAD: &[u8] = b"secrethub:secret-payload:v1";
@@ -29,6 +32,9 @@ pub enum VaultError {
     InvalidSecret,
     #[error("stored secret is not valid UTF-8")]
     InvalidUtf8,
+    /// Names the offending field key only, never its value.
+    #[error("invalid item field: {0}")]
+    InvalidField(String),
     #[error(transparent)]
     Crypto(#[from] CryptoError),
     #[error(transparent)]
@@ -42,6 +48,29 @@ pub struct NewSecretInput {
     pub description: String,
     pub tags: Vec<String>,
     pub value: String,
+}
+
+/// A new login, bank card or note. `env_key` is the variable prefix of a "dev use" login.
+pub struct NewItem {
+    pub item_type: String,
+    pub name: String,
+    pub fields: Fields,
+    pub tags: Vec<String>,
+    pub favorite: bool,
+    pub dev_use: bool,
+    pub env_key: String,
+}
+
+/// Edit of a typed item: given fields overwrite, sensitive fields left out stay unchanged and
+/// `clear` removes optional fields.
+pub struct ItemUpdate {
+    pub name: String,
+    pub fields: Fields,
+    pub clear: Vec<String>,
+    pub tags: Vec<String>,
+    pub favorite: bool,
+    pub dev_use: bool,
+    pub env_key: String,
 }
 
 pub struct VaultService {
@@ -77,6 +106,8 @@ impl VaultService {
         let verifier = verifier_for(&key);
         self.database.set_vault_meta(&salt, &verifier)?;
         self.key = Some(key);
+        // Nothing to convert in a fresh vault, but the hook keeps all entry points alike.
+        let _ = self.migrate_legacy_items();
         Ok(())
     }
 
@@ -94,6 +125,8 @@ impl VaultService {
             return Err(VaultError::InvalidPassword);
         }
         self.key = Some(key);
+        // Best effort: reads fall back to the legacy interpretation if this fails.
+        let _ = self.migrate_legacy_items();
         Ok(())
     }
 
@@ -124,6 +157,7 @@ impl VaultService {
         if input.name.trim().is_empty() || input.value.is_empty() {
             return Err(VaultError::InvalidSecret);
         }
+        let attributes = raw_string_attributes(attributes, &input.env_key)?;
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
         let value_hash = format!("sha256:{:x}", Sha256::digest(input.value.as_bytes()));
         let id = self.database.create_secret_with_attributes(
@@ -193,6 +227,8 @@ impl VaultService {
         if input.name.trim().is_empty() || input.value.is_empty() {
             return Err(VaultError::InvalidSecret);
         }
+        self.reject_json_item(id)?;
+        let attributes = raw_string_attributes(attributes, &input.env_key)?;
         let encrypted = encrypt(key, input.value.as_bytes(), PAYLOAD_AAD)?;
         let value_hash = format!("sha256:{:x}", Sha256::digest(input.value.as_bytes()));
         if !self.database.update_secret_with_attributes(
@@ -230,6 +266,8 @@ impl VaultService {
         if input.name.trim().is_empty() {
             return Err(VaultError::InvalidSecret);
         }
+        self.reject_json_item(id)?;
+        let attributes = raw_string_attributes(attributes, &input.env_key)?;
         if !self.database.update_metadata_with_attributes(
             id,
             secrethub_storage::SecretMetadataUpdate {
@@ -250,6 +288,282 @@ impl VaultService {
             "success",
             "{\"source\":\"desktop\",\"value_preserved\":true}",
         )?;
+        Ok(())
+    }
+
+    /// Typed-item payloads are JSON documents; the raw-string update paths must not touch them.
+    fn reject_json_item(&self, id: &str) -> Result<(), VaultError> {
+        match self.database.get_metadata(id)? {
+            Some(existing) if existing.is_json_item() => Err(VaultError::InvalidSecret),
+            _ => Ok(()),
+        }
+    }
+
+    fn encrypt_fields(&self, fields: &Fields) -> Result<(Vec<u8>, Vec<u8>), VaultError> {
+        let key = self.require_key()?;
+        let encrypted = encrypt(key, items::encode_payload(fields).as_bytes(), PAYLOAD_AAD)?;
+        Ok((encrypted.ciphertext, encrypted.nonce.to_vec()))
+    }
+
+    /// Fields of a stored login, bank card or note, decrypted. Callers decide what may leave.
+    pub fn read_item_fields(&self, id: &str) -> Result<Fields, VaultError> {
+        self.require_key()?;
+        let metadata = self.json_item_metadata(id)?;
+        let plaintext = self.read_secret(id)?;
+        Ok(items::decode_payload(&metadata.value_type, &plaintext))
+    }
+
+    fn json_item_metadata(&self, id: &str) -> Result<SecretMetadata, VaultError> {
+        match self.database.get_metadata(id)? {
+            Some(metadata) if metadata.is_json_item() => Ok(metadata),
+            _ => Err(VaultError::InvalidSecret),
+        }
+    }
+
+    /// Creates a login, bank card or note. Returns the new id.
+    pub fn create_item(&self, input: NewItem) -> Result<String, VaultError> {
+        self.require_key()?;
+        let def = items::json_item_type(&input.item_type)
+            .ok_or_else(|| VaultError::InvalidField("item_type".into()))?;
+        if input.name.trim().is_empty() {
+            return Err(VaultError::InvalidSecret);
+        }
+        let fields = items::validate_fields(def, &input.fields)?;
+        items::check_required(def, &fields)?;
+        let (dev_use, env_key) = dev_use_settings(&def.key, input.dev_use, &input.env_key)?;
+        let (ciphertext, nonce) = self.encrypt_fields(&fields)?;
+        let id = self.database.create_secret_with_attributes(
+            NewSecret {
+                name: input.name.trim().to_owned(),
+                provider_id: "personal".into(),
+                env_key,
+                description: String::new(),
+                tags: input.tags,
+                ciphertext,
+                nonce,
+            },
+            SecretAttributes {
+                value_type: def.key.clone(),
+                category: "personal".into(),
+                favorite: input.favorite,
+                subtitle: items::subtitle_for(&def.key, &fields, ""),
+                dev_use,
+                ..Default::default()
+            },
+        )?;
+        self.database.record_audit(
+            "create_item",
+            Some(&id),
+            None,
+            "success",
+            &format!("{{\"source\":\"desktop\",\"type\":\"{}\"}}", def.key),
+        )?;
+        Ok(id)
+    }
+
+    /// Edits a typed item; the type itself never changes.
+    pub fn update_item(&self, id: &str, update: ItemUpdate) -> Result<(), VaultError> {
+        self.require_key()?;
+        let metadata = self.json_item_metadata(id)?;
+        let def = items::json_item_type(&metadata.value_type).ok_or(VaultError::InvalidSecret)?;
+        if update.name.trim().is_empty() {
+            return Err(VaultError::InvalidSecret);
+        }
+        let mut fields = self.read_item_fields(id)?;
+        for (key, value) in &update.fields {
+            let field = def
+                .field(key)
+                .ok_or_else(|| VaultError::InvalidField(key.clone()))?;
+            if value.trim().is_empty() {
+                // A blank sensitive field means "leave unchanged"; a blank plain field empties it.
+                if !field.sensitive {
+                    fields.remove(key);
+                }
+                continue;
+            }
+            fields.insert(key.clone(), items::normalize_field(field, value)?);
+        }
+        for key in &update.clear {
+            let field = def
+                .field(key)
+                .ok_or_else(|| VaultError::InvalidField(key.clone()))?;
+            let given = update
+                .fields
+                .get(key)
+                .is_some_and(|value| !value.trim().is_empty());
+            if field.required || given {
+                return Err(VaultError::InvalidField(key.clone()));
+            }
+            fields.remove(key);
+        }
+        items::check_required(def, &fields)?;
+        let (dev_use, env_key) = dev_use_settings(&def.key, update.dev_use, &update.env_key)?;
+        let (ciphertext, nonce) = self.encrypt_fields(&fields)?;
+        if !self.database.update_secret_with_attributes(
+            id,
+            UpdatedSecret {
+                name: update.name.trim().to_owned(),
+                provider_id: metadata.provider_id.clone(),
+                env_key,
+                description: String::new(),
+                tags: update.tags,
+                ciphertext,
+                nonce,
+            },
+            SecretAttributes {
+                value_type: def.key.clone(),
+                category: "personal".into(),
+                scope: metadata.scope.clone(),
+                favorite: update.favorite,
+                archived: metadata.archived,
+                subtitle: items::subtitle_for(&def.key, &fields, ""),
+                dev_use,
+                ..Default::default()
+            },
+        )? {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database.record_audit(
+            "update_item",
+            Some(id),
+            None,
+            "success",
+            &format!("{{\"source\":\"desktop\",\"type\":\"{}\"}}", def.key),
+        )?;
+        Ok(())
+    }
+
+    /// Non-sensitive fields only (website, account, bank, holder, expiry, branch, notes).
+    pub fn item_public_fields(&self, id: &str) -> Result<Fields, VaultError> {
+        let metadata = self.json_item_metadata(id)?;
+        let def = items::json_item_type(&metadata.value_type).ok_or(VaultError::InvalidSecret)?;
+        let mut fields = self.read_item_fields(id)?;
+        fields.retain(|key, _| def.field(key).is_some_and(|field| !field.sensitive));
+        Ok(fields)
+    }
+
+    /// One field of a typed item (sensitive or not). Reveal and copy are built on this.
+    pub fn item_field(&self, id: &str, field: &str) -> Result<String, VaultError> {
+        let metadata = self.json_item_metadata(id)?;
+        let def = items::json_item_type(&metadata.value_type).ok_or(VaultError::InvalidSecret)?;
+        if def.field(field).is_none() {
+            return Err(VaultError::InvalidField(field.to_owned()));
+        }
+        self.read_item_fields(id)?
+            .remove(field)
+            .filter(|value| !value.is_empty())
+            .ok_or(VaultError::InvalidSecret)
+    }
+
+    /// Converts pre-typed-items rows (typed-items design section 7). Single transaction and
+    /// idempotent: converted rows no longer match, so a second run changes nothing.
+    pub fn migrate_legacy_items(&self) -> Result<usize, VaultError> {
+        self.require_key()?;
+        let legacy = self.database.list_legacy_items()?;
+        let mut migrations = Vec::new();
+        for item in legacy {
+            let has_env = !item.env_key.is_empty();
+            let wrapped_field = match (item.value_type.as_str(), has_env) {
+                ("token", _) | (_, true) => None,
+                ("password", false) => Some(("login", "password")),
+                ("text", false) => Some(("note", "body")),
+                ("url", false) => Some(("login", "website")),
+                _ => continue,
+            };
+            match wrapped_field {
+                None => migrations.push(ItemMigration {
+                    id: item.id,
+                    value_type: "dev_secret".into(),
+                    category: None,
+                    subtitle: item.env_key,
+                    payload: None,
+                }),
+                Some((new_type, field)) => {
+                    // An unreadable payload is left alone rather than aborting the whole run.
+                    let Ok(value) = self.read_secret(&item.id) else {
+                        continue;
+                    };
+                    let fields = Fields::from([(field.to_owned(), value)]);
+                    let (ciphertext, nonce) = self.encrypt_fields(&fields)?;
+                    migrations.push(ItemMigration {
+                        id: item.id,
+                        value_type: new_type.into(),
+                        category: Some("personal".into()),
+                        subtitle: items::subtitle_for(new_type, &fields, ""),
+                        payload: Some((ciphertext, nonce)),
+                    });
+                }
+            }
+        }
+        if migrations.is_empty() {
+            return Ok(0);
+        }
+        self.database.apply_item_migrations(&migrations)?;
+        self.database.record_audit(
+            "migrate_legacy_items",
+            None,
+            None,
+            "success",
+            &format!("{{\"source\":\"desktop\",\"count\":{}}}", migrations.len()),
+        )?;
+        Ok(migrations.len())
+    }
+
+    /// Re-encrypts the whole vault under a new master password. Everything is prepared in
+    /// memory and swapped in one transaction, so a failure leaves the old password valid.
+    pub fn change_master_password(
+        &mut self,
+        current: &str,
+        new_password: &str,
+    ) -> Result<(), VaultError> {
+        let old_key = self.require_key()?;
+        let Some((salt, expected_verifier)) = self.database.get_vault_meta()? else {
+            return Err(VaultError::NotInitialized);
+        };
+        let derived = derive_key(current, &salt)?;
+        if verifier_for(&derived)
+            .as_slice()
+            .ct_eq(expected_verifier.as_slice())
+            .unwrap_u8()
+            != 1
+        {
+            return Err(VaultError::InvalidPassword);
+        }
+        if new_password.len() < 9 {
+            return Err(VaultError::InvalidPassword);
+        }
+        let new_salt = generate_salt();
+        let new_key = derive_key(new_password, &new_salt)?;
+        let mut rekeyed = Vec::new();
+        for (secret_id, ciphertext, nonce) in self.database.list_payloads()? {
+            let nonce: [u8; 12] = nonce
+                .as_slice()
+                .try_into()
+                .map_err(|_| VaultError::InvalidSecret)?;
+            let plaintext = decrypt(
+                old_key,
+                &secrethub_crypto::EncryptedPayload { nonce, ciphertext },
+                PAYLOAD_AAD,
+            )?;
+            let encrypted = encrypt(&new_key, &plaintext, PAYLOAD_AAD)?;
+            rekeyed.push(RekeyedPayload {
+                secret_id,
+                ciphertext: encrypted.ciphertext,
+                nonce: encrypted.nonce.to_vec(),
+            });
+        }
+        self.database
+            .rekey(&new_salt, &verifier_for(&new_key), &rekeyed)?;
+        self.key = Some(new_key);
+        // Both are best effort: the new password is already the only valid one.
+        let _ = self.database.checkpoint();
+        let _ = self.database.record_audit(
+            "master_password_changed",
+            None,
+            None,
+            "success",
+            "{\"source\":\"desktop\"}",
+        );
         Ok(())
     }
 
@@ -529,6 +843,41 @@ impl VaultService {
     fn require_key(&self) -> Result<&VaultKey, VaultError> {
         self.key.as_ref().ok_or(VaultError::Locked)
     }
+}
+
+/// Raw-string items only: typed JSON items are created through `create_item`. Developer
+/// secrets show their variable name as the list subtitle.
+fn raw_string_attributes(
+    mut attributes: SecretAttributes,
+    env_key: &str,
+) -> Result<SecretAttributes, VaultError> {
+    if JSON_ITEM_TYPES.contains(&attributes.value_type.as_str()) {
+        return Err(VaultError::InvalidSecret);
+    }
+    attributes.dev_use = false;
+    attributes.subtitle = if attributes.value_type == "dev_secret" {
+        env_key.to_owned()
+    } else {
+        String::new()
+    };
+    Ok(attributes)
+}
+
+/// "Dev use" exists for logins only and needs a valid variable prefix; otherwise it is off
+/// and the prefix is cleared.
+fn dev_use_settings(
+    item_type: &str,
+    dev_use: bool,
+    env_key: &str,
+) -> Result<(bool, String), VaultError> {
+    if item_type != "login" || !dev_use {
+        return Ok((false, String::new()));
+    }
+    let prefix = env_key.trim();
+    if prefix.len() > 100 || !valid_env_name(prefix) {
+        return Err(VaultError::InvalidField("env_key".into()));
+    }
+    Ok((true, prefix.to_owned()))
 }
 
 fn valid_env_name(value: &str) -> bool {

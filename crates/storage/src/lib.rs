@@ -39,6 +39,30 @@ pub struct SecretMetadata {
     pub models_sync_status: String,
     /// Unix seconds of the last key validation; 0 means never.
     pub validated_at: i64,
+    /// Low-sensitivity plaintext line for lists (website host, bank and last digits, env name).
+    pub subtitle: String,
+    /// Login items only: exposed to AI/exports as `{env_key}_USERNAME` and `{env_key}_PASSWORD`.
+    pub dev_use: bool,
+}
+
+/// Item types whose encrypted payload is a JSON document of fields.
+pub const JSON_ITEM_TYPES: [&str; 3] = ["login", "bank_card", "note"];
+
+impl SecretMetadata {
+    /// Whether the payload is a JSON field document rather than a raw string.
+    pub fn is_json_item(&self) -> bool {
+        JSON_ITEM_TYPES.contains(&self.value_type.as_str())
+    }
+
+    /// Typed-items design section 6. The MCP server applies the same rule in SQL.
+    pub fn ai_visible(&self) -> bool {
+        match self.value_type.as_str() {
+            "api_key" | "dev_secret" | "token" => true,
+            "url" | "password" | "text" => !self.env_key.is_empty(),
+            "login" => self.dev_use,
+            _ => false,
+        }
+    }
 }
 
 /// One synced model of one key, with any capability override already applied.
@@ -76,6 +100,8 @@ pub struct MediaAsset {
     pub source: String,
     pub created_at: i64,
 }
+
+const METADATA_COLUMNS: &str = "id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at, subtitle, dev_use";
 
 const MEDIA_COLUMNS: &str = "id, kind, filename, stored_path, sha256, size_bytes, mime, width, height, duration_ms, description, tags_json, source, created_at";
 
@@ -156,6 +182,8 @@ pub struct SecretAttributes {
     pub model_env_key: String,
     pub endpoint_url: String,
     pub endpoint_env_key: String,
+    pub subtitle: String,
+    pub dev_use: bool,
 }
 
 impl Default for SecretAttributes {
@@ -170,6 +198,8 @@ impl Default for SecretAttributes {
             model_env_key: String::new(),
             endpoint_url: String::new(),
             endpoint_env_key: String::new(),
+            subtitle: String::new(),
+            dev_use: false,
         }
     }
 }
@@ -213,8 +243,33 @@ pub struct Settings {
     pub require_auth_before_reveal: bool,
 }
 
+/// A row still using an old value type that the typed-items migration has to convert.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyItem {
+    pub id: String,
+    pub value_type: String,
+    pub env_key: String,
+}
+
+/// One converted row; `payload` is set when the encrypted content is rewritten too.
+pub struct ItemMigration {
+    pub id: String,
+    pub value_type: String,
+    pub category: Option<String>,
+    pub subtitle: String,
+    pub payload: Option<EncryptedParts>,
+}
+
+/// One payload row re-encrypted for a new master key.
+pub struct RekeyedPayload {
+    pub secret_id: String,
+    pub ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
+}
+
 pub type VaultMeta = (Vec<u8>, Vec<u8>);
 pub type EncryptedParts = (Vec<u8>, Vec<u8>);
+pub type PayloadRow = (String, Vec<u8>, Vec<u8>);
 
 pub struct Database {
     connection: Connection,
@@ -420,6 +475,18 @@ impl Database {
         )?;
         add_column_if_missing(
             &connection,
+            "secrets",
+            "subtitle",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "dev_use",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
             "settings",
             "catalog_auto_update",
             "INTEGER NOT NULL DEFAULT 1",
@@ -474,9 +541,9 @@ impl Database {
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
         self.connection.execute(
-            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)",
-            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, now],
+            "INSERT INTO secrets(id, name, provider_id, env_key, description, tags_json, status, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, subtitle, dev_use, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
+            params![id, secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, now],
         )?;
         self.connection.execute(
             "INSERT INTO secret_payloads(secret_id, ciphertext, nonce) VALUES (?1, ?2, ?3)",
@@ -486,15 +553,20 @@ impl Database {
     }
 
     pub fn get_metadata(&self, id: &str) -> Result<Option<SecretMetadata>, StorageError> {
-        self.connection.query_row(
-            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at FROM secrets WHERE id = ?1",
-            params![id],
-            metadata_from_row,
-        ).optional().map_err(Into::into)
+        self.connection
+            .query_row(
+                &format!("SELECT {METADATA_COLUMNS} FROM secrets WHERE id = ?1"),
+                params![id],
+                metadata_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, StorageError> {
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at FROM secrets ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT {METADATA_COLUMNS} FROM secrets ORDER BY updated_at DESC"
+        ))?;
         let rows = statement
             .query_map([], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -503,7 +575,7 @@ impl Database {
 
     pub fn search_metadata(&self, query: &str) -> Result<Vec<SecretMetadata>, StorageError> {
         let pattern = format!("%{}%", query);
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status, validated_at FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare(&format!("SELECT {METADATA_COLUMNS} FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE OR subtitle LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC"))?;
         let rows = statement
             .query_map(params![pattern], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -541,7 +613,7 @@ impl Database {
         let now = unix_time();
         let tags_json = serde_json::to_string(&secret.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
-        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, updated_at = ?15 WHERE id = ?16", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, now, id])?;
+        let updated = self.connection.execute("UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, subtitle = ?15, dev_use = ?16, updated_at = ?17 WHERE id = ?18", params![secret.name, secret.provider_id, secret.env_key, secret.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, now, id])?;
         if updated == 0 {
             return Ok(false);
         }
@@ -562,8 +634,8 @@ impl Database {
         let tags_json = serde_json::to_string(&metadata.tags)
             .map_err(|error| StorageError::InvalidData(error.to_string()))?;
         Ok(self.connection.execute(
-            "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, updated_at = ?15 WHERE id = ?16",
-            params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, now, id],
+            "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, subtitle = ?15, dev_use = ?16, updated_at = ?17 WHERE id = ?18",
+            params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, attributes.subtitle, attributes.dev_use as i64, now, id],
         )? > 0)
     }
 
@@ -836,6 +908,98 @@ impl Database {
         Ok(())
     }
 
+    /// Rows that still carry a pre-typed-items value type.
+    pub fn list_legacy_items(&self) -> Result<Vec<LegacyItem>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, value_type, env_key FROM secrets WHERE value_type IN ('token', 'url', 'password', 'text') ORDER BY created_at, id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(LegacyItem {
+                    id: row.get(0)?,
+                    value_type: row.get(1)?,
+                    env_key: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Applies all conversions in one transaction; any failure leaves every row untouched.
+    pub fn apply_item_migrations(&self, items: &[ItemMigration]) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        for item in items {
+            let changed = match &item.category {
+                Some(category) => transaction.execute(
+                    "UPDATE secrets SET value_type = ?1, category = ?2, subtitle = ?3 WHERE id = ?4",
+                    params![item.value_type, category, item.subtitle, item.id],
+                )?,
+                None => transaction.execute(
+                    "UPDATE secrets SET value_type = ?1, subtitle = ?2 WHERE id = ?3",
+                    params![item.value_type, item.subtitle, item.id],
+                )?,
+            };
+            if changed != 1 {
+                return Err(StorageError::InvalidData("migrated row is missing".into()));
+            }
+            if let Some((ciphertext, nonce)) = &item.payload {
+                transaction.execute(
+                    "UPDATE secret_payloads SET ciphertext = ?1, nonce = ?2 WHERE secret_id = ?3",
+                    params![ciphertext, nonce, item.id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Every encrypted payload as (secret id, ciphertext, nonce).
+    pub fn list_payloads(&self) -> Result<Vec<PayloadRow>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT secret_id, ciphertext, nonce FROM secret_payloads ORDER BY secret_id",
+        )?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Swaps every payload and the vault salt/verifier in one transaction (master password
+    /// change). `payloads` must cover each stored payload exactly; otherwise nothing changes.
+    pub fn rekey(
+        &self,
+        salt: &[u8],
+        verifier: &[u8],
+        payloads: &[RekeyedPayload],
+    ) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let stored: i64 =
+            transaction.query_row("SELECT COUNT(*) FROM secret_payloads", [], |row| row.get(0))?;
+        if stored != payloads.len() as i64 {
+            return Err(StorageError::InvalidData(
+                "payload set changed during rekey".into(),
+            ));
+        }
+        for payload in payloads {
+            let changed = transaction.execute(
+                "UPDATE secret_payloads SET ciphertext = ?1, nonce = ?2 WHERE secret_id = ?3",
+                params![payload.ciphertext, payload.nonce, payload.secret_id],
+            )?;
+            if changed != 1 {
+                return Err(StorageError::InvalidData("payload row is missing".into()));
+            }
+        }
+        let changed = transaction.execute(
+            "UPDATE vault_meta SET salt = ?1, verifier = ?2 WHERE id = 1",
+            params![salt, verifier],
+        )?;
+        if changed != 1 {
+            return Err(StorageError::InvalidData("vault is not initialized".into()));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn update_status(&self, id: &str, status: &str) -> Result<bool, StorageError> {
         Ok(self.connection.execute(
             "UPDATE secrets SET status = ?1, validated_at = ?2 WHERE id = ?3",
@@ -1079,6 +1243,8 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         models_synced_at: row.get(18)?,
         models_sync_status: row.get(19)?,
         validated_at: row.get(20)?,
+        subtitle: row.get(21)?,
+        dev_use: row.get::<_, i64>(22)? != 0,
     })
 }
 

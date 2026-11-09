@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "types": [
+    {
+      "key": "login",
+      "personal": true,
+      "storage": "json",
+      "label": { "zh-CN": "账号密码", "en": "Login" },
+      "fields": [
+        { "key": "website", "kind": "url", "sensitive": false, "required": false, "maxLength": 512, "label": { "zh-CN": "网址", "en": "Website" } },
+        { "key": "username", "kind": "email_or_text", "sensitive": false, "required": true, "maxLength": 256, "label": { "zh-CN": "账号", "en": "Account" } },
+        { "key": "password", "kind": "secret", "sensitive": true, "required": false, "maxLength": 1024, "label": { "zh-CN": "密码", "en": "Password" } },
+        { "key": "totp", "kind": "totp_secret", "sensitive": true, "required": false, "maxLength": 128, "label": { "zh-CN": "两步验证密钥", "en": "Two-step secret" } },
+        { "key": "notes", "kind": "multiline", "sensitive": false, "required": false, "maxLength": 5000, "label": { "zh-CN": "备注", "en": "Notes" } }
+      ]
+    },
+    {
+      "key": "bank_card",
+      "personal": true,
+      "storage": "json",
+      "label": { "zh-CN": "银行卡", "en": "Bank card" },
+      "fields": [
+        { "key": "bank", "kind": "text", "sensitive": false, "required": true, "maxLength": 100, "label": { "zh-CN": "银行", "en": "Bank" } },
+        { "key": "card_number", "kind": "card_number", "sensitive": true, "required": true, "maxLength": 32, "label": { "zh-CN": "卡号", "en": "Card number" } },
+        { "key": "holder", "kind": "text", "sensitive": false, "required": false, "maxLength": 100, "label": { "zh-CN": "持卡人", "en": "Cardholder" } },
+        { "key": "expiry", "kind": "expiry", "sensitive": false, "required": false, "maxLength": 5, "label": { "zh-CN": "有效期", "en": "Expiry" } },
+        { "key": "cvv", "kind": "digits", "sensitive": true, "required": false, "minLength": 3, "maxLength": 4, "label": { "zh-CN": "CVV", "en": "CVV" } },
+        { "key": "pin", "kind": "digits", "sensitive": true, "required": false, "minLength": 4, "maxLength": 6, "label": { "zh-CN": "密码", "en": "PIN" } },
+        { "key": "branch", "kind": "text", "sensitive": false, "required": false, "maxLength": 200, "label": { "zh-CN": "开户行", "en": "Branch" } },
+        { "key": "notes", "kind": "multiline", "sensitive": false, "required": false, "maxLength": 5000, "label": { "zh-CN": "备注", "en": "Notes" } }
+      ]
+    },
+    {
+      "key": "note",
+      "personal": true,
+      "storage": "json",
+      "label": { "zh-CN": "安全笔记", "en": "Secure note" },
+      "fields": [
+        { "key": "body", "kind": "multiline", "sensitive": true, "required": true, "maxLength": 100000, "label": { "zh-CN": "正文", "en": "Body" } }
+      ]
+    },
+    {
+      "key": "dev_secret",
+      "personal": false,
+      "storage": "string",
+      "label": { "zh-CN": "开发密钥", "en": "Dev secret" },
+      "fields": [
+        { "key": "value", "kind": "multiline", "sensitive": true, "required": true, "maxLength": 100000, "label": { "zh-CN": "值", "en": "Value" } },
+        { "key": "env_key", "kind": "text", "sensitive": false, "required": false, "maxLength": 128, "label": { "zh-CN": "环境变量名", "en": "Environment variable" } },
+        { "key": "description", "kind": "text", "sensitive": false, "required": false, "maxLength": 500, "label": { "zh-CN": "用途说明", "en": "Purpose" } }
+      ]
+    }
+  ]
+}
