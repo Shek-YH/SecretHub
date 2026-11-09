@@ -9,6 +9,7 @@ import { bindingSchema, groupBindingSchema, getPlanStatus, isValidRequestId, MAX
 import { MAX_SUGGESTIONS, precheckSuggestions, queueSuggestions, suggestionSchema } from './caps.js';
 import { getMedia, getMediaAddStatus, isValidMediaRequestId, mediaAddSchema, MEDIA_KINDS, ORIENTATIONS, precheckMediaAdd, queueMediaAdd, readMedia, searchMedia } from './media.js';
 import { getCaptureStatus, isValidCaptureRequestId, precheckCapture, queueCapture } from './capture.js';
+import { getImportStatus, importPathSchema, isValidImportRequestId, MAX_IMPORT_PATHS, precheckImport, queueImport } from './import.js';
 import { getSyncStatus, isValidSyncRequestId, MAX_SYNC_SECRETS, precheckSyncRequest, queueSyncRequest } from './sync.js';
 import { buildInvocation } from './invocation.js';
 import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
@@ -101,6 +102,18 @@ server.registerTool('secrethub_media_add', { title: 'Add File to Media Library',
 server.registerTool('secrethub_get_media_add_status', { title: 'Get Media Add Status', description: 'Report a request queued by secrethub_media_add: pending (waiting for the user in SecretHub Desktop), added (with the asset id; duplicate is true when the same content was already in the library), declined, failed (with an error code), or not_found. Reads only status files.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
   if (!isValidMediaRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned by secrethub_media_add.' }, response_format), isError: true };
   return catalogResult(getMediaAddStatus(request_id, planDirectory, resultDirectory), response_format);
+});
+
+const importDescription = 'Ask SecretHub Desktop to import servers, databases and other configuration from files or folders on this machine. Pass only absolute paths to files or folders; NEVER read, open, cat or search the contents of those files yourself (.env files, private keys, CSV exports), use only directory and file names to decide which paths to pass. This only queues the paths: SecretHub Desktop reads the files locally, groups them into config groups, API keys and other items, removes duplicates and shows the user a review of names and choices (no values). Nothing is written until the user confirms. Tell the user to open SecretHub Desktop and review the import, then poll secrethub_get_import_status with the returned requestId.';
+server.registerTool('secrethub_request_import', { title: 'Request Import', description: importDescription, inputSchema: { paths: z.array(importPathSchema).min(1).max(MAX_IMPORT_PATHS), response_format: responseFormat }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, ({ paths, response_format }) => {
+  const problem = precheckImport(paths);
+  if (problem) return { ...catalogResult({ queued: false, error: problem }, response_format), isError: true };
+  const requestId = queueImport(planDirectory, paths);
+  return catalogResult({ requestId, pathCount: new Set(paths).size, requiresUserConfirmation: true, imported: false, nextStep: 'Ask the user to open SecretHub Desktop and review the import request; until they confirm nothing is written. Poll secrethub_get_import_status with this requestId.' }, response_format);
+});
+server.registerTool('secrethub_get_import_status', { title: 'Get Import Status', description: 'Report an import queued by secrethub_request_import: pending (waiting for the user in SecretHub Desktop), done (with added, updated and skipped counts and the item names, never any value), declined, failed (with an error code), or not_found. Reads only status files.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
+  if (!isValidImportRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned by secrethub_request_import.' }, response_format), isError: true };
+  return catalogResult(getImportStatus(request_id, planDirectory, resultDirectory), response_format);
 });
 
 function catalogResult(value: Record<string, unknown>, format: 'json' | 'markdown') { const text = format === 'json' ? JSON.stringify(value, null, 2) : markdown(value); return { content: [{ type: 'text' as const, text: text.slice(0, CHARACTER_LIMIT) }], structuredContent: value }; }

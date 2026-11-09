@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { getTranslation } from './i18n/translations';
-import { backend, isTauriRuntime, type ImportPreviewRow } from './lib/backend';
+import { backend, isTauriRuntime, type ImportApplyOutcome, type ImportPreviewRow, type ImportReview } from './lib/backend';
+import { ImportReviewModal } from './ImportReview';
 
 type T = ReturnType<typeof getTranslation>;
 
@@ -18,6 +19,31 @@ export function ImportPanel({ t, onClose, onDone }: { t: T; onClose: () => void;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [review, setReview] = useState<ImportReview | null>(null);
+
+  /** Folder import: the backend reads the folder locally and returns a value-free review. */
+  async function chooseFolder() {
+    try {
+      const folder = isTauriRuntime() ? await backend.chooseFolder() : null;
+      if (!folder) return;
+      setMessage(t.importReview.scanning);
+      setReview(await backend.importScan([folder]));
+      setMessage('');
+      setError('');
+    } catch (reason) {
+      setMessage('');
+      setError(String(reason));
+    }
+  }
+
+  async function reviewed(outcome: ImportApplyOutcome) {
+    setReview(null);
+    // Newly created API keys are checked one by one so their status and model list are ready.
+    for (const id of outcome.apiKeyIds) {
+      try { await backend.validate(id); } catch { /* the key stays unchecked; the list shows it */ }
+    }
+    onDone();
+  }
 
   async function chooseFile() {
     try {
@@ -82,6 +108,7 @@ export function ImportPanel({ t, onClose, onDone }: { t: T; onClose: () => void;
         </div>
         <div className="import-file-row">
           <button type="button" className="primary-button" onClick={() => void chooseFile()}>{t.tools.importChooseFile}</button>
+          <button type="button" className="secondary-button" onClick={() => void chooseFolder()}>{t.importReview.chooseFolder}</button>
           {filePath && <code className="restore-file-name">{t.tools.importChosen}: {filePath}</code>}
         </div>
         <strong className="import-paste-title">{t.tools.importPasteTitle}</strong>
@@ -105,6 +132,7 @@ export function ImportPanel({ t, onClose, onDone }: { t: T; onClose: () => void;
           <button type="button" className="primary-button" disabled={rows.length === 0 || busy} onClick={() => void confirm()}>{t.actions.confirmImport}</button>
         </div>
       </form>
+      {review && <ImportReviewModal t={t} review={review} onClose={() => setReview(null)} onDone={(outcome) => void reviewed(outcome)} />}
     </div>
   );
 }

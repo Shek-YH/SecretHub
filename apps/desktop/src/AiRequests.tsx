@@ -1,5 +1,5 @@
 import type { getTranslation } from './i18n/translations';
-import type { CaptureRequest, MediaRequest, PendingSyncRequest } from './lib/backend';
+import type { CaptureRequest, MediaRequest, PendingImportRequest, PendingSyncRequest } from './lib/backend';
 import { formatBytes } from './mediaFormat';
 
 type T = ReturnType<typeof getTranslation>;
@@ -20,4 +20,9 @@ export function CaptureRequestBanner({ request, t, onStart, onDecline }: { reque
 /** Shown while the vault is locked: the sync request stays queued and runs right after unlocking. */
 export function SyncRequestBanner({ request, t }: { request: PendingSyncRequest; t: T }) {
   return <section className="mcp-plan" aria-label={t.ai.syncTitle}><div><span className="section-kicker">MCP / MODEL SYNC</span><strong>{t.ai.syncTitle}</strong><p>{t.ai.syncBody}</p>{request.secretCount != null && <small>{request.secretCount} {t.nav.secrets}</small>}</div></section>;
+}
+
+/** An AI asks to import files by path only; nothing is read until the user clicks View. */
+export function ImportRequestBanner({ request, t, onView, onDecline }: { request: PendingImportRequest; t: T; onView: () => void; onDecline: () => void }) {
+  return <section className="mcp-plan" aria-label={t.importReview.aiRequest.replace('{paths}', '')}><div><span className="section-kicker">MCP / IMPORT</span><strong>{t.importReview.aiRequest.replace('{paths}', '')}</strong><div className="import-request-paths">{request.paths.map((path) => <code key={path}>{path}</code>)}</div><p>{t.importReview.aiBody}</p></div><div className="mcp-plan-actions"><button className="primary-button" onClick={onView}>{t.importReview.view}</button><button className="secondary-button" onClick={onDecline}>{t.importReview.decline}</button></div></section>;
 }

@@ -52,6 +52,9 @@ const messages = [
   { jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'secrethub_validate_secret', arguments: { id: 'secret-note', response_format: 'json' } } },
   { jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'secrethub_recommend_secrets_for_project', arguments: { stack: ['hidden-login'], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 33, method: 'tools/call', params: { name: 'secrethub_request_model_sync', arguments: { secret_ids: ['secret-login'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 34, method: 'tools/call', params: { name: 'secrethub_request_import', arguments: { paths: [directory, join(directory, 'one.env')], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 35, method: 'tools/call', params: { name: 'secrethub_request_import', arguments: { paths: ['relative/folder'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 36, method: 'tools/call', params: { name: 'secrethub_get_import_status', arguments: { request_id: 'import-../x', response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -141,6 +144,13 @@ try {
   assert.equal(personalMetadata.isError === true || personalMetadata.structuredContent?.found === false, true);
   assert.deepEqual(responses.find((response) => response.id === 28).result.structuredContent.profiles.find((profile) => profile.id === 'profile-mixed').secretIds, ['secret-model']);
   for (const id of [29, 30, 33]) assert.equal(responses.find((response) => response.id === id).result.isError, true, `call ${id}`);
+  for (const name of ['secrethub_request_import', 'secrethub_get_import_status']) assert.ok(tools.some((tool) => tool.name === name), name);
+  const importQueued = responses.find((response) => response.id === 34).result.structuredContent;
+  assert.match(importQueued.requestId, /^import-/);
+  const importFile = JSON.parse(readFileSync(`${planDirectory}/${importQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([importFile.kind, importFile.paths], ['import', [directory, join(directory, 'one.env')]]);
+  assert.equal(responses.find((response) => response.id === 35).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 36).result.isError, true);
   // Names, payload bytes and env names never appear anywhere; ids may only be echoed back for calls that named them.
   assert.equal(JSON.stringify(responses).match(/Hidden|0D0E0F|hidden-vision-model|HIDDEN_LOGIN_KEY/g)?.length ?? 0, 0);
   for (const id of [3, 5, 26, 28, 32]) assert.equal(/secret-(card|note|login|legacy-url)/.test(JSON.stringify(responses.find((response) => response.id === id))), false, `call ${id}`);

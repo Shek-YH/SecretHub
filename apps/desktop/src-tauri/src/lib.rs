@@ -11,18 +11,21 @@ mod commands;
 mod export;
 mod groups;
 mod import;
+mod import_flow;
 mod items;
 mod media;
 mod model_sync;
 mod plan;
 mod queue;
 mod restore;
+mod scan;
 mod sync;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
     pub policy: Mutex<AutoLockPolicy>,
     pub capture: capture::CaptureState,
+    pub imports: import_flow::Sessions,
 }
 
 pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -59,6 +62,7 @@ pub fn run() {
                     now_seconds(),
                 )),
                 capture: capture::CaptureState::default(),
+                imports: import_flow::Sessions::default(),
             });
             catalog_update::start(app.handle().clone());
             sync::start(app.handle().clone());
@@ -93,6 +97,11 @@ pub fn run() {
             commands::secret_import_preview,
             commands::secret_import,
             commands::choose_import_file,
+            import_flow::import_scan,
+            import_flow::import_apply,
+            import_flow::import_cancel,
+            import_flow::mcp_pending_import_requests,
+            import_flow::mcp_import_decline,
             commands::secret_import_file_preview,
             commands::secret_import_file,
             commands::mcp_pending_plans,

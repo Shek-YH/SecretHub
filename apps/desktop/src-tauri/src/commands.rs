@@ -979,7 +979,9 @@ pub struct ImportOutcome {
 }
 
 /// Provider credentials import as API keys; every other variable is a developer secret.
-fn import_attributes(secret: &import::PlannedSecret) -> secrethub_storage::SecretAttributes {
+pub(crate) fn import_attributes(
+    secret: &import::PlannedSecret,
+) -> secrethub_storage::SecretAttributes {
     if secret.provider_credential {
         secrethub_storage::SecretAttributes {
             category: "ai".into(),

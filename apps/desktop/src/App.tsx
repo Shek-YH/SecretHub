@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal } from './McpReview';
-import { CaptureRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
+import { CaptureRequestBanner, ImportRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
+import { ImportReviewModal } from './ImportReview';
 import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type ProfileVariables, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type ImportApplyOutcome, type ImportReview, type PendingImportRequest, type ProfileVariables, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { CatalogSettings } from './CatalogSettings';
 import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, groupProviders, providerKind, providerTemplates, resolveProviderId, type ProviderTemplate } from './providers';
 import { SecretForm } from './SecretForm';
@@ -57,6 +58,8 @@ export function App() {
   const [captureRequests, setCaptureRequests] = useState<CaptureRequest[]>([]);
   const [captureName, setCaptureName] = useState<string | null>(null);
   const [mediaRequests, setMediaRequests] = useState<MediaRequest[]>([]);
+  const [importRequests, setImportRequests] = useState<PendingImportRequest[]>([]);
+  const [aiReview, setAiReview] = useState<ImportReview | null>(null);
   const [mediaRevision, setMediaRevision] = useState(0);
   const [modelsRevision, setModelsRevision] = useState(0);
   const [, setCatalogRevision] = useState(0);
@@ -186,7 +189,8 @@ export function App() {
       // Queued AI sync requests run in the backend once unlocked; when the queue drains, reload what they changed.
       void backend.pendingSyncRequests().then((items) => { setPendingSync(items); if (previousSyncCount.current > 0 && items.length === 0) { void refreshSecretsRef.current(); setModelsRevision((value) => value + 1); } previousSyncCount.current = items.length; }).catch(() => undefined);
       void backend.pendingCaptureRequests().then(setCaptureRequests).catch(() => undefined);
-      void backend.pendingMediaRequests().then(setMediaRequests).catch(() => undefined); };
+      void backend.pendingMediaRequests().then(setMediaRequests).catch(() => undefined);
+      void backend.pendingImportRequests().then(setImportRequests).catch(() => undefined); };
     loadPlans();
     const timer = window.setInterval(loadPlans, 2000);
     return () => window.clearInterval(timer);
@@ -208,6 +212,24 @@ export function App() {
       setCaptureRequests((current) => current.filter((item) => item.requestId !== request.requestId));
       if (accept) setCaptureName(request.providerName);
     } catch (error) { setRuntimeError(`${t.capture.failed}: ${String(error)}`); }
+  }
+
+  async function viewImport(request: PendingImportRequest) {
+    try { setAiReview(await backend.importScan(request.paths, request.requestId)); setRuntimeError(''); }
+    catch (reason) { setRuntimeError(`${t.actions.operationFailed}: ${String(reason)}`); }
+  }
+
+  async function declineImport(request: PendingImportRequest) {
+    try { await backend.importDecline(request.requestId); setImportRequests((current) => current.filter((item) => item.requestId !== request.requestId)); }
+    catch (reason) { setRuntimeError(`${t.actions.operationFailed}: ${String(reason)}`); }
+  }
+
+  async function aiImportDone(outcome: ImportApplyOutcome) {
+    setAiReview(null);
+    for (const id of outcome.apiKeyIds) {
+      try { await backend.validate(id); } catch { /* the key stays unchecked; the list shows it */ }
+    }
+    void refreshSecrets();
   }
 
   async function decideMedia(request: MediaRequest, accept: boolean) {
@@ -470,6 +492,8 @@ export function App() {
         {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onReview={() => setReviewPlan(plan)} />)}
         {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus?.unlocked && captureRequests.map((request) => <CaptureRequestBanner key={request.requestId} request={request} t={t} onStart={() => void decideCapture(request, true)} onDecline={() => void decideCapture(request, false)} />)}
+        {vaultStatus?.unlocked && importRequests.map((request) => <ImportRequestBanner key={request.requestId} request={request} t={t} onView={() => void viewImport(request)} onDecline={() => void declineImport(request)} />)}
+        {aiReview && <ImportReviewModal t={t} review={aiReview} onClose={() => setAiReview(null)} onDone={(outcome) => void aiImportDone(outcome)} />}
         {mediaRequests.map((request) => <MediaRequestBanner key={request.requestId} request={request} t={t} onAccept={() => void decideMedia(request, true)} onDecline={() => void decideMedia(request, false)} />)}
         {capBatches.map((batch) => <CapabilitySuggestionBanner key={batch.requestId} batch={batch} t={t} onReview={() => setReviewCaps(batch)} />)}
         {reviewPlan && <PlanReviewModal plan={reviewPlan} t={t} onClose={() => setReviewPlan(null)} onDone={planReviewed} />}

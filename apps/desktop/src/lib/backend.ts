@@ -33,6 +33,14 @@ export type ExportOutcomeV2 = { written: string[]; skipped: string[] };
 /** Variable subsets of config groups by secret id; a group without an entry means every variable. */
 export type ProfileVariables = Record<string, string[]>;
 export type BackendProfile = { id: string; name: string; description: string; secret_ids: string[]; variables?: ProfileVariables };
+/** Value-free review of a local import scan: names, flags and choices only. */
+export type ImportDedupe = { state: 'new' | 'same' | 'differs'; options: string[]; default: string; added: string[]; changed: string[]; missing: string[] };
+export type ImportReviewVar = { name: string; secret: boolean; values: number; pick: number; conflict: boolean; apiKeyItem?: string };
+export type ImportReviewItem = { id: string; kind: 'group' | 'api_key' | 'login' | 'bank_card' | 'note'; source: string; name: string; variables: ImportReviewVar[]; hasNotes: boolean; dedupe: ImportDedupe; splitFrom?: string; provider?: string; fields?: string[] };
+export type ImportReview = { sessionId: string; requestId?: string; items: ImportReviewItem[]; skipped: Array<{ name: string; reason: string }> };
+export type ImportItemDecision = { id: string; include: boolean; action?: string; split?: boolean; picks?: Record<string, number>; secrets?: Record<string, boolean> };
+export type ImportApplyOutcome = { added: string[]; updated: string[]; skipped: string[]; apiKeyIds: string[] };
+export type PendingImportRequest = { requestId: string; paths: string[]; createdAt: string };
 export type ImportPreviewRow = { label: string; generic: boolean; keys: string[] };
 export type ImportOutcome = { ids: string[]; apiKeyIds: string[] };
 export type BackendSettings = { locale: string; theme: string; auto_lock_minutes: number; clipboard_timeout_seconds: number; require_auth_before_export: boolean; require_auth_before_reveal: boolean };
@@ -91,6 +99,11 @@ export const backend = {
   importPreview: (request: { format: 'env' | 'json'; contents: string; confirmed: false }) => invoke<ImportPreviewRow[]>('secret_import_preview', { request }),
   importSecrets: (request: { format: 'env' | 'json'; contents: string; confirmed: true }) => invoke<ImportOutcome>('secret_import', { request }),
   chooseImportFile: () => invoke<string | null>('choose_import_file'),
+  importScan: (paths: string[], requestId?: string) => invoke<ImportReview>('import_scan', { paths, requestId }),
+  importApply: (sessionId: string, decisions: { items: ImportItemDecision[] }) => invoke<ImportApplyOutcome>('import_apply', { sessionId, decisions }),
+  importCancel: (sessionId: string) => invoke<void>('import_cancel', { sessionId }),
+  pendingImportRequests: () => invoke<PendingImportRequest[]>('mcp_pending_import_requests'),
+  importDecline: (requestId: string) => invoke<void>('mcp_import_decline', { requestId }),
   importFilePreview: (path: string) => invoke<ImportPreviewRow[]>('secret_import_file_preview', { path }),
   importFile: (path: string) => invoke<ImportOutcome>('secret_import_file', { path }),
   copy: (id: string) => invoke<void>('secret_copy', { id }),
