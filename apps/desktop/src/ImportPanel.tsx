@@ -36,6 +36,43 @@ export function ImportPanel({ t, onClose, onDone }: { t: T; onClose: () => void;
     }
   }
 
+  /** Files for the review flow: password exports, the bank card template, keys. */
+  async function chooseFiles() {
+    try {
+      const files = isTauriRuntime() ? await backend.importChooseFiles() : null;
+      if (!files || files.length === 0) return;
+      setMessage(t.importReview.scanning);
+      setReview(await backend.importScan(files));
+      setMessage('');
+      setError('');
+    } catch (reason) {
+      setMessage('');
+      setError(String(reason));
+    }
+  }
+
+  async function saveTemplate() {
+    try {
+      const saved = isTauriRuntime() ? await backend.importSaveBankTemplate() : null;
+      if (saved) { setMessage(t.importReview.templateSaved); setError(''); }
+    } catch (reason) { setError(String(reason)); }
+  }
+
+  /** Smart paste: recognized locally, then reviewed like any other import. */
+  async function smartPaste() {
+    try {
+      if (!isTauriRuntime()) return;
+      setFilePath('');
+      setMessage(t.importReview.scanning);
+      setReview(await backend.importScanText(contents));
+      setMessage('');
+      setError('');
+    } catch (reason) {
+      setMessage('');
+      setError(String(reason));
+    }
+  }
+
   async function reviewed(outcome: ImportApplyOutcome) {
     setReview(null);
     // Newly created API keys are checked one by one so their status and model list are ready.
@@ -109,8 +146,11 @@ export function ImportPanel({ t, onClose, onDone }: { t: T; onClose: () => void;
         <div className="import-file-row">
           <button type="button" className="primary-button" onClick={() => void chooseFile()}>{t.tools.importChooseFile}</button>
           <button type="button" className="secondary-button" onClick={() => void chooseFolder()}>{t.importReview.chooseFolder}</button>
+          <button type="button" className="secondary-button" onClick={() => void chooseFiles()}>{t.importReview.chooseFiles}</button>
+          <button type="button" className="secondary-button" onClick={() => void saveTemplate()}>{t.importReview.bankTemplate}</button>
           {filePath && <code className="restore-file-name">{t.tools.importChosen}: {filePath}</code>}
         </div>
+        <p className="cap-hint">{t.importReview.bankTemplateHint}</p>
         <strong className="import-paste-title">{t.tools.importPasteTitle}</strong>
         <label>
           {t.actions.importFormat}
@@ -128,6 +168,7 @@ export function ImportPanel({ t, onClose, onDone }: { t: T; onClose: () => void;
         {message && <div className="form-success">{message}</div>}
         <div className="form-security"><span>◆</span>{t.security.warning}</div>
         <div className="form-actions">
+          <button type="button" className="secondary-button" disabled={!contents.trim()} title={t.importReview.smartPasteHint} onClick={() => void smartPaste()}>{t.importReview.smartPaste}</button>
           <button type="button" className="secondary-button" onClick={() => void previewText()}>{t.actions.importPreview}</button>
           <button type="button" className="primary-button" disabled={rows.length === 0 || busy} onClick={() => void confirm()}>{t.actions.confirmImport}</button>
         </div>

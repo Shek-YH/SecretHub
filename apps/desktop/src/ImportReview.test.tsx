@@ -167,3 +167,63 @@ describe('AI import request', () => {
     await waitFor(() => expect(decline).toHaveBeenCalledWith('import-1-aa'));
   });
 });
+
+describe('I2 sources in the import panel', () => {
+  const loginReview: ImportReview = {
+    sessionId: 'session-2',
+    items: [
+      { id: 'i0', kind: 'login', source: '粘贴文本', name: 'panel.example.com', hasNotes: false, fields: ['password', 'username', 'website'], dedupe: { state: 'differs', options: ['update', 'keep_both', 'skip'], default: 'keep_both', added: [], changed: ['password'], missing: [] }, variables: [] },
+      { id: 'i1', kind: 'bank_card', source: '粘贴文本', name: 'Fake Bank 尾号 1111', hasNotes: false, fields: ['bank', 'card_number'], dedupe: { state: 'new', options: [], default: 'create', added: [], changed: [], missing: [] }, variables: [] },
+    ],
+    skipped: [{ name: 'passwords.csv', reason: 'invalid_row' }],
+  };
+
+  beforeEach(() => { (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}; });
+
+  it('lists the field names of logins and cards in the user language, never values', () => {
+    render(<ImportReviewModal t={t} review={loginReview} onClose={() => undefined} onDone={() => undefined} />);
+    const login = document.querySelector('[data-item="i0"]') as HTMLElement;
+    expect(within(login).getByText('将保存的字段: 密码, 账号, 网址')).toBeInTheDocument();
+    expect(within(login).getByText('变更变量: password')).toBeInTheDocument();
+    expect(within(login).getByLabelText('panel.example.com 已存在，内容有差异')).toHaveValue('keep_both');
+    expect(within(login).getByText('账号密码')).toBeInTheDocument();
+    expect(within(document.querySelector('[data-item="i1"]') as HTMLElement).getByText('银行卡')).toBeInTheDocument();
+    expect(screen.getByText(/passwords.csv/)).toBeInTheDocument();
+  });
+
+  it('opens the review for chosen files (password exports, keys)', async () => {
+    const choose = vi.spyOn(backend, 'importChooseFiles').mockResolvedValue(['C:/x/passwords.csv', 'C:/x/id_ed25519']);
+    const scan = vi.spyOn(backend, 'importScan').mockResolvedValue(loginReview);
+    const user = userEvent.setup();
+    render(<ImportPanel t={t} onClose={() => undefined} onDone={() => undefined} />);
+    await user.click(screen.getByRole('button', { name: '选择文件（密码导出 CSV、密钥等）' }));
+    expect(await screen.findByRole('dialog', { name: '确认导入' })).toBeInTheDocument();
+    expect(choose).toHaveBeenCalled();
+    expect(scan).toHaveBeenCalledWith(['C:/x/passwords.csv', 'C:/x/id_ed25519']);
+  });
+
+  it('offers the bank card template with the CVV and password notice', async () => {
+    const save = vi.spyOn(backend, 'importSaveBankTemplate').mockResolvedValue('C:/x/bank-cards-template.csv');
+    const user = userEvent.setup();
+    render(<ImportPanel t={t} onClose={() => undefined} onDone={() => undefined} />);
+    expect(screen.getByText(/模板不含 CVV 和密码列/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载银行卡模板' }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(await screen.findByText('模板已保存')).toBeInTheDocument();
+  });
+
+  it('sends pasted text to the local recognizer, not to the format preview, and needs some text', async () => {
+    const scanText = vi.spyOn(backend, 'importScanText').mockResolvedValue(loginReview);
+    const preview = vi.spyOn(backend, 'importPreview').mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<ImportPanel t={t} onClose={() => undefined} onDone={() => undefined} />);
+    const smart = screen.getByRole('button', { name: '智能识别并审核' });
+    expect(smart).toBeDisabled();
+    await user.type(screen.getByLabelText('粘贴 .env 或 JSON 内容'), '账号：fake-user{enter}密码：fake-pass');
+    expect(smart).toBeEnabled();
+    await user.click(smart);
+    expect(await screen.findByRole('dialog', { name: '确认导入' })).toBeInTheDocument();
+    expect(scanText).toHaveBeenCalledWith('账号：fake-user\n密码：fake-pass');
+    expect(preview).not.toHaveBeenCalled();
+  });
+});

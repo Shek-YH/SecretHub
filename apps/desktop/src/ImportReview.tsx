@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { getTranslation } from './i18n/translations';
+import { fieldDef, fieldLabel } from './items/itemTypes';
 import { backend, type ImportApplyOutcome, type ImportItemDecision, type ImportReview as ReviewData, type ImportReviewItem } from './lib/backend';
 
 type T = ReturnType<typeof getTranslation>;
@@ -118,6 +119,9 @@ export function ImportReviewModal({ t, review, onClose, onDone }: { t: T; review
                       {item.dedupe.changed.length > 0 && <small>{text.changed}: {item.dedupe.changed.join(', ')}</small>}
                       {item.dedupe.missing.length > 0 && <small>{text.missing}: {item.dedupe.missing.join(', ')}</small>}
                     </>
+                  )}
+                  {item.fields && item.fields.length > 0 && (
+                    <small className="import-fields">{text.fieldsLabel}: {item.fields.map((key) => { const def = fieldDef(item.kind, key); return def ? fieldLabel(def, t.items.labelLocale) : key; }).join(', ')}</small>
                   )}
                   <ul className="import-variables">
                     {item.variables.map((variable) => {

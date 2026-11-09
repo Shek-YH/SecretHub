@@ -8,6 +8,7 @@ mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
+mod csv_import;
 mod export;
 mod groups;
 mod import;
@@ -15,6 +16,7 @@ mod import_flow;
 mod items;
 mod media;
 mod model_sync;
+mod paste;
 mod plan;
 mod queue;
 mod restore;
@@ -100,6 +102,9 @@ pub fn run() {
             import_flow::import_scan,
             import_flow::import_apply,
             import_flow::import_cancel,
+            import_flow::import_scan_text,
+            import_flow::import_choose_files,
+            import_flow::import_save_bank_template,
             import_flow::mcp_pending_import_requests,
             import_flow::mcp_import_decline,
             commands::secret_import_file_preview,

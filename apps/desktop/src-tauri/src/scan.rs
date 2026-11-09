@@ -51,9 +51,28 @@ pub struct SkippedFile {
     pub reason: &'static str,
 }
 
+/// A candidate that is not a config group: a login, bank card or secure note. `fields` use
+/// the keys of the typed item definitions (`item-types.json`); a note carries its text in `body`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Extra {
+    pub source: String,
+    /// `login` | `bank_card` | `note`
+    pub kind: &'static str,
+    pub name: String,
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
 #[derive(Debug, Default)]
 pub struct ScanResult {
     pub groups: Vec<ScannedGroup>,
+    pub extras: Vec<Extra>,
+    pub skipped: Vec<SkippedFile>,
+}
+
+/// What one folder (or single file) yields.
+pub struct GroupScan {
+    pub group: Option<ScannedGroup>,
+    pub extras: Vec<Extra>,
     pub skipped: Vec<SkippedFile>,
 }
 
@@ -180,80 +199,119 @@ fn closing_quote(rest: &str, quote: char) -> Option<usize> {
     None
 }
 
+/// One `KEY=VALUE` assignment starting at `lines[index]`: the name, the value and the index of
+/// the next line (a quoted value may span several lines). `None` when the line is not one.
+pub(crate) fn parse_env_assignment(
+    lines: &[&str],
+    index: usize,
+) -> Option<(String, String, usize)> {
+    let line = lines[index].trim();
+    let line = line.strip_prefix("export ").map_or(line, str::trim_start);
+    let (name, rest) = line.split_once('=')?;
+    let name = name.trim();
+    if !valid_variable_name(name) {
+        return None;
+    }
+    let mut next = index + 1;
+    let rest = rest.trim_start();
+    let value = match rest.chars().next() {
+        Some(quote @ ('"' | '\'')) => {
+            let body = &rest[1..];
+            if let Some(end) = closing_quote(body, quote) {
+                let inner = &body[..end];
+                if quote == '"' {
+                    unescape_double(inner)
+                } else {
+                    inner.to_owned()
+                }
+            } else {
+                // Multi-line quoted value: read on until a line closes the quote.
+                let mut collected = vec![body.to_owned()];
+                let mut closed = None;
+                let mut cursor = next;
+                while cursor < lines.len() {
+                    let following = lines[cursor];
+                    cursor += 1;
+                    if let Some(end) = closing_quote(following, quote) {
+                        collected.push(following[..end].to_owned());
+                        closed = Some(cursor);
+                        break;
+                    }
+                    collected.push(following.to_owned());
+                }
+                match closed {
+                    Some(after) => {
+                        next = after;
+                        let joined = collected.join("\n");
+                        if quote == '"' {
+                            unescape_double(&joined)
+                        } else {
+                            joined
+                        }
+                    }
+                    // Never closed: keep what the first line says.
+                    None => body.to_owned(),
+                }
+            }
+        }
+        _ => {
+            let unquoted = rest.split(" #").next().unwrap_or(rest);
+            unquoted.trim_end().to_owned()
+        }
+    };
+    Some((name.to_owned(), value, next))
+}
+
 fn parse_env_lines(text: &str) -> EnvParse {
     let lines: Vec<&str> = text.lines().collect();
     let mut entries = Vec::new();
     let mut other_lines = Vec::new();
     let mut index = 0;
     while index < lines.len() {
-        let raw = lines[index];
-        index += 1;
-        let line = raw.trim();
+        let line = lines[index].trim();
         if line.is_empty() || line.starts_with('#') {
+            index += 1;
             continue;
         }
-        let line = line.strip_prefix("export ").map_or(line, str::trim_start);
-        let Some((name, rest)) = line.split_once('=') else {
-            other_lines.push(raw.trim().to_owned());
-            continue;
-        };
-        let name = name.trim();
-        if !valid_variable_name(name) {
-            other_lines.push(raw.trim().to_owned());
-            continue;
+        match parse_env_assignment(&lines, index) {
+            Some((name, value, next)) => {
+                entries.push((name, value));
+                index = next;
+            }
+            None => {
+                other_lines.push(line.to_owned());
+                index += 1;
+            }
         }
-        let rest = rest.trim_start();
-        let value = match rest.chars().next() {
-            Some(quote @ ('"' | '\'')) => {
-                let body = &rest[1..];
-                if let Some(end) = closing_quote(body, quote) {
-                    let inner = &body[..end];
-                    if quote == '"' {
-                        unescape_double(inner)
-                    } else {
-                        inner.to_owned()
-                    }
-                } else {
-                    // Multi-line quoted value: read on until a line closes the quote.
-                    let mut collected = vec![body.to_owned()];
-                    let mut closed = None;
-                    let mut cursor = index;
-                    while cursor < lines.len() {
-                        let next = lines[cursor];
-                        cursor += 1;
-                        if let Some(end) = closing_quote(next, quote) {
-                            collected.push(next[..end].to_owned());
-                            closed = Some(cursor);
-                            break;
-                        }
-                        collected.push(next.to_owned());
-                    }
-                    match closed {
-                        Some(next_index) => {
-                            index = next_index;
-                            let joined = collected.join("\n");
-                            if quote == '"' {
-                                unescape_double(&joined)
-                            } else {
-                                joined
-                            }
-                        }
-                        // Never closed: keep what the first line says.
-                        None => body.to_owned(),
-                    }
-                }
-            }
-            _ => {
-                let unquoted = rest.split(" #").next().unwrap_or(rest);
-                unquoted.trim_end().to_owned()
-            }
-        };
-        entries.push((name.to_owned(), value));
     }
     EnvParse {
         entries,
         other_lines,
     }
+}
+
+/// A group built from loose `(name, value)` pairs (smart paste); `None` when nothing is usable.
+pub(crate) fn group_from_entries(
+    source: &str,
+    name: &str,
+    entries: Vec<(String, String)>,
+) -> (Option<ScannedGroup>, Vec<SkippedFile>) {
+    let mut builder = Builder {
+        variables: Vec::new(),
+        notes: Vec::new(),
+        skipped: Vec::new(),
+        extras: Vec::new(),
+    };
+    for (key, value) in entries {
+        builder.add(&key, value);
+    }
+    let group = (!builder.variables.is_empty()).then(|| ScannedGroup {
+        source: source.to_owned(),
+        name: name.to_owned(),
+        variables: builder.variables,
+        notes: String::new(),
+    });
+    (group, builder.skipped)
 }
 
 // ----------------------------------------------------------------------- group assembly
@@ -262,6 +320,7 @@ struct Builder {
     variables: Vec<ScanVar>,
     notes: Vec<String>,
     skipped: Vec<SkippedFile>,
+    extras: Vec<Extra>,
 }
 
 impl Builder {
@@ -357,15 +416,23 @@ fn json_variables(text: &str) -> Option<Vec<(String, String)>> {
 
 /// Builds the candidate group of one folder (or single file) from its files. `None` when
 /// nothing usable was found.
+#[cfg(test)]
 pub fn assemble_group(
     source: &str,
     name: &str,
     files: &[FileInput],
 ) -> (Option<ScannedGroup>, Vec<SkippedFile>) {
+    let scanned = assemble(source, name, files);
+    (scanned.group, scanned.skipped)
+}
+
+/// Like `assemble_group`, plus the logins and bank cards found in CSV files.
+pub fn assemble(source: &str, name: &str, files: &[FileInput]) -> GroupScan {
     let mut builder = Builder {
         variables: Vec::new(),
         notes: Vec::new(),
         skipped: Vec::new(),
+        extras: Vec::new(),
     };
     let mut sorted: Vec<(Kind, &FileInput)> =
         files.iter().map(|file| (classify(file), file)).collect();
@@ -415,7 +482,19 @@ pub fn assemble_group(
                 let (variable, _) = builder.free_name("SSH_PUBLIC_KEY");
                 builder.add(&variable, file.text.trim().to_owned());
             }
-            Kind::Text => builder.note(&file.name, &file.text),
+            Kind::Text => {
+                // Password exports and the bank card template become items of their own.
+                if extension(&file.name) == "csv" {
+                    if let Some(csv) =
+                        crate::csv_import::extras_from_csv(&file.name, &file.text, source)
+                    {
+                        builder.extras.extend(csv.extras);
+                        builder.skipped.extend(csv.skipped);
+                        continue;
+                    }
+                }
+                builder.note(&file.name, &file.text)
+            }
             Kind::Unsupported => builder.skipped.push(SkippedFile {
                 name: file.name.clone(),
                 reason: "unsupported",
@@ -430,18 +509,17 @@ pub fn assemble_group(
             reason: "notes_truncated",
         });
     }
-    if builder.variables.is_empty() && notes.is_empty() {
-        return (None, builder.skipped);
+    let group = (!(builder.variables.is_empty() && notes.is_empty())).then(|| ScannedGroup {
+        source: source.to_owned(),
+        name: name.to_owned(),
+        variables: builder.variables,
+        notes,
+    });
+    GroupScan {
+        group,
+        extras: builder.extras,
+        skipped: builder.skipped,
     }
-    (
-        Some(ScannedGroup {
-            source: source.to_owned(),
-            name: name.to_owned(),
-            variables: builder.variables,
-            notes,
-        }),
-        builder.skipped,
-    )
 }
 
 // ------------------------------------------------------------------- filesystem walking
@@ -515,9 +593,10 @@ fn walk(
     }
     if !files.is_empty() {
         let name = display_name(directory);
-        let (group, skipped) = assemble_group(&name, &name, &files);
-        result.skipped.extend(skipped);
-        result.groups.extend(group);
+        let scanned = assemble(&name, &name, &files);
+        result.skipped.extend(scanned.skipped);
+        result.groups.extend(scanned.group);
+        result.extras.extend(scanned.extras);
     }
     for sub in subdirectories {
         walk(&sub, depth + 1, budget, result)?;
@@ -564,9 +643,10 @@ pub fn scan_paths(paths: &[PathBuf]) -> Result<ScanResult, String> {
             match read_candidate(path) {
                 Ok(file) => {
                     let name = single_file_group_name(path);
-                    let (group, skipped) = assemble_group(&display_name(path), &name, &[file]);
-                    result.skipped.extend(skipped);
-                    result.groups.extend(group);
+                    let scanned = assemble(&display_name(path), &name, &[file]);
+                    result.skipped.extend(scanned.skipped);
+                    result.groups.extend(scanned.group);
+                    result.extras.extend(scanned.extras);
                 }
                 Err(skipped) => result.skipped.push(skipped),
             }
