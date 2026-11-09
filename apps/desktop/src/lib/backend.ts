@@ -17,7 +17,10 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   }
 }
 
-export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number; validated_at: number };
+export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number; validated_at: number; subtitle?: string; dev_use?: boolean };
+/** Create/update payloads of typed items. `fields` carries only what the user typed; secrets are never read back. */
+export type ItemCreateRequest = { itemType: string; name: string; fields: Record<string, string>; tags: string[]; favorite: boolean; devUse?: boolean; envKey?: string };
+export type ItemUpdateRequest = { name: string; fields: Record<string, string>; clear: string[]; tags: string[]; favorite: boolean; devUse?: boolean; envKey?: string };
 export type ImportPreviewRow = { label: string; generic: boolean; keys: string[] };
 export type ImportOutcome = { ids: string[]; apiKeyIds: string[] };
 export type BackendSettings = { locale: string; theme: string; auto_lock_minutes: number; clipboard_timeout_seconds: number; require_auth_before_export: boolean; require_auth_before_reveal: boolean };
@@ -57,6 +60,14 @@ export const backend = {
   create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<string>('secret_create', { request }),
   update: (id: string, request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<void>('secret_update', { id, request }),
   remove: (id: string) => invoke<boolean>('secret_delete', { id }),
+  itemCreate: (request: ItemCreateRequest) => invoke<string>('item_create', { request }),
+  itemUpdate: (id: string, request: ItemUpdateRequest) => invoke<void>('item_update', { id, request }),
+  itemPublicFields: (id: string) => invoke<Record<string, string>>('item_public_fields', { id }),
+  itemSecretFields: (id: string) => invoke<string[]>('item_secret_fields', { id }),
+  itemFieldReveal: (id: string, field: string) => invoke<void>('item_field_reveal', { id, field }),
+  itemFieldCopy: (id: string, field: string) => invoke<void>('item_field_copy', { id, field }),
+  itemNoteBody: (id: string) => invoke<string>('item_note_body', { id }),
+  changePassword: (current: string, newPassword: string) => invoke<void>('vault_change_password', { current, newPassword }),
   importPreview: (request: { format: 'env' | 'json'; contents: string; confirmed: false }) => invoke<ImportPreviewRow[]>('secret_import_preview', { request }),
   importSecrets: (request: { format: 'env' | 'json'; contents: string; confirmed: true }) => invoke<ImportOutcome>('secret_import', { request }),
   chooseImportFile: () => invoke<string | null>('choose_import_file'),

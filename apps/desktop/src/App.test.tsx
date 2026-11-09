@@ -5,6 +5,12 @@ import { AUTO_LOCK_EVENT, backend, isAutoLockError } from './lib/backend';
 import { getTranslation } from './i18n/translations';
 import { SecretForm } from './SecretForm';
 
+/** Add > pick the API key card: the one-screen form is the second step now. */
+async function openApiKeyForm(user: Awaited<ReturnType<typeof import('@testing-library/user-event')['default']['setup']>>) {
+  await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+  await user.click(within(screen.getByRole('dialog', { name: '你要保存什么？' })).getByRole('button', { name: /API Key（开发/ }));
+}
+
 describe('SecretHub desktop shell', () => {
   it('drops to the unlock screen with a notice and closes open forms when the vault auto-locks', async () => {
     render(<App />);
@@ -28,7 +34,10 @@ describe('SecretHub desktop shell', () => {
     expect(screen.getByText('复制 API Key')).toBeInTheDocument();
     expect(screen.getByText('复制全部内容')).toBeInTheDocument();
     expect(screen.getByText('API key')).toBeInTheDocument();
-    expect(screen.getByText('TOKEN')).toBeInTheDocument();
+    expect(screen.getByText('开发密钥')).toBeInTheDocument();
+    expect(screen.getByText('账号密码')).toBeInTheDocument();
+    expect(screen.getByText('银行卡')).toBeInTheDocument();
+    expect(screen.getByText('安全笔记')).toBeInTheDocument();
   });
 
   it('opens the provider management view from the provider navigation', async () => {
@@ -71,14 +80,14 @@ describe('SecretHub desktop shell', () => {
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getByRole('button', { name: /API key/ }));
     expect(screen.getByRole('button', { name: '一键检测 API Key' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /TOKEN/ }));
+    await user.click(screen.getByRole('button', { name: /开发密钥/ }));
     expect(screen.queryByRole('button', { name: '一键检测 API Key' })).not.toBeInTheDocument();
   });
 
   it('filters the full provider list when adding an API key', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
-    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    await openApiKeyForm(user);
     await user.click(screen.getByRole('button', { name: '更多…' }));
     const panel = screen.getByRole('group', { name: '全部服务商' });
     expect(within(panel).getByRole('button', { name: 'Groq' })).toBeInTheDocument();
@@ -90,7 +99,7 @@ describe('SecretHub desktop shell', () => {
   it('opens the one-screen API key form, picks a provider chip and makes env key optional', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
-    await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
+    await openApiKeyForm(user);
     const form = screen.getByRole('dialog', { name: '添加凭据' });
     expect(within(form).getByLabelText('粘贴 API Key')).toBeInTheDocument();
     await user.click(within(form).getByRole('button', { name: 'DeepSeek' }));
@@ -102,20 +111,42 @@ describe('SecretHub desktop shell', () => {
     expect(within(form).getByRole('option', { name: 'DeepSeek V4 Flash · deepseek-v4-flash' })).toBeInTheDocument();
   });
 
-  it('opens a type-specific Token form via the other-types link without showing the model catalog', async () => {
+  it('asks what to save first, with one card per type and a short description', async () => {
     render(<App />);
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getAllByRole('button', { name: '添加凭据' })[0]);
-    await user.click(screen.getByRole('button', { name: /添加其他类型/ }));
-    expect(screen.getByRole('button', { name: /^API KEY/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^URL/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Password/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Text/ })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^TOKEN/ }));
-    expect(screen.getByText('TOKEN / TOKEN')).toBeInTheDocument();
+    const picker = screen.getByRole('dialog', { name: '你要保存什么？' });
+    for (const name of [/API Key（开发/, /开发密钥/, /账号密码/, /银行卡/, /安全笔记/]) expect(within(picker).getByRole('button', { name })).toBeInTheDocument();
+    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('credential-type-card'))).toHaveLength(5);
+    expect(screen.queryByLabelText('粘贴 API Key')).not.toBeInTheDocument();
+    await user.click(within(picker).getByRole('button', { name: /开发密钥/ }));
+    const form = screen.getByRole('dialog', { name: '添加开发密钥' });
+    expect(within(form).getByLabelText('值')).toBeInTheDocument();
+    expect(within(form).getByLabelText('环境变量名')).toBeInTheDocument();
+    expect(within(form).getByLabelText('用途说明')).toBeInTheDocument();
     expect(screen.queryByText('TEMPLATE CATALOG / PROVIDERS')).not.toBeInTheDocument();
     expect(screen.queryByText('API Base URL')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('粘贴 API Key')).not.toBeInTheDocument();
+  });
+
+  it('goes back to the type page from the API key form and from the typed forms', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await openApiKeyForm(user);
+    await user.click(screen.getByRole('button', { name: /添加其他类型/ }));
+    expect(screen.getByRole('dialog', { name: '你要保存什么？' })).toBeInTheDocument();
+    await user.click(within(screen.getByRole('dialog', { name: '你要保存什么？' })).getByRole('button', { name: /银行卡/ }));
+    await user.click(screen.getByRole('button', { name: '返回上一步' }));
+    expect(screen.getByRole('dialog', { name: '你要保存什么？' })).toBeInTheDocument();
+  });
+
+  it('keeps the provider page "configure" button on the API key form directly', async () => {
+    render(<App />);
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('button', { name: '服务商' }));
+    await user.click(screen.getAllByRole('button', { name: '配置' })[0]);
+    expect(screen.queryByRole('dialog', { name: '你要保存什么？' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '添加凭据' })).toBeInTheDocument();
   });
 
   it('loads editable metadata and permits saving without exposing the old value', async () => {
@@ -319,13 +350,13 @@ describe('Tag picker in the secret form', () => {
 
   it('passes the selected tags array to onSave', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
-    const initial = { id: 's1', name: 'Demo', envKey: 'DEMO_KEY', provider: 'custom', tags: ['ai'], status: 'unknown', updated: 'now', valueType: 'text' };
+    const initial = { id: 's1', name: 'Demo', envKey: 'DEEPSEEK_API_KEY', provider: 'deepseek', tags: ['ai'], status: 'unknown', updated: 'now', valueType: 'api_key', modelId: 'deepseek-v4-pro', modelEnvKey: 'DEEPSEEK_MODEL', endpointUrl: 'https://api.deepseek.com', endpointEnvKey: 'DEEPSEEK_BASE_URL' };
     render(<SecretForm t={getTranslation('zh-CN')} knownTags={['ai', 'ops']} initial={initial} onClose={() => undefined} onSave={onSave} />);
     const user = (await import('@testing-library/user-event')).default.setup();
     await user.click(screen.getByRole('button', { name: '选择标签' }));
     await user.click(screen.getByRole('button', { name: 'ops' }));
     await user.click(screen.getByRole('button', { name: '确定' }));
-    await user.type(screen.getByLabelText(/Secret 值/), 'v');
+    await user.type(screen.getByLabelText('API Key'), 'fake-value');
     await user.click(screen.getByRole('button', { name: '保存凭据' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tags: ['ai', 'ops'] }));
   });

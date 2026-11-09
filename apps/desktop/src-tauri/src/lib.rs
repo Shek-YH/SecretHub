@@ -72,6 +72,7 @@ pub fn run() {
             items::item_create,
             items::item_update,
             items::item_public_fields,
+            items::item_secret_fields,
             items::item_field_reveal,
             items::item_field_copy,
             items::item_note_body,

@@ -203,3 +203,29 @@ body { background: #071126; color: #eef4ff; }
 .import-paste-title { display: block; margin-top: 16px; color: #89a198; font-size: 11px; }
 .gate-restore-link { margin: 14px auto 0; }
 .setting-row select { width: auto; min-width: 90px; }
+
+/* Typed items: icons, type picker, per-type forms and detail rows. */
+.type-icon { flex: none; vertical-align: -2px; }
+.row-check-spacer { width: 13px; height: 13px; display: block; }
+.row-avatar .type-icon { width: 16px; height: 16px; }
+.item-type-picker .credential-type-card strong { display: flex; align-items: center; gap: 8px; }
+.secret-input label { display: block; margin-top: 14px; }
+.secret-input .key-input-row textarea { flex: 1; margin-top: 6px; }
+.secret-input .masked-textarea { -webkit-text-security: disc; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.password-generator { display: flex; align-items: center; gap: 18px; margin-top: 8px; color: #89a198; font-size: 11px; }
+.password-generator .generator-length { display: flex !important; align-items: center; gap: 10px; margin: 0; }
+.password-generator input[type="range"] { width: 140px; margin: 0; padding: 0; }
+.password-generator .checkbox-label { margin: 0; }
+.dev-use-section { margin-top: 4px; padding: 2px 0 4px; border-left: 2px solid #31518e; padding-left: 12px; }
+.luhn-warning { margin: 8px 0 0; padding: 8px 10px; border: 1px solid #8a7430; border-radius: 5px; background: rgba(214, 177, 66, .12); color: #e4c55f; font-size: 11px; line-height: 1.5; }
+.item-fields { gap: 16px; }
+.item-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 4px; align-items: center; }
+.item-field .field-label { grid-column: 1 / -1; margin-bottom: 0; }
+.item-field .field-value { overflow-wrap: anywhere; }
+.item-field .field-value.multiline { white-space: pre-wrap; }
+.item-field-actions { display: flex; gap: 6px; }
+.item-field-actions .secondary-button { padding: 5px 9px; font-size: 11px; }
+.note-body { grid-column: 1 / -1; margin: 0; max-height: 260px; overflow: auto; padding: 10px; border: 1px solid #31518e; border-radius: 6px; background: #091733; color: #d9e7e1; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-subtitle { display: block; margin-top: 6px; color: #7da095; font-size: 11px; }
+.change-password-form { width: min(440px, calc(100vw - 48px)); }
+.setting-row .secondary-button { padding: 6px 10px; }

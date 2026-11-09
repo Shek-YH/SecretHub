@@ -18,7 +18,7 @@ import {
 } from './providers';
 import { CapabilityModelsEditor, capabilityError, needsCapabilitySection, normalizeRows } from './CapabilityModels';
 import { FilterableSelect, SEARCH_THRESHOLD } from './FilterableSelect';
-import type { CredentialPreset, CredentialType, SecretMetadata, SecretRequest } from './secretTypes';
+import type { CredentialPreset, SecretMetadata, SecretRequest } from './secretTypes';
 
 type T = ReturnType<typeof getTranslation>;
 
@@ -34,6 +34,8 @@ type SecretFormProps = {
   syncedModels?: BackendModel[];
   capabilityRows?: CapabilityModelRow[];
   onCapture?: (providerId: string, providerName: string) => void;
+  /** Goes back to the "what do you want to save" page; the link is hidden when missing. */
+  onChangeType?: () => void;
   onClose: () => void;
   onSave: (request: SecretRequest) => Promise<void>;
 };
@@ -46,13 +48,6 @@ const CATEGORY_OPTIONS = [
   ['other', 'Other'],
 ] as const;
 
-const PLAIN_ENV_DEFAULTS: Record<Exclude<CredentialType, 'api_key'>, string> = {
-  token: 'TOKEN',
-  url: 'URL',
-  password: 'PASSWORD',
-  text: 'TEXT',
-};
-
 export function SecretForm({
   t,
   knownTags,
@@ -62,6 +57,7 @@ export function SecretForm({
   syncedModels = [],
   capabilityRows = [],
   onCapture,
+  onChangeType,
   onClose,
   onSave,
 }: SecretFormProps) {
@@ -75,8 +71,6 @@ export function SecretForm({
     ? providerTemplates.find((item) => item.id === initial.provider || item.name === initial.provider)?.id ?? 'custom'
     : preset?.provider ?? '';
 
-  const [view, setView] = useState<'form' | 'types'>('form');
-  const [credentialType, setCredentialType] = useState<CredentialType>((initial?.valueType as CredentialType) ?? 'api_key');
   const [provider, setProvider] = useState(initialProvider);
   const [moreOpen, setMoreOpen] = useState(false);
   const [providerQuery, setProviderQuery] = useState('');
@@ -103,9 +97,8 @@ export function SecretForm({
   const manualProvider = useRef(Boolean(preset) || editing);
 
   const template: ProviderTemplate = providerTemplate(provider);
-  const isApiKey = credentialType === 'api_key';
-  const aggregator = isApiKey && providerKind(provider) === 'aggregator';
-  const showCaps = editing && isApiKey && needsCapabilitySection(providerKind(provider), syncedModels);
+  const aggregator = providerKind(provider) === 'aggregator';
+  const showCaps = editing && needsCapabilitySection(providerKind(provider), syncedModels);
   const modelGroups = buildModelOptions(template.models, template.id === 'custom' ? [] : syncedModels, template.defaultModel);
   const modelOptions = [...modelGroups.synced, ...modelGroups.recommended];
   const isCustomModel = template.id === 'custom' || !modelOptions.some((model) => model.id === modelId);
@@ -144,23 +137,9 @@ export function SecretForm({
 
   function changeValue(next: string) {
     setValue(next);
-    if (editing || !isApiKey || manualProvider.current) return;
+    if (editing || manualProvider.current) return;
     const { match } = detectProviderByPrefix(next, providerTemplates);
     if (match && match.id !== provider) applyTemplate(match);
-  }
-
-  function chooseCredentialType(next: CredentialType) {
-    setCredentialType(next);
-    setView('form');
-    if (next === 'api_key') return;
-    setProvider('custom');
-    setModelId('');
-    setModelEnvKey('');
-    setEndpointUrl('');
-    setEndpointEnvKey('');
-    setCategory('other');
-    if (!touched.current.has('name')) setName('');
-    if (!touched.current.has('envKey')) setEnvKey(PLAIN_ENV_DEFAULTS[next]);
   }
 
   function pickModel(next: string) {
@@ -185,20 +164,17 @@ export function SecretForm({
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      if (isApiKey) {
-        if (!provider) throw new Error(t.quick.pickProvider);
-        if (!name.trim()) throw new Error(t.form.required);
-        if (!editing && !value.trim()) throw new Error(t.quick.keyCleared);
-        if (template.id === 'custom' && !endpointUrl.trim()) {
-          setAdvancedOpen(true);
-          throw new Error(t.quick.customNeedsUrl);
-        }
-        if ((!modelId.trim() && !aggregator) || !endpointUrl.trim()) {
-          setAdvancedOpen(true);
-          throw new Error(t.form.apiKeyFieldsRequired);
-        }
+      if (!provider) throw new Error(t.quick.pickProvider);
+      if (!name.trim()) throw new Error(t.form.required);
+      if (!editing && !value.trim()) throw new Error(t.quick.keyCleared);
+      if (template.id === 'custom' && !endpointUrl.trim()) {
+        setAdvancedOpen(true);
+        throw new Error(t.quick.customNeedsUrl);
       }
-      if (!isApiKey && (!name.trim() || (!editing && !value.trim()))) throw new Error(t.form.required);
+      if ((!modelId.trim() && !aggregator) || !endpointUrl.trim()) {
+        setAdvancedOpen(true);
+        throw new Error(t.form.apiKeyFieldsRequired);
+      }
       let capabilityModels: CapabilityModelRow[] | undefined;
       if (showCaps) {
         capabilityModels = normalizeRows(capDraft);
@@ -213,7 +189,7 @@ export function SecretForm({
         description: notes,
         tags,
         value,
-        value_type: credentialType,
+        value_type: 'api_key',
         category,
         scope: initial?.scope ?? 'global',
         favorite,
@@ -221,7 +197,7 @@ export function SecretForm({
         model_id: modelId.trim(),
         model_env_key: modelEnvKey.trim().toUpperCase(),
         endpoint_url: endpointUrl.trim(),
-        endpoint_env_key: (endpointEnvKey.trim() || (isApiKey ? defaultEndpointEnvKey(provider) : '')).toUpperCase(),
+        endpoint_env_key: (endpointEnvKey.trim() || defaultEndpointEnvKey(provider)).toUpperCase(),
       });
       onClose();
     } catch (reason) {
@@ -229,51 +205,16 @@ export function SecretForm({
     }
   }
 
-  if (view === 'types') {
-    const typeOptions: Array<{ id: CredentialType; label: string; hint: string }> = [
-      { id: 'api_key', label: t.form.apiKeyType, hint: t.form.apiKeyHint },
-      { id: 'token', label: t.form.tokenType, hint: t.form.tokenHint },
-      { id: 'url', label: t.form.urlType, hint: t.form.urlHint },
-      { id: 'password', label: t.form.passwordType, hint: t.form.passwordHint },
-      { id: 'text', label: t.form.textType, hint: t.form.textHint },
-    ];
-    return (
-      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t.form.typeTitle}>
-        <div className="secret-form credential-type-picker">
-          <div className="form-heading">
-            <div>
-              <span className="section-kicker">CREDENTIAL ROUTER / TYPE</span>
-              <h2>{t.form.typeTitle}</h2>
-              <p className="form-intro">{t.form.typeIntro}</p>
-            </div>
-            <div className="form-heading-actions">
-              <button type="button" className="back-button" onClick={() => setView('form')}>{t.form.back}</button>
-              <button type="button" className="close-button" onClick={onClose}>×</button>
-            </div>
-          </div>
-          <div className="credential-type-grid">
-            {typeOptions.map((item) => (
-              <button type="button" className="credential-type-card" key={item.id} onClick={() => chooseCredentialType(item.id)}>
-                <strong>{item.label}</strong>
-                <span>{item.hint}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const optionLabel = (model: { id: string; label: string; capabilities: string[] }) =>
     `${model.label} · ${model.id}${model.capabilities.length ? ` [${model.capabilities.join(', ')}]` : ''}`;
 
   let detectionMessage = '';
-  if (!editing && isApiKey && value.trim()) {
+  if (!editing && value.trim()) {
     if (detection.match && detection.match.id === provider) detectionMessage = t.quick.detected.replace('{name}', detection.match.name);
     else if (detection.ambiguous && !manualProvider.current) detectionMessage = t.quick.ambiguous;
   }
 
-  const providerSection = !isApiKey ? null : editing ? (
+  const providerSection = editing ? (
     <label>
       {t.form.provider}
       <select value={provider} onChange={(event) => applyTemplate(providerTemplate(event.target.value))}>
@@ -401,7 +342,7 @@ export function SecretForm({
     </label>
   );
 
-  const advanced = isApiKey ? (
+  const advanced = (
     <>
       {envKeyField}
       <div className="form-two-col">
@@ -430,12 +371,10 @@ export function SecretForm({
       )}
       {metaFields}
     </>
-  ) : (
-    metaFields
   );
 
-  const defaultModelLine = !isApiKey || editing || !provider ? '' : aggregator ? t.cap.newKeyHint : modelId.trim() ? t.quick.defaultModelLine.replace('{model}', modelId.trim()) : '';
-  const kicker = isApiKey ? `API KEY / ${provider ? template.name.toUpperCase() : 'NEW'}` : `${credentialType.toUpperCase()} / ${credentialType.toUpperCase()}`;
+  const defaultModelLine = editing || !provider ? '' : aggregator ? t.cap.newKeyHint : modelId.trim() ? t.quick.defaultModelLine.replace('{model}', modelId.trim()) : '';
+  const kicker = `API KEY / ${provider ? template.name.toUpperCase() : 'NEW'}`;
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={editing ? t.form.editTitle : t.form.addTitle}>
@@ -444,72 +383,47 @@ export function SecretForm({
           <div>
             <span className="section-kicker">{kicker}</span>
             <h2>{editing ? t.form.editTitle : t.form.addTitle}</h2>
-            <p className="form-intro">{isApiKey ? t.form.presetIntro : t.form.plainIntro}</p>
+            <p className="form-intro">{t.form.presetIntro}</p>
           </div>
           <div className="form-heading-actions">
-            {!editing && !isApiKey && <button type="button" className="back-button" onClick={() => setView('types')}>{t.form.back}</button>}
             <button type="button" className="close-button" onClick={onClose}>×</button>
           </div>
         </div>
 
         {providerSection}
 
-        {isApiKey ? (
-          <div className="key-field">
-            <label htmlFor={keyInputId}>{editing ? t.quick.keyLabelEdit : t.quick.pasteKey}</label>
-            <div className="key-input-row">
-              <input
-                id={keyInputId}
-                required={!editing}
-                value={value}
-                onChange={(event) => changeValue(event.target.value)}
-                type={showValue ? 'text' : 'password'}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={editing ? t.form.keepExistingValue : undefined}
-              />
-              <button type="button" className="secondary-button" aria-pressed={showValue} onClick={() => setShowValue((shown) => !shown)}>
-                {showValue ? t.quick.hideKey : t.quick.showKey}
-              </button>
-            </div>
-            {detectionMessage && <p className="cap-hint detect-hint" role="status">{detectionMessage}</p>}
-            {provider && template.keyUrl && (
-              <div className="provider-link-row">
-                {onCapture && !editing && (
-                  <button type="button" className="secondary-button capture-button" onClick={() => onCapture(template.id, template.name)}>{t.quick.getFromSite}</button>
-                )}
-                <a href={template.keyUrl} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openExternal(template.keyUrl); }}>{t.form.officialKeyLink}</a>
-              </div>
-            )}
+        <div className="key-field">
+          <label htmlFor={keyInputId}>{editing ? t.quick.keyLabelEdit : t.quick.pasteKey}</label>
+          <div className="key-input-row">
+            <input
+              id={keyInputId}
+              required={!editing}
+              value={value}
+              onChange={(event) => changeValue(event.target.value)}
+              type={showValue ? 'text' : 'password'}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={editing ? t.form.keepExistingValue : undefined}
+            />
+            <button type="button" className="secondary-button" aria-pressed={showValue} onClick={() => setShowValue((shown) => !shown)}>
+              {showValue ? t.quick.hideKey : t.quick.showKey}
+            </button>
           </div>
-        ) : (
-          <>
-            <label>
-              {t.form.name}
-              <input required value={name} onChange={(event) => edited('name', setName)(event.target.value)} placeholder={t.form.required} />
-            </label>
-            {envKeyField}
-            <label>
-              {t.form.value}
-              <input
-                required={!editing}
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                type={credentialType === 'url' ? 'url' : credentialType === 'text' ? 'text' : 'password'}
-                autoComplete="new-password"
-                placeholder={editing ? t.form.keepExistingValue : undefined}
-              />
-              {credentialType === 'url' && value.trim() && <button type="button" className="inline-link" onClick={() => void openExternal(value.trim())}>{t.form.openUrl}</button>}
-            </label>
-          </>
-        )}
+          {detectionMessage && <p className="cap-hint detect-hint" role="status">{detectionMessage}</p>}
+          {provider && template.keyUrl && (
+            <div className="provider-link-row">
+              {onCapture && !editing && (
+                <button type="button" className="secondary-button capture-button" onClick={() => onCapture(template.id, template.name)}>{t.quick.getFromSite}</button>
+              )}
+              <a href={template.keyUrl} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openExternal(template.keyUrl); }}>{t.form.officialKeyLink}</a>
+            </div>
+          )}
+        </div>
 
-        {isApiKey && (
-          <label>
-            {t.form.name}
-            <input required value={name} onChange={(event) => edited('name', setName)(event.target.value)} placeholder={t.form.required} />
-          </label>
-        )}
+        <label>
+          {t.form.name}
+          <input required value={name} onChange={(event) => edited('name', setName)(event.target.value)} placeholder={t.form.required} />
+        </label>
 
         {defaultModelLine && <p className="cap-hint default-model-line">{defaultModelLine}</p>}
 
@@ -524,8 +438,8 @@ export function SecretForm({
           <button type="button" className="secondary-button" onClick={onClose}>{t.form.cancel}</button>
           <button className="primary-button" type="submit">{t.form.save}</button>
         </div>
-        {!editing && isApiKey && (
-          <button type="button" className="inline-link other-types-link" onClick={() => setView('types')}>{t.quick.otherTypes}</button>
+        {!editing && onChangeType && (
+          <button type="button" className="inline-link other-types-link" onClick={onChangeType}>{t.quick.otherTypes}</button>
         )}
       </form>
     </div>

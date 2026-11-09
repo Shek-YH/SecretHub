@@ -139,6 +139,17 @@ pub fn item_public_fields(id: String, state: State<'_, AppState>) -> Result<Fiel
         .map_err(vault_error)
 }
 
+/// Which secret fields hold a value (names only), so the detail page can draw dots for them.
+#[tauri::command]
+pub fn item_secret_fields(id: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .item_secret_fields(&id)
+        .map_err(vault_error)
+}
+
 /// Shows one secret field in a native dialog; the value never reaches the web view.
 #[tauri::command]
 pub fn item_field_reveal(

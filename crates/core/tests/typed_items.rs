@@ -110,6 +110,8 @@ fn login_round_trips_through_encrypted_json_and_keeps_secrets_out_of_plain_colum
     assert!(!public.contains_key("password") && !public.contains_key("totp"));
     assert_eq!(vault.item_field(&id, "password").unwrap(), "fake-password");
     assert_eq!(vault.item_field(&id, "totp").unwrap(), "JBSWY3DPEHPK3PXP");
+    // Only the names of existing secret fields are listed.
+    assert_eq!(vault.item_secret_fields(&id).unwrap(), ["password", "totp"]);
     assert!(matches!(
         vault.item_field(&id, "pin"),
         Err(VaultError::InvalidField(_))

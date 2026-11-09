@@ -442,6 +442,21 @@ impl VaultService {
         Ok(fields)
     }
 
+    /// Names of the secret fields that currently hold a value; lets the UI show dots only for
+    /// fields that exist without ever receiving a value.
+    pub fn item_secret_fields(&self, id: &str) -> Result<Vec<String>, VaultError> {
+        let metadata = self.json_item_metadata(id)?;
+        let def = items::json_item_type(&metadata.value_type).ok_or(VaultError::InvalidSecret)?;
+        Ok(self
+            .read_item_fields(id)?
+            .into_iter()
+            .filter(|(key, value)| {
+                !value.is_empty() && def.field(key).is_some_and(|field| field.sensitive)
+            })
+            .map(|(key, _)| key)
+            .collect())
+    }
+
     /// One field of a typed item (sensitive or not). Reveal and copy are built on this.
     pub fn item_field(&self, id: &str, field: &str) -> Result<String, VaultError> {
         let metadata = self.json_item_metadata(id)?;
