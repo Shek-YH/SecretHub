@@ -477,9 +477,11 @@ fn user_journey_import_export_rekey() {
     let env_text = fs::read_to_string(project.path().join(".env")).unwrap();
     assert!(env_text.contains("PORT=3000") && env_text.contains("SSH_HOST=old-host.invalid"));
     assert!(!env_text.contains("fakeval-ali-host.invalid"));
-    // The `$` password is written byte for byte inside double quotes. (Reading it back through a
-    // dotenv parser is a known problem, see `known_bug_dollar_values_do_not_round_trip`.)
-    assert!(env_text.contains(&format!("SSH_PASSWORD=\"{ALI_DOLLAR_PASSWORD}\"")));
+    // `$` is escaped so dotenv readers keep it literal; reading the file back yields the original.
+    let read_back = secrethub_exporter::parse_env_entries(&env_text).unwrap();
+    assert!(read_back
+        .iter()
+        .any(|entry| entry.key == "SSH_PASSWORD" && entry.value == ALI_DOLLAR_PASSWORD));
     assert!(env_text.contains(&format!("DASHSCOPE_API_KEY=\"{ALI_DASH}\"")));
     assert!(env_text.contains("SSH_PORT=\"22\""));
     let example = fs::read_to_string(project.path().join(".env.example")).unwrap();
@@ -520,12 +522,9 @@ fn user_journey_import_export_rekey() {
     }
 }
 
-/// Known bug (reported, not fixed): the exporter writes `$` unescaped inside double quotes, so a
-/// dotenv reader expands or rejects a value such as a password containing `$`, and the next merge
-/// into the same `.env` fails to parse it.
+/// Regression: values containing `$` must survive export, a dotenv read and a second merge.
 #[test]
-#[ignore = "known bug: exported values containing `$` are expanded or rejected by dotenv readers"]
-fn known_bug_dollar_values_do_not_round_trip() {
+fn dollar_values_round_trip() {
     use secrethub_exporter::{merge_env, parse_env_entries, render_env, EnvEntry};
     let entries = [EnvEntry::new("SSH_PASSWORD", ALI_DOLLAR_PASSWORD)];
     let rendered = render_env(&entries).unwrap();
