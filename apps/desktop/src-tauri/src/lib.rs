@@ -9,6 +9,8 @@ mod catalog;
 mod catalog_update;
 mod commands;
 mod csv_import;
+#[cfg(test)]
+mod e2e_journey;
 mod export;
 mod groups;
 mod import;
