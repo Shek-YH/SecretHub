@@ -532,3 +532,49 @@ fn dollar_values_round_trip() {
     assert_eq!(parsed[0].value, ALI_DOLLAR_PASSWORD);
     merge_env(&rendered, &[EnvEntry::new("OTHER", "x")]).expect("a second export should merge");
 }
+
+/// The masked view of the whole fake folder shows structure and harmless values, and not one
+/// secret: passwords, tokens, keys and the private key bodies are all placeholders.
+#[test]
+fn masked_view_of_the_fixture_hides_every_secret() {
+    let work = tempfile::tempdir().unwrap();
+    let root = build_fixture(work.path());
+    let read = crate::scan::read_files(&[root]).unwrap();
+    let inspection = crate::mask::Inspection::build(&read.files, read.skipped);
+    let view: String = inspection
+        .files
+        .iter()
+        .flat_map(|file| file.lines.iter().cloned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for secret in [
+        YC_PASSWORD,
+        YC_TOKEN,
+        ALI_BT_SK,
+        ALI_DOLLAR_PASSWORD,
+        ALI_DASH,
+        ALI_RUNNINGHUB_KEY,
+        "FAKEVAL-YC-LINE1",
+        "FAKEVAL-ALI-ENV-1",
+        "FAKEVAL-ALI-FILE",
+        "FAKEVAL-TX-LINE",
+        "FAKEVALPUBLICKEY",
+    ] {
+        assert!(!view.contains(secret), "the view leaks {secret}");
+    }
+    // Structure and harmless values stay readable.
+    for visible in [
+        "YECAOYUN_HOST=fakeval-yc-host.invalid",
+        "YECAOYUN_PORT=22",
+        "BT_PANEL_PORT=8888",
+        "BT_PANEL_PASSWORD=«S",
+        "SSH_HOST=fakeval-ali-host.invalid",
+        "腾讯这台机器暂时没有开放面板",
+    ] {
+        assert!(view.contains(visible), "{visible} missing in\n{view}");
+    }
+    // The key in the .env and in the key file is one placeholder.
+    let keys = view.matches("多行私钥").count();
+    assert!(keys >= 4, "private keys appear as placeholders: {keys}");
+    assert!(inspection.token_count() < view.matches("«S").count());
+}

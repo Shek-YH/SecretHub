@@ -16,8 +16,10 @@ mod groups;
 mod import;
 mod import_flow;
 mod items;
+mod mask;
 mod media;
 mod model_sync;
+mod organize;
 mod paste;
 mod plan;
 mod queue;
@@ -30,6 +32,7 @@ pub struct AppState {
     pub policy: Mutex<AutoLockPolicy>,
     pub capture: capture::CaptureState,
     pub imports: import_flow::Sessions,
+    pub inspections: mask::Inspections,
 }
 
 pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -67,9 +70,11 @@ pub fn run() {
                 )),
                 capture: capture::CaptureState::default(),
                 imports: import_flow::Sessions::default(),
+                inspections: mask::Inspections::default(),
             });
             catalog_update::start(app.handle().clone());
             sync::start(app.handle().clone());
+            organize::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -109,6 +114,10 @@ pub fn run() {
             import_flow::import_save_bank_template,
             import_flow::mcp_pending_import_requests,
             import_flow::mcp_import_decline,
+            organize::mcp_pending_organize_requests,
+            organize::ai_import_notices,
+            organize::ai_import_dismiss,
+            organize::ai_import_undo,
             commands::secret_import_file_preview,
             commands::secret_import_file,
             commands::mcp_pending_plans,

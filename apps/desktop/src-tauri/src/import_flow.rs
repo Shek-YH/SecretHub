@@ -236,36 +236,36 @@ impl ImportDecisions {
 
 // ------------------------------------------------------------------ vault snapshot
 
-struct ExistingGroup {
-    id: String,
-    name: String,
-    variables: Vec<(String, String, bool)>,
+pub(crate) struct ExistingGroup {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) variables: Vec<(String, String, bool)>,
 }
 
-struct ExistingKey {
+pub(crate) struct ExistingKey {
     id: String,
     provider_id: String,
     env_key: String,
-    value: String,
+    pub(crate) value: String,
     metadata: SecretMetadata,
 }
 
 /// Decrypted view of the vault, alive only while one review or apply runs.
 /// A stored login, bank card or note, decrypted for comparison.
-struct ExistingTyped {
+pub(crate) struct ExistingTyped {
     id: String,
-    fields: BTreeMap<String, String>,
-    metadata: SecretMetadata,
+    pub(crate) fields: BTreeMap<String, String>,
+    pub(crate) metadata: SecretMetadata,
 }
 
-struct Snapshot {
-    groups: Vec<ExistingGroup>,
-    keys: Vec<ExistingKey>,
-    typed: Vec<ExistingTyped>,
-    names: Vec<String>,
+pub(crate) struct Snapshot {
+    pub(crate) groups: Vec<ExistingGroup>,
+    pub(crate) keys: Vec<ExistingKey>,
+    pub(crate) typed: Vec<ExistingTyped>,
+    pub(crate) names: Vec<String>,
 }
 
-fn snapshot(vault: &VaultService) -> Result<Snapshot, String> {
+pub(crate) fn snapshot(vault: &VaultService) -> Result<Snapshot, String> {
     let metadata = vault.list_metadata().map_err(|e| e.to_string())?;
     let mut groups = Vec::new();
     let mut keys = Vec::new();
@@ -310,11 +310,11 @@ fn snapshot(vault: &VaultService) -> Result<Snapshot, String> {
     })
 }
 
-fn same_name(left: &str, right: &str) -> bool {
+pub(crate) fn same_name(left: &str, right: &str) -> bool {
     left.trim().to_lowercase() == right.trim().to_lowercase()
 }
 
-fn unique_name(base: &str, taken: &[String]) -> String {
+pub(crate) fn unique_name(base: &str, taken: &[String]) -> String {
     let mut candidate = base.to_owned();
     let mut counter = 2;
     while taken.iter().any(|name| same_name(name, &candidate)) {

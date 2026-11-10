@@ -1,5 +1,5 @@
 import type { getTranslation } from './i18n/translations';
-import type { CaptureRequest, MediaRequest, PendingImportRequest, PendingSyncRequest } from './lib/backend';
+import type { AiImportNotice, CaptureRequest, MediaRequest, PendingImportRequest, PendingOrganizeRequest, PendingSyncRequest } from './lib/backend';
 import { formatBytes } from './mediaFormat';
 
 type T = ReturnType<typeof getTranslation>;
@@ -20,6 +20,18 @@ export function CaptureRequestBanner({ request, t, onStart, onDecline }: { reque
 /** Shown while the vault is locked: the sync request stays queued and runs right after unlocking. */
 export function SyncRequestBanner({ request, t }: { request: PendingSyncRequest; t: T }) {
   return <section className="mcp-plan" aria-label={t.ai.syncTitle}><div><span className="section-kicker">MCP / MODEL SYNC</span><strong>{t.ai.syncTitle}</strong><p>{t.ai.syncBody}</p>{request.secretCount != null && <small>{request.secretCount} {t.nav.secrets}</small>}</div></section>;
+}
+
+/** Shown while the vault is locked: an AI import plan stays queued and is written right after unlocking. */
+export function OrganizeWaitingBanner({ request, t }: { request: PendingOrganizeRequest; t: T }) {
+  return <section className="mcp-plan" aria-label={t.ai.organizeWaitingTitle}><div><span className="section-kicker">MCP / IMPORT</span><strong>{t.ai.organizeWaitingTitle}</strong><p>{t.ai.organizeWaitingBody}</p><small>{request.itemCount} {t.nav.secrets}</small></div></section>;
+}
+
+/** An AI import was written automatically: counts only, with a way to look at it or to undo exactly that batch. */
+export function AiImportNoticeBanner({ notice, t, onView, onUndo, onDismiss }: { notice: AiImportNotice; t: T; onView: () => void; onUndo: () => void; onDismiss: () => void }) {
+  const total = notice.createdGroups + notice.addedVars + notice.savedSeparately + notice.otherItems;
+  const title = t.ai.noticeTitle.replace('{total}', String(total)).replace('{groups}', String(notice.createdGroups)).replace('{vars}', String(notice.addedVars)).replace('{separate}', String(notice.savedSeparately));
+  return <section className="mcp-plan" aria-label={title}><div><span className="section-kicker">MCP / IMPORT</span><strong>{title}</strong></div><div className="mcp-plan-actions"><button className="primary-button" onClick={onView}>{t.ai.noticeView}</button><button className="secondary-button" onClick={onUndo}>{t.ai.noticeUndo}</button><button className="secondary-button" onClick={onDismiss}>{t.ai.noticeDismiss}</button></div></section>;
 }
 
 /** An AI asks to import files by path only; nothing is read until the user clicks View. */

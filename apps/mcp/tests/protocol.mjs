@@ -169,6 +169,57 @@ try {
   assert.deepEqual(statuses.find((r) => r.id === 2).result.structuredContent, { status: 'written', requestId: v2Response.requestId, writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [] });
   assert.equal(statuses.find((r) => r.id === 3).result.structuredContent.status, 'pending');
   assert.equal(statuses.find((r) => r.id === 4).result.isError, true);
+
+  // AI-organized import: inspect -> masked view -> plan -> status. Fake secrets must never come back.
+  const FAKE_SECRET = 'fakeval-protocol-secret';
+  const call = (id, name, args) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: { ...args, response_format: 'json' } } });
+  const session = (calls) => {
+    const input = [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } }, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, ...calls];
+    const run = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${input.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  };
+  const first = session([
+    call(2, 'secrethub_import_inspect', { paths: [directory] }),
+    call(3, 'secrethub_import_inspect', { paths: ['relative/folder'] }),
+    call(4, 'secrethub_get_import_inspection', { request_id: 'inspect-../x' }),
+    call(5, 'secrethub_apply_import_plan', { inspection_id: 'inspect-0-unknown', items: [{ type: 'note', name: 'n', notes: 'x' }] }),
+    call(6, 'secrethub_apply_import_plan', { inspection_id: 'inspect-0-unknown', items: [{ type: 'env_group', name: 'g', variables: [{ name: 'A', value: { plain: FAKE_SECRET } }] }] }),
+  ]);
+  const inspectQueued = first.find((r) => r.id === 2).result.structuredContent;
+  assert.match(inspectQueued.requestId, /^inspect-/);
+  const inspectFile = JSON.parse(readFileSync(`${planDirectory}/${inspectQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([inspectFile.kind, inspectFile.paths, Object.keys(inspectFile).sort()], ['import_inspect', [directory], ['createdAt', 'kind', 'paths', 'requestId', 'version']]);
+  for (const id of [3, 4, 5, 6]) assert.equal(first.find((r) => r.id === id).result.isError, true, `call ${id}`);
+  // The inspection result as Desktop writes it: masked lines only. Extra fields must not be passed on.
+  mkdirSync(resultDirectory, { recursive: true });
+  writeFileSync(join(resultDirectory, `${inspectQueued.requestId}.json`), JSON.stringify({ requestId: inspectQueued.requestId, status: 'done', inspectionId: inspectQueued.requestId, expiresInSeconds: 1800, tokenCount: 1, truncated: false, files: [{ name: 'srv/.env', lines: ['SSH_HOST=8.0.0.1', 'SSH_PASSWORD=«S1:24 位随机串»'], raw: FAKE_SECRET }], skipped: [], finishedAt: new Date().toISOString(), leak: FAKE_SECRET }));
+  const second = session([
+    call(2, 'secrethub_get_import_inspection', { request_id: inspectQueued.requestId }),
+    call(3, 'secrethub_apply_import_plan', { inspection_id: inspectQueued.requestId, items: [{ type: 'env_group', name: 'Server', category: 'server', variables: [{ name: 'SRV_HOST', value: { literal: '8.0.0.1' }, description: 'SSH host' }, { name: 'SRV_PASSWORD', value: { token: 'S1' }, secret: false }] }] }),
+  ]);
+  const view = second.find((r) => r.id === 2).result.structuredContent;
+  assert.equal(view.status, 'done');
+  assert.deepEqual(view.files, [{ name: 'srv/.env', startLine: 0, lines: ['SSH_HOST=8.0.0.1', 'SSH_PASSWORD=«S1:24 位随机串»'] }]);
+  assert.equal(JSON.stringify(second).includes(FAKE_SECRET), false);
+  const planQueued = second.find((r) => r.id === 3).result.structuredContent;
+  assert.match(planQueued.requestId, /^organize-/);
+  assert.equal(planQueued.requiresUserConfirmation, false);
+  const planFile = JSON.parse(readFileSync(`${planDirectory}/${planQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([planFile.kind, planFile.inspectionId, planFile.items[0].variables[1].value], ['import_organize', inspectQueued.requestId, { token: 'S1' }]);
+  writeFileSync(join(resultDirectory, `${planQueued.requestId}.json`), JSON.stringify({ requestId: planQueued.requestId, status: 'done', batchId: 'batch-1', counts: { createdGroups: 1, addedVariables: 0, savedSeparately: 0, otherItems: 0, skippedVariables: 0 }, items: [{ index: 0, name: 'Server', type: 'env_group', result: 'created', addedVariables: 2, savedSeparately: 0, skippedVariables: 0, value: FAKE_SECRET }], rejected: [{ item: 0, variable: 'SRV_X', reason: 'literal_not_in_view', value: FAKE_SECRET }], password: FAKE_SECRET, finishedAt: 'now' }));
+  const third = session([
+    call(2, 'secrethub_get_import_status', { request_id: planQueued.requestId }),
+    call(3, 'secrethub_get_import_status', { request_id: 'organize-../x' }),
+    call(4, 'secrethub_get_import_status', { request_id: 'organize-0-missing' }),
+  ]);
+  const organized = third.find((r) => r.id === 2).result.structuredContent;
+  assert.deepEqual([organized.status, organized.batchId, organized.items[0].result, organized.rejected], ['done', 'batch-1', 'created', [{ item: 0, variable: 'SRV_X', reason: 'literal_not_in_view' }]]);
+  assert.equal(third.find((r) => r.id === 3).result.isError, true);
+  assert.equal(third.find((r) => r.id === 4).result.structuredContent.status, 'not_found');
+  assert.equal(JSON.stringify(third).includes(FAKE_SECRET), false);
+  const listed = session([{ jsonrpc: '2.0', id: 9, method: 'tools/list', params: {} }]).find((r) => r.id === 9).result.tools;
+  for (const name of ['secrethub_import_inspect', 'secrethub_get_import_inspection', 'secrethub_apply_import_plan']) assert.ok(listed.some((tool) => tool.name === name), name);
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

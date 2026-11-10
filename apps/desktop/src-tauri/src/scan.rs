@@ -84,7 +84,7 @@ pub struct FileInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Env,
     Json,
     PrivateKey,
@@ -101,7 +101,7 @@ fn extension(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn classify(file: &FileInput) -> Kind {
+pub(crate) fn classify(file: &FileInput) -> Kind {
     let lower = file.name.to_ascii_lowercase();
     let ext = extension(&file.name);
     if ext == "pub" {
@@ -389,12 +389,12 @@ impl Builder {
     }
 }
 
-fn normalized_key(text: &str) -> String {
+pub(crate) fn normalized_key(text: &str) -> String {
     text.replace("\r\n", "\n").trim().to_owned() + "\n"
 }
 
 /// Flat JSON object of scalars -> variables; anything else is `None` (the caller makes it a note).
-fn json_variables(text: &str) -> Option<Vec<(String, String)>> {
+pub(crate) fn json_variables(text: &str) -> Option<Vec<(String, String)>> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
     let object = value.as_object()?;
     let mut out = Vec::new();
@@ -479,6 +479,10 @@ pub fn assemble(source: &str, name: &str, files: &[FileInput]) -> GroupScan {
                 }
             }
             Kind::PublicKey => {
+                // The same key already present (for example in the .env) is not added again.
+                if builder.holds_value(&file.text) {
+                    continue;
+                }
                 let (variable, _) = builder.free_name("SSH_PUBLIC_KEY");
                 builder.add(&variable, file.text.trim().to_owned());
             }
@@ -616,6 +620,99 @@ fn single_file_group_name(path: &Path) -> String {
     path.file_stem()
         .and_then(|value| value.to_str())
         .map_or_else(|| display_name(path), str::to_owned)
+}
+
+/// The files an AI inspection covers (design 2026-11-10 section 1): the same range limits as
+/// `scan_paths` (depth, file count, size, text only). `FileInput::name` is `<folder>/<file>`.
+pub struct ReadFiles {
+    pub files: Vec<FileInput>,
+    pub skipped: Vec<SkippedFile>,
+}
+
+fn collect(
+    directory: &Path,
+    depth: usize,
+    budget: &mut usize,
+    out: &mut ReadFiles,
+) -> Result<(), String> {
+    let folder = display_name(directory);
+    let mut subdirectories = Vec::new();
+    let mut entries: Vec<PathBuf> = fs::read_dir(directory)
+        .map_err(|_| "cannot read folder".to_owned())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            let name = display_name(&path);
+            if depth < MAX_DEPTH && name != ".git" && name != "node_modules" {
+                subdirectories.push(path);
+            }
+            continue;
+        }
+        if *budget == 0 {
+            out.skipped.push(SkippedFile {
+                name: display_name(&path),
+                reason: "file_limit",
+            });
+            continue;
+        }
+        *budget -= 1;
+        match read_candidate(&path) {
+            Ok(mut file) => {
+                file.name = format!("{folder}/{}", file.name);
+                out.files.push(file);
+            }
+            Err(skipped) => out.skipped.push(skipped),
+        }
+    }
+    for sub in subdirectories {
+        collect(&sub, depth + 1, budget, out)?;
+    }
+    Ok(())
+}
+
+/// Reads the files behind `paths` for an inspection. Paths must be absolute and exist.
+pub fn read_files(paths: &[PathBuf]) -> Result<ReadFiles, String> {
+    if paths.is_empty() {
+        return Err("no paths to inspect".to_owned());
+    }
+    let mut out = ReadFiles {
+        files: Vec::new(),
+        skipped: Vec::new(),
+    };
+    let mut budget = MAX_FILES;
+    for path in paths {
+        if !path.is_absolute() {
+            return Err("import paths must be absolute".to_owned());
+        }
+        if path.is_dir() {
+            collect(path, 0, &mut budget, &mut out)?;
+        } else if path.is_file() {
+            if budget == 0 {
+                out.skipped.push(SkippedFile {
+                    name: display_name(path),
+                    reason: "file_limit",
+                });
+                continue;
+            }
+            budget -= 1;
+            match read_candidate(path) {
+                Ok(mut file) => {
+                    let folder = path.parent().map(display_name).unwrap_or_default();
+                    if !folder.is_empty() {
+                        file.name = format!("{folder}/{}", file.name);
+                    }
+                    out.files.push(file);
+                }
+                Err(skipped) => out.skipped.push(skipped),
+            }
+        } else {
+            return Err("import path does not exist".to_owned());
+        }
+    }
+    Ok(out)
 }
 
 /// Scans files and folders. Paths must be absolute and exist.
@@ -776,6 +873,36 @@ mod tests {
         let public = var(&group, "SSH_PUBLIC_KEY");
         assert!(!public.secret);
         assert_eq!(public.values[0], "ssh-ed25519 AAAAFAKE user@host");
+    }
+
+    #[test]
+    fn a_public_key_file_with_the_value_already_in_the_env_is_not_added_again() {
+        let key = "ssh-ed25519 AAAAFAKE user@host";
+        let (group, _) = assemble_group(
+            "a",
+            "a",
+            &[
+                file(".env", &format!("SERVER_SSH_PUBLIC_KEY={key}\nA=1\n")),
+                file("id_ed25519.pub", &format!("{key}\n")),
+            ],
+        );
+        let group = group.unwrap();
+        assert!(group.variables.iter().all(|v| v.name != "SSH_PUBLIC_KEY"));
+        assert_eq!(var(&group, "SERVER_SSH_PUBLIC_KEY").values, [key]);
+
+        // A different key is still added.
+        let (group, _) = assemble_group(
+            "a",
+            "a",
+            &[
+                file(".env", &format!("SERVER_SSH_PUBLIC_KEY={key}\n")),
+                file("id_ed25519.pub", "ssh-ed25519 AAAAOTHER user@host\n"),
+            ],
+        );
+        assert_eq!(
+            var(&group.unwrap(), "SSH_PUBLIC_KEY").values,
+            ["ssh-ed25519 AAAAOTHER user@host"]
+        );
     }
 
     #[test]

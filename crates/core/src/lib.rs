@@ -10,9 +10,11 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+mod batches;
 pub mod groups;
 pub mod items;
 mod lock;
+pub use batches::UndoSummary;
 pub use groups::{GroupPublic, GroupUpdate, NewGroup, NewVariable, PublicVariable, VariableUpdate};
 pub use items::Fields;
 pub use lock::AutoLockPolicy;

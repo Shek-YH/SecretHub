@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getTranslation, readStoredLocale, type Locale } from './i18n/translations';
 import { CapabilitySuggestionBanner, CapabilitySuggestionModal, PlanReviewModal } from './McpReview';
-import { CaptureRequestBanner, ImportRequestBanner, MediaRequestBanner, SyncRequestBanner } from './AiRequests';
+import { AiImportNoticeBanner, CaptureRequestBanner, ImportRequestBanner, MediaRequestBanner, OrganizeWaitingBanner, SyncRequestBanner } from './AiRequests';
 import { ImportReviewModal } from './ImportReview';
 import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type ImportApplyOutcome, type ImportReview, type PendingImportRequest, type ProfileVariables, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type ImportApplyOutcome, type ImportReview, type PendingImportRequest, type PendingOrganizeRequest, type AiImportNotice, type ProfileVariables, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { CatalogSettings } from './CatalogSettings';
 import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, groupProviders, providerKind, providerTemplates, resolveProviderId, type ProviderTemplate } from './providers';
 import { SecretForm } from './SecretForm';
@@ -55,6 +55,9 @@ export function App() {
   const [reviewCaps, setReviewCaps] = useState<CapabilitySuggestionBatch | null>(null);
   const [pendingSync, setPendingSync] = useState<PendingSyncRequest[]>([]);
   const previousSyncCount = useRef(0);
+  const [pendingOrganize, setPendingOrganize] = useState<PendingOrganizeRequest[]>([]);
+  const [aiNotices, setAiNotices] = useState<AiImportNotice[]>([]);
+  const previousOrganizeCount = useRef(0);
   const [captureRequests, setCaptureRequests] = useState<CaptureRequest[]>([]);
   const [captureName, setCaptureName] = useState<string | null>(null);
   const [mediaRequests, setMediaRequests] = useState<MediaRequest[]>([]);
@@ -188,6 +191,9 @@ export function App() {
     const loadPlans = () => { void backend.pendingPlans().then(setPendingPlans).catch((error) => setRuntimeError(String(error))); void backend.pendingCapabilitySuggestions().then(setCapBatches).catch((error) => setRuntimeError(String(error)));
       // Queued AI sync requests run in the backend once unlocked; when the queue drains, reload what they changed.
       void backend.pendingSyncRequests().then((items) => { setPendingSync(items); if (previousSyncCount.current > 0 && items.length === 0) { void refreshSecretsRef.current(); setModelsRevision((value) => value + 1); } previousSyncCount.current = items.length; }).catch(() => undefined);
+      // AI import plans are written by the backend once unlocked; the notices need the unlocked vault.
+      void backend.pendingOrganizeRequests().then((items) => { setPendingOrganize(items); if (previousOrganizeCount.current > 0 && items.length === 0) void refreshSecretsRef.current(); previousOrganizeCount.current = items.length; }).catch(() => undefined);
+      void backend.aiImportNotices().then(setAiNotices).catch(() => setAiNotices([]));
       void backend.pendingCaptureRequests().then(setCaptureRequests).catch(() => undefined);
       void backend.pendingMediaRequests().then(setMediaRequests).catch(() => undefined);
       void backend.pendingImportRequests().then(setImportRequests).catch(() => undefined); };
@@ -217,6 +223,20 @@ export function App() {
   async function viewImport(request: PendingImportRequest) {
     try { setAiReview(await backend.importScan(request.paths, request.requestId)); setRuntimeError(''); }
     catch (reason) { setRuntimeError(`${t.actions.operationFailed}: ${String(reason)}`); }
+  }
+
+  async function undoAiImport(notice: AiImportNotice) {
+    try {
+      const undone = await backend.aiImportUndo(notice.batchId);
+      setAiNotices((current) => current.filter((item) => item.batchId !== notice.batchId));
+      setActionMessage(t.ai.undone.replace('{items}', String(undone.removedItems)).replace('{vars}', String(undone.removedVariables)));
+      void refreshSecrets();
+    } catch (reason) { setRuntimeError(`${t.ai.undoFailed}: ${String(reason)}`); }
+  }
+
+  async function dismissAiNotice(notice: AiImportNotice) {
+    setAiNotices((current) => current.filter((item) => item.batchId !== notice.batchId));
+    try { await backend.aiImportDismiss(notice.batchId); } catch { /* the notice comes back on the next poll */ }
   }
 
   async function declineImport(request: PendingImportRequest) {
@@ -491,6 +511,8 @@ export function App() {
         </section>
         {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onReview={() => setReviewPlan(plan)} />)}
         {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
+        {vaultStatus && !vaultStatus.unlocked && pendingOrganize.map((request) => <OrganizeWaitingBanner key={request.requestId} request={request} t={t} />)}
+        {vaultStatus?.unlocked && aiNotices.map((notice) => <AiImportNoticeBanner key={notice.batchId} notice={notice} t={t} onView={() => { setActiveNav('env_group'); void refreshSecrets(); }} onUndo={() => void undoAiImport(notice)} onDismiss={() => void dismissAiNotice(notice)} />)}
         {vaultStatus?.unlocked && captureRequests.map((request) => <CaptureRequestBanner key={request.requestId} request={request} t={t} onStart={() => void decideCapture(request, true)} onDecline={() => void decideCapture(request, false)} />)}
         {vaultStatus?.unlocked && importRequests.map((request) => <ImportRequestBanner key={request.requestId} request={request} t={t} onView={() => void viewImport(request)} onDecline={() => void declineImport(request)} />)}
         {aiReview && <ImportReviewModal t={t} review={aiReview} onClose={() => setAiReview(null)} onDone={(outcome) => void aiImportDone(outcome)} />}

@@ -59,6 +59,24 @@ pub struct GroupVariableRow {
     pub plain_value: String,
 }
 
+/// One automatic AI import (design 2026-11-10 section 3): counts only, never values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBatch {
+    pub batch_id: String,
+    pub created_at: i64,
+    /// New config groups.
+    pub created_groups: i64,
+    /// Variables appended to existing groups.
+    pub added_vars: i64,
+    /// Variables with conflicting values saved as a separate group.
+    pub saved_separately: i64,
+    /// New API keys, logins and notes.
+    pub other_items: i64,
+    pub undone: bool,
+    pub dismissed: bool,
+}
+
 impl SecretMetadata {
     /// Whether the payload is a JSON field document rather than a raw string.
     pub fn is_json_item(&self) -> bool {
@@ -368,6 +386,22 @@ impl Database {
                 secret INTEGER NOT NULL,
                 plain_value TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (secret_id, name)
+             );
+             CREATE TABLE IF NOT EXISTS import_batches (
+                batch_id TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL,
+                created_groups INTEGER NOT NULL DEFAULT 0,
+                added_vars INTEGER NOT NULL DEFAULT 0,
+                saved_separately INTEGER NOT NULL DEFAULT 0,
+                other_items INTEGER NOT NULL DEFAULT 0,
+                undone INTEGER NOT NULL DEFAULT 0,
+                dismissed INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS import_batch_entries (
+                batch_id TEXT NOT NULL REFERENCES import_batches(batch_id) ON DELETE CASCADE,
+                secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                variable_name TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (batch_id, secret_id, variable_name)
              );
              CREATE TABLE IF NOT EXISTS provider_models (
                 secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
@@ -709,6 +743,104 @@ impl Database {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    // ------------------------------------------------------------------ import batches
+
+    pub fn create_import_batch(&self, batch_id: &str) -> Result<(), StorageError> {
+        self.connection.execute(
+            "INSERT INTO import_batches(batch_id, created_at) VALUES (?1, ?2)",
+            params![batch_id, unix_time()],
+        )?;
+        Ok(())
+    }
+
+    /// `variable_name` is empty when the whole item was created by the batch.
+    pub fn add_batch_entry(
+        &self,
+        batch_id: &str,
+        secret_id: &str,
+        variable_name: &str,
+    ) -> Result<(), StorageError> {
+        self.connection.execute(
+            "INSERT OR IGNORE INTO import_batch_entries(batch_id, secret_id, variable_name) VALUES (?1, ?2, ?3)",
+            params![batch_id, secret_id, variable_name],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_batch_counts(&self, batch_id: &str, counts: [i64; 4]) -> Result<(), StorageError> {
+        self.connection.execute(
+            "UPDATE import_batches SET created_groups = ?2, added_vars = ?3, saved_separately = ?4, other_items = ?5 WHERE batch_id = ?1",
+            params![batch_id, counts[0], counts[1], counts[2], counts[3]],
+        )?;
+        Ok(())
+    }
+
+    /// `(secret_id, variable_name)` pairs recorded for a batch.
+    pub fn list_batch_entries(
+        &self,
+        batch_id: &str,
+    ) -> Result<Vec<(String, String)>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT secret_id, variable_name FROM import_batch_entries WHERE batch_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = statement
+            .query_map(params![batch_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Whether another batch that has not been undone still holds entries of this item.
+    pub fn secret_in_other_batches(
+        &self,
+        batch_id: &str,
+        secret_id: &str,
+    ) -> Result<bool, StorageError> {
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM import_batch_entries e JOIN import_batches b ON b.batch_id = e.batch_id WHERE e.secret_id = ?2 AND e.batch_id <> ?1 AND b.undone = 0",
+            params![batch_id, secret_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn get_import_batch(&self, batch_id: &str) -> Result<Option<ImportBatch>, StorageError> {
+        self.connection
+            .query_row(
+                "SELECT batch_id, created_at, created_groups, added_vars, saved_separately, other_items, undone, dismissed FROM import_batches WHERE batch_id = ?1",
+                params![batch_id],
+                batch_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Batches whose notice has not been dismissed and that were not undone, newest first.
+    pub fn list_open_import_batches(&self) -> Result<Vec<ImportBatch>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT batch_id, created_at, created_groups, added_vars, saved_separately, other_items, undone, dismissed FROM import_batches WHERE dismissed = 0 AND undone = 0 ORDER BY created_at DESC, rowid DESC LIMIT 20",
+        )?;
+        let rows = statement
+            .query_map([], batch_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn dismiss_import_batch(&self, batch_id: &str) -> Result<(), StorageError> {
+        self.connection.execute(
+            "UPDATE import_batches SET dismissed = 1 WHERE batch_id = ?1",
+            params![batch_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_import_batch_undone(&self, batch_id: &str) -> Result<(), StorageError> {
+        self.connection.execute(
+            "UPDATE import_batches SET undone = 1, dismissed = 1 WHERE batch_id = ?1",
+            params![batch_id],
+        )?;
+        Ok(())
     }
 
     pub fn update_secret(&self, id: &str, secret: UpdatedSecret) -> Result<bool, StorageError> {
@@ -1382,6 +1514,19 @@ fn to_json(values: &[String]) -> Result<String, StorageError> {
 
 fn from_json(text: &str) -> Result<Vec<String>, StorageError> {
     serde_json::from_str(text).map_err(|error| StorageError::InvalidData(error.to_string()))
+}
+
+fn batch_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportBatch> {
+    Ok(ImportBatch {
+        batch_id: row.get(0)?,
+        created_at: row.get(1)?,
+        created_groups: row.get(2)?,
+        added_vars: row.get(3)?,
+        saved_separately: row.get(4)?,
+        other_items: row.get(5)?,
+        undone: row.get::<_, i64>(6)? != 0,
+        dismissed: row.get::<_, i64>(7)? != 0,
+    })
 }
 
 fn add_column_if_missing(
