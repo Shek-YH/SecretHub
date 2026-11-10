@@ -894,7 +894,11 @@ pub(crate) fn entries_for(
             entries.push(api_entry);
         }
         if !item.model_id.trim().is_empty() {
-            let model_entry = EnvEntry::new(safe_model_env_key(item), item.model_id.clone());
+            let model_entry = EnvEntry::with_comment(
+                safe_model_env_key(item),
+                item.model_id.clone(),
+                "调用的模型名",
+            );
             entries.push(if separator_before && entries.len() == group_start {
                 model_entry.with_separator_before()
             } else {
@@ -909,9 +913,10 @@ pub(crate) fn entries_for(
             ));
         }
         if !item.endpoint_url.trim().is_empty() {
-            entries.push(EnvEntry::new(
+            entries.push(EnvEntry::with_comment(
                 safe_endpoint_env_key(item),
                 item.endpoint_url.clone(),
+                "接口基础地址",
             ));
         }
     }

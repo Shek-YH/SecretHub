@@ -90,6 +90,11 @@ Build one plan from what you read:
   access key id/secret).
 - **Describe every variable** in one short sentence of purpose
   (`"SSH 登录密码"`, `"宝塔面板 API 接口密钥"`). No values in descriptions.
+  Add the format when it is not obvious: a private key is
+  `"SSH 私钥（多行 PEM，.env 中以 \n 转义为一行，dotenv 读取后还原）"`, a
+  whitelist states its separator (`"逗号分隔的 IP 列表"`), a URL states whether
+  it includes a path or version prefix. When a group mixes password and key
+  login, say which one the project should prefer.
 - **Flag doubts** for the final report: duplicates, a value that looks like it
   belongs elsewhere, a password next to the wrong host, a half-filled group.
   Do not silently fix or drop them; use what the view shows and mention them.

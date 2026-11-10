@@ -429,7 +429,7 @@ mod tests {
         let env = fs::read_to_string(project.path().join(".env")).unwrap();
         assert_eq!(
             example,
-            "# OpenAI API Key\nOPENAI_API_KEY=\"\"\nOPENAI_MODEL=\"\"\n\n# Fake server（服务器）\n# SSH 登录密码\nSSH_PASSWORD=\"\"\nSSH_PORT=\"\"\n"
+            "# OpenAI API Key\nOPENAI_API_KEY=\"\"\n# 调用的模型名\nOPENAI_MODEL=\"\"\n\n# Fake server（服务器）\n# SSH 登录密码\nSSH_PASSWORD=\"\"\nSSH_PORT=\"\"\n"
         );
         // The real file has the same comments and the values; the comments hold no value.
         assert!(env.contains("# Fake server（服务器）\n# SSH 登录密码\nSSH_PASSWORD=\""));
