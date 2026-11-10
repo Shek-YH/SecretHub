@@ -3,7 +3,7 @@
 //! shows name, source, state and (for plain values only) the value. Secret values are decrypted
 //! only inside `export_apply_v2`, right before writing.
 
-use super::commands::{entries_for, touch_activity, vault_from_state};
+use super::commands::{entries_for, group_entries, touch_activity, vault_from_state};
 use super::plan::{self, WriteOptions, MASK};
 use super::AppState;
 use secrethub_core::VaultService;
@@ -64,6 +64,10 @@ pub struct ExportOutcomeV2 {
 struct Resolved {
     row: ExportRow,
     value: String,
+    /// Comment lines above the variable (group name, purpose); never a value.
+    comment: Option<String>,
+    /// First variable of its item: a blank line separates it from the previous item.
+    starts_item: bool,
 }
 
 fn resolve_rows(
@@ -90,10 +94,22 @@ fn resolve_rows(
         if selection.variables.is_some() && item.value_type != "env_group" {
             return Err("variables are only allowed for config groups".to_owned());
         }
-        let secrets: Vec<(String, String, bool)> = if item.value_type == "env_group" {
+        let secrets: Vec<(String, String, bool, Option<String>)> = if item.value_type == "env_group"
+        {
+            let comments: HashMap<String, String> =
+                group_entries(vault, &item.id, selection.variables.as_deref())?
+                    .into_iter()
+                    .filter_map(|entry| entry.comment.map(|comment| (entry.key, comment)))
+                    .collect();
             vault
                 .group_values(&item.id, selection.variables.as_deref())
                 .map_err(|error| error.to_string())?
+                .into_iter()
+                .map(|(key, value, secret)| {
+                    let comment = comments.get(&key).cloned();
+                    (key, value, secret, comment)
+                })
+                .collect()
         } else {
             entries_for(vault, std::slice::from_ref(&item.id), true)?
                 .into_iter()
@@ -104,12 +120,14 @@ fn resolve_rows(
                         "login" => true,
                         _ => entry.key == item.env_key,
                     };
-                    (entry.key, entry.value, secret)
+                    (entry.key, entry.value, secret, entry.comment)
                 })
                 .collect()
         };
-        for (key, value, secret) in secrets {
+        for (position, (key, value, secret, comment)) in secrets.into_iter().enumerate() {
             resolved.push(Resolved {
+                comment,
+                starts_item: position == 0,
                 row: ExportRow {
                     key,
                     secret_id: item.id.clone(),
@@ -206,7 +224,10 @@ pub(crate) fn apply(
         if !audited.contains(&item.row.secret_id) {
             audited.push(item.row.secret_id.clone());
         }
-        entries.push(secrethub_exporter::EnvEntry::new(item.row.key, item.value));
+        let mut entry = secrethub_exporter::EnvEntry::new(item.row.key, item.value);
+        entry.comment = item.comment;
+        entry.separator_before = item.starts_item && !entries.is_empty();
+        entries.push(entry);
     }
     if entries.is_empty() {
         return Err("nothing to export".to_owned());
@@ -305,6 +326,7 @@ mod tests {
             name: name.into(),
             value: value.into(),
             secret,
+            description: String::new(),
         };
         vault
             .create_group(NewGroup {
@@ -348,6 +370,72 @@ mod tests {
             .iter()
             .map(|row| (row.key.as_str(), row.status))
             .collect()
+    }
+
+    #[test]
+    fn exports_carry_group_header_purpose_and_provider_comments_but_no_values() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let vault = vault(data.path());
+        let key = api_key(&vault);
+        let server = group(&vault, "Fake server", "203.0.113.7");
+        let existing = vault.group_variables(&server).unwrap();
+        // Give two variables a purpose; SSH_PORT keeps none.
+        let described = |name: &str, text: &str| {
+            existing
+                .iter()
+                .find(|row| row.name == name)
+                .map(|row| secrethub_core::VariableUpdate {
+                    name: row.name.clone(),
+                    secret: row.secret,
+                    value: (!row.secret).then(|| row.plain_value.clone()),
+                    from: None,
+                    description: Some(text.to_owned()),
+                })
+        };
+        let mut variables = vec![
+            described("SSH_HOST", "服务器 SSH 主机").unwrap(),
+            described("SSH_PASSWORD", "SSH 登录密码").unwrap(),
+            described("SSH_PORT", "").unwrap(),
+        ];
+        variables[2].description = None;
+        vault
+            .update_group(
+                &server,
+                secrethub_core::GroupUpdate {
+                    name: "Fake server".into(),
+                    category: "server".into(),
+                    variables,
+                    notes: None,
+                    tags: Vec::new(),
+                    favorite: false,
+                    ai_values: true,
+                },
+            )
+            .unwrap();
+        apply(
+            &vault,
+            &request(
+                project.path(),
+                vec![
+                    selection(&key, None),
+                    selection(&server, Some(&["SSH_PASSWORD", "SSH_PORT"])),
+                ],
+                &[],
+            ),
+        )
+        .unwrap();
+        let example = fs::read_to_string(project.path().join(".env.example")).unwrap();
+        let env = fs::read_to_string(project.path().join(".env")).unwrap();
+        assert_eq!(
+            example,
+            "# OpenAI API Key\nOPENAI_API_KEY=\"\"\nOPENAI_MODEL=\"\"\n\n# Fake server（服务器）\n# SSH 登录密码\nSSH_PASSWORD=\"\"\nSSH_PORT=\"\"\n"
+        );
+        // The real file has the same comments and the values; the comments hold no value.
+        assert!(env.contains("# Fake server（服务器）\n# SSH 登录密码\nSSH_PASSWORD=\""));
+        let comments: String = env.lines().filter(|l| l.starts_with('#')).collect();
+        assert!(!comments.contains(FAKE_KEY) && !comments.contains(FAKE_PASSWORD));
+        assert!(!example.contains(FAKE_KEY) && !example.contains(FAKE_PASSWORD));
     }
 
     #[test]

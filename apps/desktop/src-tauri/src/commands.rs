@@ -757,12 +757,80 @@ pub(crate) fn group_entries(
     id: &str,
     names: Option<&[String]>,
 ) -> Result<Vec<EnvEntry>, String> {
+    let descriptions: std::collections::HashMap<String, String> = vault
+        .group_variables(id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|row| (row.name, row.description))
+        .collect();
+    let header = vault
+        .list_metadata()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|item| item.id == id)
+        .map(|item| group_comment(&item.name, &item.category));
     Ok(vault
         .group_values(id, names)
         .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|(name, value, _)| EnvEntry::new(name, value))
+        .enumerate()
+        .map(|(index, (name, value, _))| {
+            // Comments only: the group's name and category above its first variable, then one
+            // line of purpose per variable. Never a value.
+            let description = descriptions.get(&name).map_or("", |text| text.trim());
+            let mut lines: Vec<&str> = Vec::new();
+            if index == 0 {
+                lines.extend(header.as_deref());
+            }
+            if !description.is_empty() {
+                lines.push(description);
+            }
+            if lines.is_empty() {
+                EnvEntry::new(name, value)
+            } else {
+                EnvEntry::with_comment(name, value, lines.join("\n"))
+            }
+        })
         .collect())
+}
+
+/// `<group name>（<category in Chinese>）`, the header comment of a group in an exported file.
+pub(crate) fn group_comment(name: &str, category: &str) -> String {
+    let label = match category {
+        "server" => "服务器",
+        "database" => "数据库",
+        "storage" => "对象存储",
+        "other" => "其他",
+        other => other,
+    };
+    format!("{}（{label}）", name.trim())
+}
+
+/// Comment above an exported key: `<provider name> API Key` for provider keys, followed by the
+/// user's own purpose text (not the automatic "Imported ..." marker); other secrets only carry
+/// their purpose text.
+fn key_comment(item: &secrethub_storage::SecretMetadata) -> String {
+    let description = item.description.trim();
+    let own = if description.starts_with("Imported ") {
+        ""
+    } else {
+        description
+    };
+    if item.value_type != "api_key" {
+        return own.to_owned();
+    }
+    let name = crate::catalog::effective_registry()
+        .into_iter()
+        .find(|provider| provider.id == item.provider_id)
+        .map_or_else(|| item.provider_id.clone(), |provider| provider.name);
+    if own.is_empty() {
+        format!("{name} API Key")
+    } else {
+        format!(
+            "{name} API Key
+{own}"
+        )
+    }
 }
 
 /// Entries for legacy plans: key, primary model and endpoint only (plan previews rely on this).
@@ -819,7 +887,7 @@ pub(crate) fn entries_for(
         let value = vault.read_secret(id).map_err(|error| error.to_string())?;
         if !item.env_key.trim().is_empty() {
             let mut api_entry =
-                entry_with_optional_comment(&item.env_key, value.clone(), &item.description);
+                entry_with_optional_comment(&item.env_key, value.clone(), &key_comment(item));
             if separator_before {
                 api_entry = api_entry.with_separator_before();
             }
@@ -866,7 +934,7 @@ pub(crate) fn selected_entries_from_metadata(
     let mut entries = Vec::new();
     if !metadata.env_key.trim().is_empty() {
         let mut api_entry =
-            entry_with_optional_comment(&metadata.env_key, value, &metadata.description);
+            entry_with_optional_comment(&metadata.env_key, value, &key_comment(metadata));
         if !entries.is_empty() {
             api_entry = api_entry.with_separator_before();
         }
@@ -1757,7 +1825,11 @@ mod tests {
             }],
         ))
         .unwrap();
-        assert!(rendered.contains("# local project only"));
+        assert!(rendered.contains(
+            "# DeepSeek API Key
+# local project only
+DEEPSEEK_API_KEY="
+        ));
         assert!(rendered.contains("DEEPSEEK_API_KEY=\"fixture-key\""));
         assert!(rendered.contains("DEEPSEEK_MODEL=\"deepseek-v4.1-flash\""));
         assert!(rendered.contains("DEEPSEEK_BASE_URL=\"https://api.deepseek.com\""));

@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 const MASTER: &str = "fake-master-password-one";
 const NEW_MASTER: &str = "fake-master-password-two";
 
-const YC: &str = "野草云";
-const ALI: &str = "阿里宝塔";
-const TX: &str = "腾讯宝塔";
+pub(crate) const YC: &str = "野草云";
+pub(crate) const ALI: &str = "阿里宝塔";
+pub(crate) const TX: &str = "腾讯宝塔";
 const TOPUP: &str = "充值";
 
 fn key(tag: &str) -> String {
@@ -48,7 +48,7 @@ fn write(path: &Path, text: &str) {
 }
 
 /// The fake credentials folder; returns its root.
-fn build_fixture(base: &Path) -> PathBuf {
+pub(crate) fn build_fixture(base: &Path) -> PathBuf {
     let root = base.join("资料");
 
     // 野草云: complete server + panel set, a key file identical to the one in .env.

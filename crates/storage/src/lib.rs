@@ -57,6 +57,8 @@ pub struct GroupVariableRow {
     pub name: String,
     pub secret: bool,
     pub plain_value: String,
+    /// What the variable is for. Plaintext, visible to AI tools; never holds a value.
+    pub description: String,
 }
 
 /// One automatic AI import (design 2026-11-10 section 3): counts only, never values.
@@ -551,6 +553,12 @@ impl Database {
         )?;
         add_column_if_missing(
             &connection,
+            "group_variables",
+            "description",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
             "profile_secrets",
             "variables_json",
             "TEXT NOT NULL DEFAULT ''",
@@ -711,7 +719,7 @@ impl Database {
             params![secret_id],
         )?;
         let mut insert = self.connection.prepare(
-            "INSERT INTO group_variables(secret_id, position, name, secret, plain_value) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO group_variables(secret_id, position, name, secret, plain_value, description) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         for (position, variable) in variables.iter().enumerate() {
             insert.execute(params![
@@ -719,7 +727,8 @@ impl Database {
                 position as i64,
                 variable.name,
                 variable.secret as i64,
-                variable.plain_value
+                variable.plain_value,
+                variable.description
             ])?;
         }
         Ok(())
@@ -731,7 +740,7 @@ impl Database {
         secret_id: &str,
     ) -> Result<Vec<GroupVariableRow>, StorageError> {
         let mut statement = self.connection.prepare(
-            "SELECT name, secret, plain_value FROM group_variables WHERE secret_id = ?1 ORDER BY position",
+            "SELECT name, secret, plain_value, description FROM group_variables WHERE secret_id = ?1 ORDER BY position",
         )?;
         let rows = statement
             .query_map(params![secret_id], |row| {
@@ -739,6 +748,7 @@ impl Database {
                     name: row.get(0)?,
                     secret: row.get::<_, i64>(1)? != 0,
                     plain_value: row.get(2)?,
+                    description: row.get(3)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

@@ -27,7 +27,7 @@ function mockDesktop(rows: BackendSecret[] = [GROUP]) {
   return {
     pub: vi.spyOn(backend, 'groupPublic').mockResolvedValue({
       variables: [
-        { name: 'SSH_HOST', secret: false, value: '203.0.113.7' },
+        { name: 'SSH_HOST', secret: false, value: '203.0.113.7', description: 'SSH 主机地址' },
         { name: 'SSH_PASSWORD', secret: true },
         { name: 'SSH_PRIVATE_KEY', secret: true },
       ],
@@ -196,9 +196,12 @@ describe('edit flow', () => {
     const mocks = mockDesktop();
     const user = await openApp();
     await screen.findByText('203.0.113.7');
+    expect(screen.getByText('SSH 主机地址')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '编辑' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByLabelText('值 SSH_HOST')).toHaveValue('203.0.113.7');
+    expect(within(dialog).getByLabelText('用途说明 SSH_HOST')).toHaveValue('SSH 主机地址');
+    await user.type(within(dialog).getByLabelText('用途说明 SSH_PASSWORD'), 'SSH 登录密码');
     // Secret inputs start empty: the stored value never comes back to the form.
     expect(within(dialog).getByLabelText('值 SSH_PASSWORD')).toHaveValue('');
     expect(document.body.innerHTML).not.toContain(FAKE_SECRET);
@@ -214,9 +217,9 @@ describe('edit flow', () => {
     expect(id).toBe('g1');
     expect(request.notes).toBeUndefined();
     expect(request.variables).toEqual([
-      { name: 'SERVER_HOST', secret: false, value: '203.0.113.7', from: 'SSH_HOST' },
-      { name: 'SSH_PASSWORD', secret: true },
-      { name: 'SSH_PRIVATE_KEY', secret: true, value: '' },
+      { name: 'SERVER_HOST', secret: false, value: '203.0.113.7', from: 'SSH_HOST', description: 'SSH 主机地址' },
+      { name: 'SSH_PASSWORD', secret: true, description: 'SSH 登录密码' },
+      { name: 'SSH_PRIVATE_KEY', secret: true, value: '', description: '' },
     ]);
   });
 

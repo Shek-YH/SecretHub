@@ -1794,6 +1794,7 @@ mod tests {
             name: name.to_owned(),
             value: value.to_owned(),
             secret,
+            description: String::new(),
         };
         vault
             .create_group(NewGroup {

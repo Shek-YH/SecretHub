@@ -110,6 +110,22 @@ try {
   // The other groups keep their values.
   assert.equal(variablesOf(offItems.find((item) => item.name === '野草云')).YECAOYUN_HOST.value, 'fakeval-yc-newhost.invalid');
   noSecrets('catalog with AI values off', [offCatalog, offMetadata, offSearch]);
+
+  // 5. A vault filled by an AI plan (ideal plan fixture): every variable has a purpose text the AI can read.
+  const organized = join(work, 'organized.sqlite');
+  const organizeRun = run('cargo', ['test', '-p', 'secrethub-desktop', 'organize_fixture', '--', '--nocapture'], { cwd: repo, env: { ...process.env, SECRETHUB_ORGANIZE_DB: organized }, stdio: ['ignore', 'inherit', 'inherit'] });
+  assert.equal(organizeRun.status, 0, 'the Rust organize fixture test failed');
+  const [organizedCatalog] = call(organized, [['secrethub_list_secret_catalog', { limit: 100, offset: 0 }]]);
+  const organizedItems = organizedCatalog.result.structuredContent.items;
+  const server = organizedItems.find((item) => item.valueType === 'env_group' && item.name === '野草云服务器');
+  assert.ok(server, 'the AI-organized group is in the catalog');
+  const serverVariables = variablesOf(server);
+  assert.deepEqual([serverVariables.YC_SSH_HOST.description, serverVariables.YC_SSH_HOST.value], ['野草云服务器的 SSH 主机地址', 'fakeval-yc-host.invalid']);
+  assert.deepEqual([serverVariables.YC_SSH_PRIVATE_KEY.secret, 'value' in serverVariables.YC_SSH_PRIVATE_KEY, serverVariables.YC_SSH_PRIVATE_KEY.description], [true, false, 'SSH 私钥，用于免密登录该服务器']);
+  const organizedGroups = organizedItems.filter((item) => item.valueType === 'env_group');
+  assert.equal(organizedGroups.length, 6);
+  for (const group of organizedGroups) for (const variable of group.variables) assert.ok(variable.description, `${group.name}.${variable.name} has a description`);
+  noSecrets('organized catalog', organizedCatalog);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

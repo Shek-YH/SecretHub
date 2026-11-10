@@ -75,6 +75,8 @@ pub struct NewVariable {
     pub name: String,
     pub value: String,
     pub secret: bool,
+    /// What the variable is for (plaintext, visible to AI tools; must not contain the value).
+    pub description: String,
 }
 
 pub struct NewGroup {
@@ -94,6 +96,8 @@ pub struct VariableUpdate {
     /// `None` keeps the stored value (looked up under `from` when the variable is renamed).
     pub value: Option<String>,
     pub from: Option<String>,
+    /// `None` keeps the stored description (looked up under `from` when renamed).
+    pub description: Option<String>,
 }
 
 pub struct GroupUpdate {
@@ -111,6 +115,7 @@ pub struct GroupUpdate {
 pub struct PublicVariable {
     pub name: String,
     pub secret: bool,
+    pub description: String,
     /// Present only for plain variables.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -159,6 +164,15 @@ impl GroupPayload {
 
 pub fn check_value(name: &str, value: &str) -> Result<(), VaultError> {
     if value.len() > MAX_VALUE_BYTES || value.contains('\0') {
+        return Err(VaultError::InvalidField(name.to_owned()));
+    }
+    Ok(())
+}
+
+pub const MAX_DESCRIPTION_CHARS: usize = 200;
+
+pub fn check_description(name: &str, description: &str) -> Result<(), VaultError> {
+    if description.chars().count() > MAX_DESCRIPTION_CHARS || description.contains('\0') {
         return Err(VaultError::InvalidField(name.to_owned()));
     }
     Ok(())

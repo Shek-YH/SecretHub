@@ -267,3 +267,6 @@ body { background: #071126; color: #eef4ff; }
 .import-conflict { background: rgba(255, 107, 107, .25); }
 .import-summary { margin-right: auto; font-size: 12px; opacity: .8; }
 .import-request-paths { display: grid; gap: 2px; margin: 4px 0; }
+
+.group-variable-row .group-var-description { grid-column: 1 / -1; }
+.field-description { display: block; opacity: 0.75; }

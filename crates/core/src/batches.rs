@@ -100,6 +100,7 @@ impl VaultService {
                     secret: *secret,
                     value: (!*secret).then(|| value.clone()),
                     from: None,
+                    description: None,
                 })
                 .collect();
             summary.removed_variables += current.len() - kept.len();

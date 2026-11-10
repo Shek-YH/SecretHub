@@ -865,6 +865,7 @@ pub fn apply(
                             name: name.clone(),
                             value: value.clone(),
                             secret: *secret,
+                            description: String::new(),
                         })
                         .collect(),
                     notes: group.notes.clone(),
@@ -982,6 +983,7 @@ fn merge_into(
                 secret: *new_secret,
                 value: Some(new_value.clone()),
                 from: None,
+                description: None,
             }),
             // Untouched: a stored secret keeps its value, a plain one must carry it again.
             None => variables.push(VariableUpdate {
@@ -989,6 +991,7 @@ fn merge_into(
                 secret: *secret,
                 value: (!*secret).then(|| value.clone()),
                 from: None,
+                description: None,
             }),
         }
     }
@@ -999,6 +1002,7 @@ fn merge_into(
                 secret: *secret,
                 value: Some(value.clone()),
                 from: None,
+                description: None,
             });
         }
     }
@@ -1445,6 +1449,7 @@ mod tests {
 
     fn variable(name: &str, value: &str, secret: bool) -> NewVariable {
         NewVariable {
+            description: String::new(),
             name: name.into(),
             value: value.into(),
             secret,

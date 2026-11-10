@@ -21,6 +21,8 @@ pub struct GroupVariableCreate {
     #[serde(default)]
     pub value: String,
     pub secret: bool,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +51,9 @@ pub struct GroupVariableChange {
     pub value: Option<String>,
     #[serde(default)]
     pub from: Option<String>,
+    /// `None` keeps the stored description.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +133,7 @@ pub fn group_create(
                         name: variable.name,
                         value: variable.value,
                         secret: variable.secret,
+                        description: variable.description,
                     })
                     .collect(),
                 notes: request.notes,
@@ -160,6 +166,7 @@ pub fn group_update(
                             secret: variable.secret,
                             value: variable.value,
                             from: variable.from,
+                            description: variable.description,
                         })
                         .collect(),
                     notes: request.notes,

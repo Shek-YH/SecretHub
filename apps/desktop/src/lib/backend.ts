@@ -22,10 +22,10 @@ export type BackendSecret = { id: string; name: string; provider_id: string; env
 export type ItemCreateRequest = { itemType: string; name: string; fields: Record<string, string>; tags: string[]; favorite: boolean; devUse?: boolean; envKey?: string };
 export type ItemUpdateRequest = { name: string; fields: Record<string, string>; clear: string[]; tags: string[]; favorite: boolean; devUse?: boolean; envKey?: string };
 /** Config groups: `value` is set for plain variables only; secret values never reach the web view. */
-export type GroupPublic = { variables: Array<{ name: string; secret: boolean; value?: string }>; hasNotes: boolean; aiValues: boolean };
-export type GroupCreateRequest = { name: string; category: string; variables: Array<{ name: string; value: string; secret: boolean }>; notes: string; tags: string[]; favorite: boolean; aiValues: boolean };
+export type GroupPublic = { variables: Array<{ name: string; secret: boolean; value?: string; description?: string }>; hasNotes: boolean; aiValues: boolean };
+export type GroupCreateRequest = { name: string; category: string; variables: Array<{ name: string; value: string; secret: boolean; description?: string }>; notes: string; tags: string[]; favorite: boolean; aiValues: boolean };
 /** `variables` is the full target list; a secret variable without `value` keeps its stored value (looked up under `from`). */
-export type GroupUpdateRequest = { name: string; category: string; variables: Array<{ name: string; secret: boolean; value?: string; from?: string }>; notes?: string; tags: string[]; favorite: boolean; aiValues: boolean };
+export type GroupUpdateRequest = { name: string; category: string; variables: Array<{ name: string; secret: boolean; value?: string; from?: string; description?: string }>; notes?: string; tags: string[]; favorite: boolean; aiValues: boolean };
 export type ExportSelection = { secretId: string; variables?: string[] };
 export type ExportRow = { key: string; secretId: string; sourceName: string; secret: boolean; display: string; status: 'new' | 'overwrite' | 'conflict' };
 export type ExportRequestV2 = { directory: string; selections: ExportSelection[]; skipKeys: string[] };

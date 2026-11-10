@@ -757,6 +757,7 @@ fn group_variables_are_transactional_ordered_and_cascade_on_delete() {
         name: name.into(),
         secret,
         plain_value: value.into(),
+        description: format!("about {name}"),
     };
     let id = database
         .create_group(
@@ -772,6 +773,7 @@ fn group_variables_are_transactional_ordered_and_cascade_on_delete() {
         rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
         ["B_HOST", "A_PASSWORD"]
     );
+    assert_eq!(rows[0].description, "about B_HOST");
 
     // A duplicate name fails the whole update and leaves the old rows in place.
     let failed = database.update_group(

@@ -22,13 +22,31 @@ describe('secrethub-import skill', () => {
     expect(skill).toMatch(/Desktop/);
   });
 
-  it('ships three evals, each of which requires not reading the file contents', () => {
+  it('makes the masked-view flow the default and sets the organizing rules', () => {
+    for (const tool of ['secrethub_import_inspect', 'secrethub_get_import_inspection', 'secrethub_apply_import_plan']) expect(skill, tool).toContain(tool);
+    expect(skill.indexOf('secrethub_import_inspect')).toBeLessThan(skill.indexOf('secrethub_request_import'));
+    expect(skill).toMatch(/One group per server or service/);
+    expect(skill).toMatch(/UPPER_CASE, with a prefix/);
+    expect(skill).toMatch(/Describe every variable/);
+    expect(skill).toMatch(/Flag doubts/);
+    expect(skill).toMatch(/BT \(宝塔\) panel/);
+    expect(skill).toMatch(/\{ "token": "S3" \}/);
+    expect(skill).toMatch(/Never guess,\s+invent or "complete" a password/);
+    expect(skill).toMatch(/must never contain a value/);
+    expect(skill).toMatch(/撤销此次导入/);
+    expect(skill).toMatch(/When a project later fails to connect/);
+    expect(skill).toMatch(/可能不对/);
+  });
+
+  it('ships five evals, each of which requires not reading the file contents', () => {
     expect(evals.skill_name).toBe('secrethub-import');
-    expect(evals.evals).toHaveLength(3);
-    expect(evals.evals.map((item) => item.id)).toEqual([1, 2, 3]);
+    expect(evals.evals).toHaveLength(5);
+    expect(evals.evals.map((item) => item.id)).toEqual([1, 2, 3, 4, 5]);
     for (const item of evals.evals) expect(item.expected_output).toMatch(/不读取|拒绝读取|不会进入|不使用|明确拒绝/);
-    expect(evals.evals[0].expected_output).toContain('secrethub_request_import');
-    expect(evals.evals[0].expected_output).toContain('secrethub_get_import_status');
+    for (const tool of ['secrethub_import_inspect', 'secrethub_get_import_inspection', 'secrethub_apply_import_plan', 'secrethub_get_import_status']) expect(evals.evals[0].expected_output).toContain(tool);
+    expect(evals.evals[0].expected_output).toContain('撤销');
+    expect(evals.evals[3].expected_output).toMatch(/拒绝猜测或编造密码/);
+    expect(evals.evals[4].expected_output).toMatch(/可能不对/);
     expect(evals.evals[1].expected_output).toMatch(/拒绝读取或展示/);
     expect(evals.evals[2].expected_output).toMatch(/拒绝提供任何密码/);
   });

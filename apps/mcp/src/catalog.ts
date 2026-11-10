@@ -24,7 +24,7 @@ export type CatalogSecret = {
   aiValues?: boolean;
 };
 
-export type GroupVariable = { name: string; secret: boolean; value?: string };
+export type GroupVariable = { name: string; secret: boolean; value?: string; description?: string };
 
 /** `variables` lists the variable subset of config groups in the profile; a group without an entry means every variable. */
 export type CatalogProfile = { id: string; name: string; description: string; secretIds: string[]; variables?: Record<string, string[]> };
@@ -124,11 +124,14 @@ function attachGroupVariables(db: DatabaseSync, secrets: CatalogSecret[]) {
   for (const group of groups) {
     const allow = aiValues.get(group.id) ?? true;
     let rows: Array<Record<string, unknown>> = [];
-    try { rows = db.prepare('SELECT name, secret, plain_value FROM group_variables WHERE secret_id = ? ORDER BY position').all(group.id) as Array<Record<string, unknown>>; } catch { rows = []; }
+    // The description column is newer than the table; older vaults have none.
+    const columns = hasColumn(db, 'group_variables', 'description') ? 'name, secret, plain_value, description' : 'name, secret, plain_value';
+    try { rows = db.prepare(`SELECT ${columns} FROM group_variables WHERE secret_id = ? ORDER BY position`).all(group.id) as Array<Record<string, unknown>>; } catch { rows = []; }
     group.aiValues = allow;
     group.variables = rows.map((row) => {
       const secret = Number(row.secret) === 1;
-      return { name: String(row.name), secret, ...(!secret && allow ? { value: String(row.plain_value) } : {}) };
+      const description = typeof row.description === 'string' ? row.description.trim() : '';
+      return { name: String(row.name), secret, ...(description ? { description } : {}), ...(!secret && allow ? { value: String(row.plain_value) } : {}) };
     });
   }
 }

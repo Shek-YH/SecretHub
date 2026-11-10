@@ -344,7 +344,6 @@ struct Resolved {
     name: String,
     value: String,
     secret: bool,
-    #[allow(dead_code)]
     description: String,
 }
 
@@ -500,6 +499,7 @@ impl Applier<'_> {
                         name: variable.name.clone(),
                         value: variable.value.clone(),
                         secret: variable.secret,
+                        description: variable.description.clone(),
                     })
                     .collect(),
                 notes: notes.to_owned(),
@@ -532,6 +532,7 @@ impl Applier<'_> {
                 secret,
                 value: (!secret).then_some(value),
                 from: None,
+                description: None,
             })
             .collect();
         variables.extend(added.iter().map(|variable| VariableUpdate {
@@ -539,6 +540,7 @@ impl Applier<'_> {
             secret: variable.secret,
             value: Some(variable.value.clone()),
             from: None,
+            description: Some(variable.description.clone()),
         }));
         self.vault
             .update_group(
@@ -1515,6 +1517,47 @@ mod tests {
     }
 
     #[test]
+    fn descriptions_are_stored_and_existing_ones_survive_an_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = vault(dir.path());
+        let view = inspection(PASSWORD, API_KEY);
+        let mut first = ali_group(&view);
+        first.variables[0].description = "SSH 主机地址".into();
+        apply(&vault, &view, &[first]);
+        let id = group_id(&vault, "阿里宝塔服务器").unwrap();
+        let described = |vault: &VaultService| -> Vec<(String, String)> {
+            vault
+                .group_variables(&id)
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.name, row.description))
+                .collect()
+        };
+        assert_eq!(
+            described(&vault)[0],
+            ("ALI_BT_SSH_HOST".into(), "SSH 主机地址".into())
+        );
+        assert_eq!(described(&vault)[1].1, "");
+
+        let mut more = group_item(
+            "阿里宝塔服务器",
+            vec![var("ALI_BT_SSH_USER", None, Some("root"))],
+        );
+        more.variables[0].description = "SSH 登录用户名".into();
+        // A new description for a variable that exists already changes nothing.
+        let mut host = var("ALI_BT_SSH_HOST", None, Some(HOST));
+        host.description = "别的说明".into();
+        more.variables.push(host);
+        apply(&vault, &view, &[more]);
+        let after = described(&vault);
+        assert_eq!(after[0].1, "SSH 主机地址");
+        assert_eq!(
+            after.last().unwrap(),
+            &("ALI_BT_SSH_USER".to_owned(), "SSH 登录用户名".to_owned())
+        );
+    }
+
+    #[test]
     fn undo_removes_only_what_the_batch_added() {
         let dir = tempfile::tempdir().unwrap();
         let vault = vault(dir.path());
@@ -1527,6 +1570,7 @@ mod tests {
                     name: "ALI_BT_SSH_HOST".into(),
                     value: HOST.into(),
                     secret: false,
+                    description: String::new(),
                 }],
                 notes: "keep me".into(),
                 tags: Vec::new(),

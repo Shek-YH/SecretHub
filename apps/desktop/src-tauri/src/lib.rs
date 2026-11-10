@@ -20,6 +20,8 @@ mod mask;
 mod media;
 mod model_sync;
 mod organize;
+#[cfg(test)]
+mod organize_fixture;
 mod paste;
 mod plan;
 mod queue;

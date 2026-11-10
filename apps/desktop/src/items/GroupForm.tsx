@@ -9,7 +9,7 @@ import { GROUP_CATEGORIES, GROUP_TEMPLATES, MAX_GROUP_VARIABLES, VARIABLE_NAME, 
 export type GroupSavePayload = {
   name: string;
   category: string;
-  variables: Array<{ name: string; secret: boolean; value?: string; from?: string }>;
+  variables: Array<{ name: string; secret: boolean; value?: string; from?: string; description: string }>;
   /** Only present when the notes were created or opened for editing; absent keeps the stored notes. */
   notes?: string;
   tags: string[];
@@ -32,6 +32,8 @@ type Row = {
   key: number;
   name: string;
   value: string;
+  /** What the variable is for; plaintext, visible to AI tools, never a value. */
+  description: string;
   secret: boolean;
   /** Template variable name this row came from; lets the prefix rename it. */
   base: string;
@@ -45,7 +47,7 @@ type Row = {
 };
 
 let nextKey = 1;
-const newRow = (patch: Partial<Row> = {}): Row => ({ key: nextKey++, name: '', value: '', secret: false, base: '', edited: false, secretTouched: false, cleared: false, ...patch });
+const newRow = (patch: Partial<Row> = {}): Row => ({ key: nextKey++, name: '', value: '', description: '', secret: false, base: '', edited: false, secretTouched: false, cleared: false, ...patch });
 
 function rowsFromTemplate(templateKey: string, prefix: string): Row[] {
   const template = GROUP_TEMPLATES.find((item) => item.key === templateKey);
@@ -59,7 +61,7 @@ export function GroupForm({ t, knownTags, initial, initialPublic, onBack, onClos
   const [templateKey, setTemplateKey] = useState(editing ? '' : 'server');
   const [prefix, setPrefix] = useState('');
   const [rows, setRows] = useState<Row[]>(() => editing
-    ? (initialPublic?.variables ?? []).map((variable) => newRow({ name: variable.name, value: variable.value ?? '', secret: variable.secret, from: variable.name, edited: true }))
+    ? (initialPublic?.variables ?? []).map((variable) => newRow({ name: variable.name, value: variable.value ?? '', description: variable.description ?? '', secret: variable.secret, from: variable.name, edited: true }))
     : rowsFromTemplate('server', ''));
   const [notes, setNotes] = useState('');
   const [notesOpen, setNotesOpen] = useState(!editing);
@@ -111,11 +113,12 @@ export function GroupForm({ t, knownTags, initial, initialPublic, onBack, onClos
     }
     const variables = filled.map((row) => {
       const variable = row.name.trim();
-      if (!editing) return { name: variable, secret: row.secret, value: row.value };
+      const description = row.description.trim();
+      if (!editing) return { name: variable, secret: row.secret, value: row.value, description };
       const from = row.from && row.from !== variable ? row.from : undefined;
       // A stored secret keeps its value unless something was typed or the clear button was used.
       const value = row.secret ? (row.cleared ? '' : row.value !== '' ? row.value : undefined) : row.value;
-      return { name: variable, secret: row.secret, ...(value !== undefined ? { value } : {}), ...(from ? { from } : {}) };
+      return { name: variable, secret: row.secret, description, ...(value !== undefined ? { value } : {}), ...(from ? { from } : {}) };
     });
     try {
       await onSave({ name: name.trim(), category, variables, ...(notesOpen ? { notes } : {}), tags, favorite, aiValues });
@@ -157,6 +160,7 @@ export function GroupForm({ t, knownTags, initial, initialPublic, onBack, onClos
                 {t.groups.secretSwitch}
               </label>
               <button type="button" className="secondary-button" aria-label={`${t.groups.removeVariable} ${label}`} onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}>×</button>
+              <input className="group-var-description" aria-label={`${t.groups.varDescription} ${label}`} value={row.description} maxLength={200} onChange={(event) => patch(row.key, { description: event.target.value })} placeholder={t.groups.descriptionPlaceholder} autoComplete="off" />
             </div>
           );
         })}

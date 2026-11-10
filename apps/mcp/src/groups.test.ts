@@ -68,6 +68,16 @@ describe('config groups in the catalog', () => {
     expect(openCatalogStore(path).get('g2')!.variables![0].value).toBe('198.51.100.1');
   });
 
+  it('lists the description of each variable, also when plain values are switched off', () => {
+    const db = new DatabaseSync(path);
+    db.exec(SCHEMA.replace("plain_value TEXT NOT NULL DEFAULT ''", "plain_value TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT ''"));
+    db.exec("INSERT INTO secrets (id, name, provider_id, env_key, value_type, ai_values) VALUES ('g', 'Server', 'group', '', 'env_group', 0); INSERT INTO secret_payloads VALUES ('g', X'0A');");
+    db.exec("INSERT INTO group_variables VALUES ('g', 0, 'SRV_HOST', 0, '203.0.113.7', 'SSH 主机地址'), ('g', 1, 'SRV_PASSWORD', 1, '', 'SSH 登录密码'), ('g', 2, 'SRV_PORT', 0, '22', '');");
+    db.close();
+    const group = openCatalogStore(path).get('g')!;
+    expect(group.variables).toEqual([{ name: 'SRV_HOST', secret: false, description: 'SSH 主机地址' }, { name: 'SRV_PASSWORD', secret: true, description: 'SSH 登录密码' }, { name: 'SRV_PORT', secret: false }]);
+  });
+
   it('keeps working on a vault from an older build without ai_values or group tables', () => {
     const db = new DatabaseSync(path);
     db.exec(SCHEMA.replace(', ai_values INTEGER NOT NULL DEFAULT 1', '').replace(/CREATE TABLE group_variables[^;]*;/, ''));

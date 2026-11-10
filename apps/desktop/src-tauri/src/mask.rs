@@ -139,9 +139,22 @@ pub struct Masker {
     index: HashMap<String, usize>,
 }
 
+/// `ssh-ed25519 AAAA... comment`: one unit, so the AI can place it as a whole.
+fn is_public_key(text: &str) -> bool {
+    static CELL: OnceLock<Regex> = OnceLock::new();
+    regex(
+        &CELL,
+        r"^(ssh-[a-z0-9-]+|ecdsa-[a-z0-9-]+)\s+[A-Za-z0-9+/=]{16,}(\s+\S+)?$",
+    )
+    .is_match(text.trim())
+}
+
 fn describe(value: &str, private_key: bool) -> String {
     if private_key {
         return "多行私钥".to_owned();
+    }
+    if is_public_key(value) {
+        return "SSH 公钥".to_owned();
     }
     if value.contains('\n') {
         return "多行文本".to_owned();
@@ -504,6 +517,9 @@ impl Masker {
         if value.trim_start().starts_with(OPEN) && !value.contains('\n') {
             return value.trim().to_owned();
         }
+        if is_public_key(value) {
+            return self.token(value.trim(), false);
+        }
         if name_is_secret(name) {
             return self.token(value.trim_end_matches(['\r']), false);
         }
@@ -581,7 +597,11 @@ fn mask_lines(masker: &mut Masker, text: &str, allow_kv: bool) -> Vec<String> {
                 continue;
             }
         }
-        out.push(masker.text(line.trim_end(), false));
+        if is_public_key(line) {
+            out.push(masker.token(line.trim(), false));
+        } else {
+            out.push(masker.text(line.trim_end(), false));
+        }
         index += 1;
     }
     out
@@ -921,11 +941,15 @@ mod tests {
     }
 
     #[test]
-    fn public_keys_keep_type_and_comment_but_not_the_blob() {
-        let text = masked("PUB=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE fake@host\n");
+    fn public_keys_are_one_placeholder_in_env_files_and_key_files() {
+        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE fake@host";
+        let (inspection, text) = view(&[
+            file("a/.env", &format!("PUB={key}\n")),
+            file("a/id.pub", &format!("{key}\n")),
+        ]);
         assert!(!text.contains("AAAAC3NzaC1"), "{text}");
-        assert!(text.contains("ssh-ed25519 «S"), "{text}");
-        assert!(text.contains("fake@host"), "{text}");
+        assert_eq!(text, "PUB=«S1:SSH 公钥»\n«S1:SSH 公钥»");
+        assert_eq!(inspection.token_value(1), Some(key));
     }
 
     #[test]

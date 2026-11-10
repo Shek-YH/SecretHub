@@ -22,6 +22,7 @@ fn variable(name: &str, value: &str, secret: bool) -> NewVariable {
         name: name.into(),
         value: value.into(),
         secret,
+        description: format!("about {name}"),
     }
 }
 
@@ -47,6 +48,7 @@ fn keep(name: &str, secret: bool) -> VariableUpdate {
         secret,
         value: None,
         from: None,
+        description: None,
     }
 }
 
@@ -56,6 +58,7 @@ fn plain(name: &str, value: &str) -> VariableUpdate {
         secret: false,
         value: Some(value.into()),
         from: None,
+        description: None,
     }
 }
 
@@ -176,6 +179,7 @@ fn update_keeps_secrets_renames_with_from_and_replaces_the_list() {
             secret: true,
             value: None,
             from: Some("SSH_PASSWORD".into()),
+            description: None,
         },
         keep("SSH_PRIVATE_KEY", true),
         plain("SSH_PORT", "22"),
@@ -217,6 +221,7 @@ fn update_keeps_secrets_renames_with_from_and_replaces_the_list() {
             secret: true,
             value: Some("fake-new-password".into()),
             from: None,
+            description: None,
         },
         plain("SSH_HOST", ""),
     ]);
@@ -398,4 +403,52 @@ fn group_commands_reject_other_items_and_locked_vaults() {
     ));
     assert!(matches!(vault.group_notes(&id), Err(VaultError::Locked)));
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn descriptions_are_stored_in_plain_text_kept_on_update_and_follow_renames() {
+    let path = temp_path();
+    let vault = unlocked(&path);
+    let id = new_group(&vault, "Fake server");
+    let described = |vault: &VaultService| -> Vec<(String, String)> {
+        vault
+            .group_public(&id)
+            .unwrap()
+            .variables
+            .into_iter()
+            .map(|variable| (variable.name, variable.description))
+            .collect()
+    };
+    assert_eq!(
+        described(&vault),
+        [
+            ("SSH_HOST".into(), "about SSH_HOST".into()),
+            ("SSH_PASSWORD".into(), "about SSH_PASSWORD".into()),
+            ("SSH_PRIVATE_KEY".into(), "about SSH_PRIVATE_KEY".into()),
+        ]
+    );
+
+    // `None` keeps the stored text, also across a rename; `Some` replaces it.
+    let mut renamed = keep("ROOT_PASSWORD", true);
+    renamed.from = Some("SSH_PASSWORD".into());
+    let mut changed = plain("SSH_HOST", "198.51.100.9");
+    changed.description = Some("  new text  ".into());
+    let mut emptied = keep("SSH_PRIVATE_KEY", true);
+    emptied.description = Some(String::new());
+    vault
+        .update_group(&id, update(vec![changed, renamed, emptied]))
+        .unwrap();
+    assert_eq!(
+        described(&vault),
+        [
+            ("SSH_HOST".into(), "new text".into()),
+            ("ROOT_PASSWORD".into(), "about SSH_PASSWORD".into()),
+            ("SSH_PRIVATE_KEY".into(), String::new()),
+        ]
+    );
+
+    // The text sits in the plain row, never in the encrypted payload, and is bounded.
+    let mut long = group_input("Long");
+    long.variables[0].description = "x".repeat(201);
+    assert!(vault.create_group(long).is_err());
 }

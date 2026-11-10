@@ -515,6 +515,7 @@ impl VaultService {
         let mut rows = Vec::new();
         for variable in &input.variables {
             groups::check_value(&variable.name, &variable.value)?;
+            groups::check_description(&variable.name, &variable.description)?;
             if variable.secret {
                 secrets.insert(variable.name.clone(), variable.value.clone());
             }
@@ -526,6 +527,7 @@ impl VaultService {
                 } else {
                     variable.value.clone()
                 },
+                description: variable.description.trim().to_owned(),
             });
         }
         let (ciphertext, nonce) =
@@ -596,6 +598,15 @@ impl VaultService {
                 (None, false) => return Err(VaultError::InvalidField(variable.name.clone())),
             };
             groups::check_value(&variable.name, &value)?;
+            let description = match &variable.description {
+                Some(description) => description.trim().to_owned(),
+                None => old_rows
+                    .iter()
+                    .find(|row| row.name == source)
+                    .map(|row| row.description.clone())
+                    .unwrap_or_default(),
+            };
+            groups::check_description(&variable.name, &description)?;
             if variable.secret {
                 secrets.insert(variable.name.clone(), value.clone());
             }
@@ -607,6 +618,7 @@ impl VaultService {
                 } else {
                     value
                 },
+                description,
             });
         }
         let notes = match update.notes {
@@ -670,6 +682,7 @@ impl VaultService {
                 value: (!row.secret).then_some(row.plain_value),
                 name: row.name,
                 secret: row.secret,
+                description: row.description,
             })
             .collect();
         Ok(GroupPublic {

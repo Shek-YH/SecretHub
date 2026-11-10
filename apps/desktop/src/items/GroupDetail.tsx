@@ -70,6 +70,7 @@ export function GroupDetail({ t, secret, onEdit, onDelete }: { t: T; secret: Sec
         {group?.variables.map((variable) => (
           <div className="item-field" key={variable.name} data-variable={variable.name} data-secret={variable.secret ? 'true' : 'false'}>
             <span className="field-label">{variable.name} <small>{variable.secret ? t.groups.secret : t.groups.plain}</small></span>
+            {variable.description && <small className="field-description">{variable.description}</small>}
             {variable.secret
               ? <strong className="field-value masked-value" aria-label={`${variable.name}: ${t.detail.masked}`}>{DOTS}</strong>
               : <strong className="field-value">{variable.value || t.groups.emptyValue}</strong>}
