@@ -26,6 +26,8 @@ secrethub-exporter = { path = "../../../crates/exporter" }
 secrethub-storage = { path = "../../../crates/storage" }
 serde.workspace = true
 tauri = { version = "2.8", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde_json = { workspace = true, features = ["preserve_order"] }
 regex.workspace = true
 sha2.workspace = true

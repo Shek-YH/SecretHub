@@ -10,8 +10,60 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "SecretHub", "width": 1280, "height": 820, "minWidth": 960, "minHeight": 640, "resizable": true }],
-    "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost" }
+    "windows": [
+      {
+        "title": "SecretHub",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
   },
-  "bundle": { "active": true, "targets": "all", "externalBin": ["binaries/secrethub-mcp"], "resources": { "../../../skills": "skills" }, "icon": ["icons/icon.ico", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"] }
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "binaries/secrethub-mcp"
+    ],
+    "resources": {
+      "../../../skills": "skills"
+    },
+    "icon": [
+      "icons/icon.ico",
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ],
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese"
+        ],
+        "installerHooks": "./windows/installer-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGN0ZDREQxRTU0MDJCNDQKUldSRUswRGwwYzEvWDRRQlNJeHkxcDhGK1M2SnU1R3FoR2R5WkNBc3pYV2hSWWwzRXA5cjFTdSsK",
+      "endpoints": [
+        "https://UPDATE_HOST_PLACEHOLDER/secrethub/latest.json"
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
+    }
+  }
 }

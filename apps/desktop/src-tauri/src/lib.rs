@@ -29,6 +29,7 @@ mod restore;
 mod scan;
 mod sync;
 mod connect;
+mod update;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
@@ -49,6 +50,9 @@ pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .manage(update::UpdateState::default())
         .setup(|app| {
             let path = database_path(app.handle()).map_err(Box::<dyn std::error::Error>::from)?;
             if let Some(data_dir) = path.parent() {
@@ -79,6 +83,7 @@ pub fn run() {
             sync::start(app.handle().clone());
             organize::start(app.handle().clone());
             connect::refresh_after_upgrade(app.handle().clone());
+            update::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -161,6 +166,9 @@ pub fn run() {
             sync::mcp_pending_sync_requests,
             connect::ai_connect,
             connect::ai_connect_status,
+            update::update_status,
+            update::update_check_now,
+            update::update_install,
             capture::key_capture_start,
             capture::key_capture_cancel,
             capture::key_capture_status,
@@ -186,8 +194,13 @@ pub fn run() {
             commands::choose_backup_file,
             commands::backup_restore
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running SecretHub");
+        .build(tauri::generate_context!())
+        .expect("error while building SecretHub")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                update::install_on_exit(app);
+            }
+        });
 }
 
 fn now_seconds() -> u64 {

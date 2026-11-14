@@ -255,4 +255,26 @@ foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refre
 - 确定模型目录的托管地址，构建时设置 `SECRETHUB_CATALOG_URL=https://…/model-catalog.json`。
 - 每次更新目录：`catalog:check` → `catalog:sign` → 上传 → `catalog:bake`。
 
+### 6.1 发布安装包与自动更新（Windows）
+
+安装包是 NSIS `.exe`，按当前用户安装（不需要管理员权限）。MCP 服务已打成单文件 `secrethub-mcp.exe` 随包安装，不需要装 Node；用户在「设置 → 连接 AI 工具」点一次，即可注册到 Claude Code / Claude Desktop / Cursor 并安装 5 个 skill。
+
+**一次性准备**
+
+- 更新签名密钥：`C:\Users\Administrator\.tauri\secrethub-updater.key`（无密码，只在本机，不进仓库；公钥已写进 `tauri.conf.json` 的 `plugins.updater.pubkey`）。**丢了这把私钥，已安装的老版本将永远收不到更新**，请离线备份。
+- 更新地址只有一处：`apps/desktop/src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints`，目前是占位 `https://UPDATE_HOST_PLACEHOLDER/secrethub/latest.json`，拿到真实域名后在这里替换。**第一个对外分发的安装包必须已经是真实地址**，否则老版本收不到更新。
+- 服务器上准备一个静态目录（HTTPS 可访问），例如 `/var/www/secrethub`，对应 `-BaseUrl https://你的域名/secrethub`。
+
+**每次发布**
+
+1. 改版本号：`tauri.conf.json`、根 `package.json`、`Cargo.toml`（workspace）、`apps/desktop/package.json`、`apps/mcp/package.json` 保持一致。
+2. 先演练（构建并签名，生成 `latest.json`，只打印 scp 命令，不上传）：
+   `powershell -File scripts\release-windows.ps1 -SshHost <ssh别名> -RemoteDir /var/www/secrethub -BaseUrl https://你的域名/secrethub -DryRun`
+3. 确认无误后去掉 `-DryRun` 正式上传（先传安装包，最后传 `latest.json`）。`-SkipBuild` 可复用已有产物，`-Notes` 写更新说明。
+4. 产物在 `target/release/bundle/nsis/`：`SecretHub_<版本>_x64-setup.exe`、`.sig`、`latest.json`。
+
+**客户端更新行为**：启动约 3 秒后检查，之后每小时一次；有新版本就静默下载（失败不打扰，下次再试）；下载完顶栏出现「更新」按钮，点击后静默安装并自动重启；一直不点，退出应用时静默安装（不自动重启）。「设置 → 软件更新 → 检查更新」是手动入口，会提示结果。安装前安装程序会先结束正在运行的 `secrethub-mcp.exe`（Claude 等客户端下次调用会自动重新拉起），避免文件被占用导致升级失败。
+
+**验证升级必须用真实旧版本**：更新模式由已安装的旧版本决定，所以要连发两个版本，先装旧版，再发新版到服务器，在旧版里实测一次升级。
+
 更多设计细节见 `docs/superpowers/specs/`，安全模型见 `SECURITY.md` 和 `docs/security/`。
