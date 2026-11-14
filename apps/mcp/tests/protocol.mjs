@@ -11,6 +11,11 @@ const planDirectory = join(directory, 'plans');
 const resultDirectory = join(directory, 'results');
 const database = new DatabaseSync(databasePath);
 database.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, value_type TEXT, category TEXT, scope TEXT, favorite INTEGER, archived INTEGER, model_id TEXT, model_env_key TEXT, endpoint_url TEXT, endpoint_env_key TEXT, updated_at INTEGER); CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY, ciphertext BLOB); CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER); CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER); CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER); INSERT INTO secrets VALUES ('secret-fixture', 'Fixture Metadata', 'generic', 'FIXTURE_KEY', 'unknown', '["test"]', 'token', 'other', 'global', 0, 0, '', '', 'https://example.invalid', 'GENERIC_BASE_URL', 1); INSERT INTO secret_payloads VALUES ('secret-fixture', X'010203'); CREATE TABLE media_assets (id TEXT PRIMARY KEY, kind TEXT, filename TEXT, stored_path TEXT, sha256 TEXT, size_bytes INTEGER, mime TEXT, width INTEGER, height INTEGER, duration_ms INTEGER, description TEXT, tags_json TEXT, source TEXT, created_at INTEGER); INSERT INTO media_assets VALUES ('asset-1', 'image', 'cat.png', 'C:\\media\\asset-1.png', 'aa', 10, 'image/png', 1920, 1080, NULL, 'a cat', '["pets"]', 'user', 2), ('asset-2', 'video', 'clip.mp4', 'C:\\media\\asset-2.mp4', 'bb', 20, 'video/mp4', 1080, 1920, 5000, 'portrait clip', '[]', 'ai', 1); CREATE TABLE provider_models (secret_id TEXT, model_id TEXT, display_name TEXT, input_json TEXT, output_json TEXT, capabilities_json TEXT, capability_source TEXT, synced_at INTEGER); INSERT INTO secrets VALUES ('secret-model', 'Model Key', 'deepseek', 'DEEPSEEK_API_KEY', 'valid', '[]', 'api_key', 'ai', 'global', 0, 0, '', '', '', '', 0); INSERT INTO secret_payloads VALUES ('secret-model', X'0A0B0C'); INSERT INTO provider_models VALUES ('secret-model', 'plain-model', '', '[]', '[]', '[]', 'unknown', 5), ('secret-model', 'vision-model', '', '[]', '[]', '["chat","vision"]', 'provider', 5);`);
+// Personal items (typed-items design section 6): no tool may reveal them, not even by name.
+database.exec(`INSERT INTO secrets VALUES ('secret-card', 'Hidden Salary Card', 'personal', '', 'unknown', '[]', 'bank_card', 'personal', 'global', 0, 0, '', '', '', '', 0), ('secret-note', 'Hidden Private Note', 'personal', '', 'unknown', '[]', 'note', 'personal', 'global', 0, 0, '', '', '', '', 0), ('secret-login', 'Hidden Personal Login', 'personal', 'HIDDEN_LOGIN_KEY', 'unknown', '[]', 'login', 'personal', 'global', 0, 0, '', '', '', '', 0), ('secret-legacy-url', 'Hidden Legacy Url', 'generic', '', 'unknown', '[]', 'url', 'other', 'global', 0, 0, '', '', '', '', 0);
+  INSERT INTO secret_payloads VALUES ('secret-card', X'0D0E0F'), ('secret-note', X'0D0E0F'), ('secret-login', X'0D0E0F'), ('secret-legacy-url', X'0D0E0F');
+  INSERT INTO provider_models VALUES ('secret-card', 'hidden-vision-model', '', '[]', '[]', '["chat","vision","video_gen"]', 'provider', 5);
+  INSERT INTO profiles VALUES ('profile-mixed', 'Mixed Profile', '', 1); INSERT INTO profile_secrets VALUES ('profile-mixed', 'secret-model', 0), ('profile-mixed', 'secret-card', 1);`);
 database.close();
 const messages = [
   { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
@@ -39,6 +44,17 @@ const messages = [
   { jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'secret-model', capability: 'chat', response_format: 'json' } } },
   { jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'secret-model', capability: 'video_gen', response_format: 'json' } } },
   { jsonrpc: '2.0', id: 25, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'missing', capability: 'chat', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 26, method: 'tools/call', params: { name: 'secrethub_search_secrets', arguments: { query: 'Hidden', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 27, method: 'tools/call', params: { name: 'secrethub_get_secret_metadata', arguments: { id: 'secret-card', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 28, method: 'tools/call', params: { name: 'secrethub_list_profiles', arguments: { response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 29, method: 'tools/call', params: { name: 'secrethub_prepare_project_env', arguments: { project_path: 'C:\\Projects\\fixture', secret_ids: ['secret-card'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 30, method: 'tools/call', params: { name: 'secrethub_get_invocation', arguments: { secret_id: 'secret-card', capability: 'chat', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'secrethub_validate_secret', arguments: { id: 'secret-note', response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'secrethub_recommend_secrets_for_project', arguments: { stack: ['hidden-login'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 33, method: 'tools/call', params: { name: 'secrethub_request_model_sync', arguments: { secret_ids: ['secret-login'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 34, method: 'tools/call', params: { name: 'secrethub_request_import', arguments: { paths: [directory, join(directory, 'one.env')], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 35, method: 'tools/call', params: { name: 'secrethub_request_import', arguments: { paths: ['relative/folder'], response_format: 'json' } } },
+  { jsonrpc: '2.0', id: 36, method: 'tools/call', params: { name: 'secrethub_get_import_status', arguments: { request_id: 'import-../x', response_format: 'json' } } },
 ];
 const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
@@ -122,6 +138,22 @@ try {
   assert.equal(JSON.stringify(invocation).includes('0A0B0C'), false);
   assert.equal(responses.find((response) => response.id === 24).result.structuredContent.kind, 'native');
   assert.equal(responses.find((response) => response.id === 25).result.isError, true);
+  // Personal rows are invisible to every tool, including by name and through profiles.
+  assert.equal(responses.find((response) => response.id === 26).result.structuredContent.total, 0);
+  const personalMetadata = responses.find((response) => response.id === 27).result;
+  assert.equal(personalMetadata.isError === true || personalMetadata.structuredContent?.found === false, true);
+  assert.deepEqual(responses.find((response) => response.id === 28).result.structuredContent.profiles.find((profile) => profile.id === 'profile-mixed').secretIds, ['secret-model']);
+  for (const id of [29, 30, 33]) assert.equal(responses.find((response) => response.id === id).result.isError, true, `call ${id}`);
+  for (const name of ['secrethub_request_import', 'secrethub_get_import_status']) assert.ok(tools.some((tool) => tool.name === name), name);
+  const importQueued = responses.find((response) => response.id === 34).result.structuredContent;
+  assert.match(importQueued.requestId, /^import-/);
+  const importFile = JSON.parse(readFileSync(`${planDirectory}/${importQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([importFile.kind, importFile.paths], ['import', [directory, join(directory, 'one.env')]]);
+  assert.equal(responses.find((response) => response.id === 35).result.isError, true);
+  assert.equal(responses.find((response) => response.id === 36).result.isError, true);
+  // Names, payload bytes and env names never appear anywhere; ids may only be echoed back for calls that named them.
+  assert.equal(JSON.stringify(responses).match(/Hidden|0D0E0F|hidden-vision-model|HIDDEN_LOGIN_KEY/g)?.length ?? 0, 0);
+  for (const id of [3, 5, 26, 28, 32]) assert.equal(/secret-(card|note|login|legacy-url)/.test(JSON.stringify(responses.find((response) => response.id === id))), false, `call ${id}`);
   mkdirSync(resultDirectory, { recursive: true });
   writeFileSync(join(resultDirectory, `${v2Response.requestId}.json`), JSON.stringify({ requestId: v2Response.requestId, status: 'written', writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [], finishedAt: 'now' }));
   const statusCalls = [
@@ -137,6 +169,57 @@ try {
   assert.deepEqual(statuses.find((r) => r.id === 2).result.structuredContent, { status: 'written', requestId: v2Response.requestId, writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [] });
   assert.equal(statuses.find((r) => r.id === 3).result.structuredContent.status, 'pending');
   assert.equal(statuses.find((r) => r.id === 4).result.isError, true);
+
+  // AI-organized import: inspect -> masked view -> plan -> status. Fake secrets must never come back.
+  const FAKE_SECRET = 'fakeval-protocol-secret';
+  const call = (id, name, args) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: { ...args, response_format: 'json' } } });
+  const session = (calls) => {
+    const input = [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } }, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, ...calls];
+    const run = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${input.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  };
+  const first = session([
+    call(2, 'secrethub_import_inspect', { paths: [directory] }),
+    call(3, 'secrethub_import_inspect', { paths: ['relative/folder'] }),
+    call(4, 'secrethub_get_import_inspection', { request_id: 'inspect-../x' }),
+    call(5, 'secrethub_apply_import_plan', { inspection_id: 'inspect-0-unknown', items: [{ type: 'note', name: 'n', notes: 'x' }] }),
+    call(6, 'secrethub_apply_import_plan', { inspection_id: 'inspect-0-unknown', items: [{ type: 'env_group', name: 'g', variables: [{ name: 'A', value: { plain: FAKE_SECRET } }] }] }),
+  ]);
+  const inspectQueued = first.find((r) => r.id === 2).result.structuredContent;
+  assert.match(inspectQueued.requestId, /^inspect-/);
+  const inspectFile = JSON.parse(readFileSync(`${planDirectory}/${inspectQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([inspectFile.kind, inspectFile.paths, Object.keys(inspectFile).sort()], ['import_inspect', [directory], ['createdAt', 'kind', 'paths', 'requestId', 'version']]);
+  for (const id of [3, 4, 5, 6]) assert.equal(first.find((r) => r.id === id).result.isError, true, `call ${id}`);
+  // The inspection result as Desktop writes it: masked lines only. Extra fields must not be passed on.
+  mkdirSync(resultDirectory, { recursive: true });
+  writeFileSync(join(resultDirectory, `${inspectQueued.requestId}.json`), JSON.stringify({ requestId: inspectQueued.requestId, status: 'done', inspectionId: inspectQueued.requestId, expiresInSeconds: 1800, tokenCount: 1, truncated: false, files: [{ name: 'srv/.env', lines: ['SSH_HOST=8.0.0.1', 'SSH_PASSWORD=«S1:24 位随机串»'], raw: FAKE_SECRET }], skipped: [], finishedAt: new Date().toISOString(), leak: FAKE_SECRET }));
+  const second = session([
+    call(2, 'secrethub_get_import_inspection', { request_id: inspectQueued.requestId }),
+    call(3, 'secrethub_apply_import_plan', { inspection_id: inspectQueued.requestId, items: [{ type: 'env_group', name: 'Server', category: 'server', variables: [{ name: 'SRV_HOST', value: { literal: '8.0.0.1' }, description: 'SSH host' }, { name: 'SRV_PASSWORD', value: { token: 'S1' }, secret: false }] }] }),
+  ]);
+  const view = second.find((r) => r.id === 2).result.structuredContent;
+  assert.equal(view.status, 'done');
+  assert.deepEqual(view.files, [{ name: 'srv/.env', startLine: 0, lines: ['SSH_HOST=8.0.0.1', 'SSH_PASSWORD=«S1:24 位随机串»'] }]);
+  assert.equal(JSON.stringify(second).includes(FAKE_SECRET), false);
+  const planQueued = second.find((r) => r.id === 3).result.structuredContent;
+  assert.match(planQueued.requestId, /^organize-/);
+  assert.equal(planQueued.requiresUserConfirmation, false);
+  const planFile = JSON.parse(readFileSync(`${planDirectory}/${planQueued.requestId}.json`, 'utf8'));
+  assert.deepEqual([planFile.kind, planFile.inspectionId, planFile.items[0].variables[1].value], ['import_organize', inspectQueued.requestId, { token: 'S1' }]);
+  writeFileSync(join(resultDirectory, `${planQueued.requestId}.json`), JSON.stringify({ requestId: planQueued.requestId, status: 'done', batchId: 'batch-1', counts: { createdGroups: 1, addedVariables: 0, savedSeparately: 0, otherItems: 0, skippedVariables: 0 }, items: [{ index: 0, name: 'Server', type: 'env_group', result: 'created', addedVariables: 2, savedSeparately: 0, skippedVariables: 0, value: FAKE_SECRET }], rejected: [{ item: 0, variable: 'SRV_X', reason: 'literal_not_in_view', value: FAKE_SECRET }], password: FAKE_SECRET, finishedAt: 'now' }));
+  const third = session([
+    call(2, 'secrethub_get_import_status', { request_id: planQueued.requestId }),
+    call(3, 'secrethub_get_import_status', { request_id: 'organize-../x' }),
+    call(4, 'secrethub_get_import_status', { request_id: 'organize-0-missing' }),
+  ]);
+  const organized = third.find((r) => r.id === 2).result.structuredContent;
+  assert.deepEqual([organized.status, organized.batchId, organized.items[0].result, organized.rejected], ['done', 'batch-1', 'created', [{ item: 0, variable: 'SRV_X', reason: 'literal_not_in_view' }]]);
+  assert.equal(third.find((r) => r.id === 3).result.isError, true);
+  assert.equal(third.find((r) => r.id === 4).result.structuredContent.status, 'not_found');
+  assert.equal(JSON.stringify(third).includes(FAKE_SECRET), false);
+  const listed = session([{ jsonrpc: '2.0', id: 9, method: 'tools/list', params: {} }]).find((r) => r.id === 9).result.tools;
+  for (const name of ['secrethub_import_inspect', 'secrethub_get_import_inspection', 'secrethub_apply_import_plan']) assert.ok(listed.some((tool) => tool.name === name), name);
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

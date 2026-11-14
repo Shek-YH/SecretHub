@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
+import { aiVisibleCondition } from './visibility.js';
 
 // Fixed vocabulary shared with Rust and the skill (design §4).
 export const CAPABILITIES = ['chat', 'code', 'reasoning', 'vision', 'image_gen', 'video_gen', 'tts', 'asr', 'embedding', 'rerank'] as const;
@@ -166,10 +167,11 @@ export function readModelSnapshot(path: string): ModelSnapshot {
   try { db = new DatabaseSync(path, { readOnly: true }); } catch { return { keys: [], models: [] }; }
   try {
     const base = 's.id, s.name, s.provider_id, s.status, s.env_key, s.endpoint_url, s.endpoint_env_key, s.value_type, s.archived, EXISTS(SELECT 1 FROM secret_payloads p WHERE p.secret_id = s.id) AS has_value';
+    const visible = aiVisibleCondition(db);
     let secretRows: Array<Record<string, unknown>>;
-    try { secretRows = db.prepare(`SELECT ${base}, s.models_synced_at, s.models_sync_status FROM secrets s`).all() as Array<Record<string, unknown>>; }
+    try { secretRows = db.prepare(`SELECT ${base}, s.models_synced_at, s.models_sync_status FROM secrets s WHERE ${visible}`).all() as Array<Record<string, unknown>>; }
     catch {
-      try { secretRows = db.prepare(`SELECT ${base}, 0 AS models_synced_at, '' AS models_sync_status FROM secrets s`).all() as Array<Record<string, unknown>>; }
+      try { secretRows = db.prepare(`SELECT ${base}, 0 AS models_synced_at, '' AS models_sync_status FROM secrets s WHERE ${visible}`).all() as Array<Record<string, unknown>>; }
       catch { return { keys: [], models: [] }; }
     }
     const keys: KeyRow[] = secretRows.map((row) => ({
@@ -188,7 +190,10 @@ export function readModelSnapshot(path: string): ModelSnapshot {
     }
     let capabilityModels: CapabilityChoice[] = [];
     try { capabilityModels = (db.prepare('SELECT secret_id, capability, model_id, env_key FROM secret_capability_models').all() as Array<Record<string, unknown>>).map((row) => ({ secretId: String(row.secret_id), capability: String(row.capability), modelId: String(row.model_id), envKey: String(row.env_key ?? '') })); } catch { capabilityModels = []; }
-    const models = modelRows.map((row) => ({ secretId: String(row.secret_id), modelId: String(row.model_id), capabilities: parseList(row.caps), capabilitySource: String(row.source) }));
+    // Model and capability rows of hidden secrets are dropped with their key.
+    const known = new Set(keys.map((key) => key.secretId));
+    capabilityModels = capabilityModels.filter((row) => known.has(row.secretId));
+    const models = modelRows.filter((row) => known.has(String(row.secret_id))).map((row) => ({ secretId: String(row.secret_id), modelId: String(row.model_id), capabilities: parseList(row.caps), capabilitySource: String(row.source) }));
     return { keys, models, capabilityModels };
   } finally { db.close(); }
 }

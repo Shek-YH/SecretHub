@@ -2,7 +2,7 @@
 //! writing and result files. Plan files and results never contain secret values;
 //! API keys are decrypted only inside `resolve_entries`, right before writing.
 
-use crate::commands::{selected_entries, selected_entries_from_metadata};
+use crate::commands::{login_env_names, selected_entries, selected_entries_from_metadata};
 use secrethub_core::{VaultError, VaultService};
 use secrethub_exporter::{
     detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, merge_env,
@@ -106,6 +106,10 @@ pub struct PlanBinding {
     pub model_id: String,
     #[serde(default)]
     pub env: PlanEnv,
+    /// Config groups only: the variable subset to write; `None` means every variable. Such a
+    /// binding carries no capability, model or env names.
+    #[serde(default)]
+    pub variables: Option<Vec<String>>,
 }
 
 /// Accepts both v1 (`secret_ids` only) and v2 (`bindings`) files; the MCP server
@@ -162,13 +166,37 @@ pub struct SecretFacts {
     /// The key's model list was synced and is non-empty.
     pub models_synced: bool,
     pub model_ids: HashSet<String>,
+    /// Set for config groups: every variable of the group in order.
+    pub group_vars: Option<Vec<GroupVarFact>>,
+}
+
+/// One variable of a config group; `plain` is empty for secret variables.
+#[derive(Debug, Clone)]
+pub struct GroupVarFact {
+    pub name: String,
+    pub secret: bool,
+    pub plain: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    ApiKey { secret_id: String },
-    BaseUrl { value: String },
-    Model { value: String, capability: String },
+    ApiKey {
+        secret_id: String,
+    },
+    BaseUrl {
+        value: String,
+    },
+    Model {
+        value: String,
+        capability: String,
+    },
+    /// A config group variable. `plain` holds the value of non-secret variables only.
+    GroupVar {
+        secret_id: String,
+        name: String,
+        secret: bool,
+        plain: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +259,67 @@ pub fn expand_bindings(
         }
     };
     for binding in bindings {
+        if let Some(group_vars) = secrets
+            .get(&binding.secret_id)
+            .and_then(|facts| facts.group_vars.as_ref())
+        {
+            let facts = &secrets[&binding.secret_id];
+            if facts.archived || !facts.has_value {
+                return Err(PlanError::new(
+                    "secret_unavailable",
+                    "secret is archived or has no value",
+                ));
+            }
+            if !binding.capability.is_empty()
+                || !binding.model_id.is_empty()
+                || binding.env != PlanEnv::default()
+            {
+                return Err(PlanError::new(
+                    "invalid_plan",
+                    "a config group binding takes only secret_id and variables",
+                ));
+            }
+            let chosen: Vec<&GroupVarFact> = match &binding.variables {
+                None => group_vars.iter().collect(),
+                Some(names) if names.is_empty() => {
+                    return Err(PlanError::new("invalid_plan", "variables cannot be empty"));
+                }
+                Some(names) => names
+                    .iter()
+                    .map(|name| {
+                        group_vars
+                            .iter()
+                            .find(|variable| variable.name == *name)
+                            .ok_or_else(|| {
+                                PlanError::new(
+                                    "invalid_plan",
+                                    format!("unknown variable {name:?} in config group"),
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?,
+            };
+            for variable in chosen {
+                add(
+                    &variable.name,
+                    &binding.secret_id,
+                    Source::GroupVar {
+                        secret_id: binding.secret_id.clone(),
+                        name: variable.name.clone(),
+                        secret: variable.secret,
+                        plain: variable.plain.clone(),
+                    },
+                    None,
+                )?;
+            }
+            continue;
+        }
+        if binding.variables.is_some() {
+            return Err(PlanError::new(
+                "invalid_plan",
+                "variables are only allowed for config group secrets",
+            ));
+        }
         let env = &binding.env;
         if env.api_key.is_none() && env.base_url.is_none() && env.model.is_none() {
             return Err(PlanError::new(
@@ -332,11 +421,12 @@ pub struct Resolved {
 }
 
 /// Turns planned entries into env entries. `read_secret` is only called for
-/// API-key entries that are not skipped.
+/// API-key entries that are not skipped, `read_group_var` for secret group variables.
 pub fn resolve_entries(
     planned: &[PlannedEntry],
     skip: &HashSet<String>,
     read_secret: &mut dyn FnMut(&str) -> Result<String, PlanError>,
+    read_group_var: &mut dyn FnMut(&str, &str) -> Result<String, PlanError>,
 ) -> Result<Resolved, PlanError> {
     let mut resolved = Resolved {
         entries: Vec::new(),
@@ -351,6 +441,18 @@ pub fn resolve_entries(
         let value = match &entry.source {
             Source::ApiKey { secret_id } => read_secret(secret_id)?,
             Source::BaseUrl { value } | Source::Model { value, .. } => value.clone(),
+            Source::GroupVar {
+                secret_id,
+                name,
+                secret,
+                plain,
+            } => {
+                if *secret {
+                    read_group_var(secret_id, name)?
+                } else {
+                    plain.clone()
+                }
+            }
         };
         if let Some(warning) = &entry.warning {
             resolved.warnings.push(format!("{}: {warning}", entry.key));
@@ -461,6 +563,22 @@ fn build_facts(
                 has_value: vault.has_secret_value(&item.id).map_err(vault_failure)?,
                 models_synced: item.models_synced_at > 0 && !model_ids.is_empty(),
                 model_ids,
+                group_vars: if item.value_type == "env_group" {
+                    Some(
+                        vault
+                            .group_variables(&item.id)
+                            .map_err(vault_failure)?
+                            .into_iter()
+                            .map(|row| GroupVarFact {
+                                name: row.name,
+                                secret: row.secret,
+                                plain: row.plain_value,
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
+                },
             },
         );
     }
@@ -474,6 +592,18 @@ fn expand_for_plan(
 ) -> Result<Vec<PlannedEntry>, PlanError> {
     if plan.bindings.is_empty() {
         return Ok(Vec::new());
+    }
+    // Bindings are for API keys: personal items and login payloads never become env values.
+    for binding in &plan.bindings {
+        let unavailable = metadata
+            .iter()
+            .find(|item| item.id == binding.secret_id)
+            .is_some_and(|item| {
+                !item.ai_visible() || (item.is_json_item() && item.value_type != "env_group")
+            });
+        if unavailable {
+            return Err(PlanError::new("secret_unavailable", "secret not found"));
+        }
     }
     let ids = plan
         .bindings
@@ -492,6 +622,7 @@ fn expand_for_plan(
 fn legacy_keys(
     plan: &PendingPlan,
     metadata: &[secrethub_storage::SecretMetadata],
+    vault: &VaultService,
 ) -> Result<Vec<(String, String)>, PlanError> {
     let mut keys = Vec::new();
     for id in &plan.secret_ids {
@@ -499,6 +630,27 @@ fn legacy_keys(
             .iter()
             .find(|item| item.id == *id)
             .ok_or_else(|| PlanError::new("secret_unavailable", "secret not found"))?;
+        if !item.ai_visible() {
+            return Err(PlanError::new("secret_unavailable", "secret not found"));
+        }
+        if item.value_type == "login" {
+            keys.extend(
+                login_env_names(&item.env_key)
+                    .into_iter()
+                    .map(|key| (key, item.id.clone())),
+            );
+            continue;
+        }
+        if item.value_type == "env_group" {
+            keys.extend(
+                vault
+                    .group_variables(&item.id)
+                    .map_err(vault_failure)?
+                    .into_iter()
+                    .map(|row| (row.name, item.id.clone())),
+            );
+            continue;
+        }
         keys.extend(
             selected_entries_from_metadata(item, String::new(), &[])
                 .into_iter()
@@ -539,7 +691,7 @@ pub fn process_plan(
     plan.validate()?;
     let metadata = vault.list_metadata().map_err(vault_failure)?;
     let planned = expand_for_plan(plan, vault, &metadata)?;
-    let legacy_names = legacy_keys(plan, &metadata)?;
+    let legacy_names = legacy_keys(plan, &metadata, vault)?;
     reject_overlap(&legacy_names, &planned)?;
 
     let mut entries = Vec::new();
@@ -555,9 +707,12 @@ pub fn process_plan(
             }
         }
     }
-    let resolved = resolve_entries(&planned, skip, &mut |id| {
-        vault.read_secret(id).map_err(vault_failure)
-    })?;
+    let resolved = resolve_entries(
+        &planned,
+        skip,
+        &mut |id| vault.read_secret(id).map_err(vault_failure),
+        &mut |id, name| vault.group_variable_value(id, name).map_err(vault_failure),
+    )?;
     skipped.extend(resolved.skipped);
     entries.extend(resolved.entries);
 
@@ -574,7 +729,8 @@ pub fn process_plan(
         )?;
         let mut audited = plan.secret_ids.clone();
         for entry in &planned {
-            if let Source::ApiKey { secret_id } = &entry.source {
+            if let Source::ApiKey { secret_id } | Source::GroupVar { secret_id, .. } = &entry.source
+            {
                 audited.push(secret_id.clone());
             }
         }
@@ -601,7 +757,7 @@ pub struct PreviewEntry {
     /// Name of the secret this entry comes from (metadata); untrusted text for display only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret_name: Option<String>,
-    /// `api_key` | `base_url` | `model` | `v1`
+    /// `api_key` | `base_url` | `model` | `group_var` | `v1`
     pub kind: &'static str,
     /// Masked for API keys and v1 entries; plain for base URLs and model ids.
     pub display: String,
@@ -647,6 +803,15 @@ pub fn preview_entries(
             Source::Model { value, capability } => {
                 ("model", value.clone(), Some(capability.clone()))
             }
+            Source::GroupVar { secret, plain, .. } => (
+                "group_var",
+                if *secret {
+                    MASK.to_owned()
+                } else {
+                    plain.clone()
+                },
+                None,
+            ),
         };
         entries.push(PreviewEntry {
             key: entry.key.clone(),
@@ -678,7 +843,7 @@ pub fn preview_plan(plan: &PendingPlan, vault: &VaultService) -> PlanPreview {
         plan.validate()?;
         let metadata = vault.list_metadata().map_err(vault_failure)?;
         let planned = expand_for_plan(plan, vault, &metadata)?;
-        let legacy = legacy_keys(plan, &metadata)?;
+        let legacy = legacy_keys(plan, &metadata, vault)?;
         reject_overlap(&legacy, &planned)?;
         let existing = read_optional(&Path::new(&plan.project_path).join(".env"))?;
         let names = metadata
@@ -816,6 +981,7 @@ mod tests {
             has_value: true,
             models_synced: !models.is_empty(),
             model_ids: models.iter().map(|model| (*model).to_owned()).collect(),
+            group_vars: None,
         }
     }
 
@@ -825,6 +991,7 @@ mod tests {
             capability: capability.to_owned(),
             model_id: model.to_owned(),
             env,
+            variables: None,
         }
     }
 
@@ -1079,13 +1246,20 @@ mod tests {
             },
         ];
         let skip = HashSet::from(["API_KEY".to_owned(), "OTHER_MODEL".to_owned()]);
-        let mut reads = 0;
-        let resolved = resolve_entries(&planned, &skip, &mut |_| {
-            reads += 1;
-            Ok(FAKE_VALUE.to_owned())
-        })
+        let reads = std::cell::Cell::new(0);
+        let resolved = resolve_entries(
+            &planned,
+            &skip,
+            &mut |_| {
+                reads.set(reads.get() + 1);
+                Ok(FAKE_VALUE.to_owned())
+            },
+            &mut |_, _| {
+                reads.set(reads.get() + 1);
+                Ok(FAKE_VALUE.to_owned())
+            },
+        )
         .unwrap();
-        assert_eq!(reads, 0);
         assert_eq!(resolved.skipped, ["API_KEY", "OTHER_MODEL"]);
         assert_eq!(resolved.entries, vec![EnvEntry::new("LLM_MODEL", "m")]);
         assert_eq!(resolved.warnings, ["LLM_MODEL: model_not_in_synced_list"]);
@@ -1370,6 +1544,113 @@ mod tests {
         );
     }
 
+    fn typed_plan(
+        project: &Path,
+        secret_ids: Vec<String>,
+        bindings: Vec<PlanBinding>,
+    ) -> PendingPlan {
+        PendingPlan {
+            request_id: "plan-9-zz".to_owned(),
+            kind: "prepare_project_env".to_owned(),
+            project_path: project.to_string_lossy().into_owned(),
+            secret_ids,
+            version: if bindings.is_empty() { 1 } else { 2 },
+            bindings,
+            created_at: "t".to_owned(),
+        }
+    }
+
+    fn typed_item(vault: &VaultService, item_type: &str, dev: Option<&str>) -> String {
+        let input: std::collections::BTreeMap<String, String> = match item_type {
+            "login" => [("username", "fake-user"), ("password", "fake-password")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+            _ => [("bank", "Fake Bank"), ("card_number", "4111111111111111")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+        };
+        vault
+            .create_item(secrethub_core::NewItem {
+                item_type: item_type.to_owned(),
+                name: "Personal fake".to_owned(),
+                fields: input,
+                tags: Vec::new(),
+                favorite: false,
+                dev_use: dev.is_some(),
+                env_key: dev.unwrap_or_default().to_owned(),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn plans_reject_personal_items_in_ids_and_bindings() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let (vault, _) = vault_with_key(data.path());
+        let card = typed_item(&vault, "bank_card", None);
+        let login = typed_item(&vault, "login", None);
+        let dev_login = typed_item(&vault, "login", Some("DOUYIN_TEST"));
+        for plan in [
+            typed_plan(project.path(), vec![card.clone()], Vec::new()),
+            typed_plan(project.path(), vec![login.clone()], Vec::new()),
+            typed_plan(
+                project.path(),
+                Vec::new(),
+                vec![binding(&card, "chat", "", env(Some("K"), None, None))],
+            ),
+            // Even a dev-use login is not an API key: bindings refuse it.
+            typed_plan(
+                project.path(),
+                Vec::new(),
+                vec![binding(&dev_login, "chat", "", env(Some("K"), None, None))],
+            ),
+        ] {
+            let preview = preview_plan(&plan, &vault);
+            assert!(preview.entries.is_empty());
+            assert_eq!(preview.errors.len(), 1);
+            assert_eq!(preview.errors[0].code, "secret_unavailable");
+            assert_eq!(
+                process_plan(&plan, &HashSet::new(), &vault)
+                    .err()
+                    .unwrap()
+                    .code,
+                "secret_unavailable"
+            );
+        }
+        assert!(!project.path().join(".env").exists());
+    }
+
+    #[test]
+    fn dev_use_logins_write_username_and_password_variables() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let (vault, key) = vault_with_key(data.path());
+        let login = typed_item(&vault, "login", Some("DOUYIN_TEST"));
+        let plan = typed_plan(project.path(), vec![key, login], Vec::new());
+        let preview = preview_plan(&plan, &vault);
+        assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+        let keys: Vec<&str> = preview.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "OPENROUTER_API_KEY",
+                "DOUYIN_TEST_USERNAME",
+                "DOUYIN_TEST_PASSWORD"
+            ]
+        );
+        let shown = serde_json::to_string(&preview).unwrap();
+        assert!(!shown.contains("fake-password") && !shown.contains("fake-user"));
+        let outcome = process_plan(&plan, &HashSet::new(), &vault).unwrap();
+        assert_eq!(outcome.written.len(), 3);
+        let env_text = fs::read_to_string(project.path().join(".env")).unwrap();
+        assert!(env_text.contains("DOUYIN_TEST_USERNAME=\"fake-user\""));
+        assert!(env_text.contains("DOUYIN_TEST_PASSWORD=\"fake-password\""));
+        let example = fs::read_to_string(project.path().join(".env.example")).unwrap();
+        assert!(!example.contains("fake-password") && !example.contains("fake-user"));
+    }
+
     #[test]
     fn v1_plans_keep_using_the_legacy_entries() {
         let data = tempfile::tempdir().unwrap();
@@ -1400,5 +1681,234 @@ mod tests {
         assert!(fs::read_to_string(project.path().join(".env"))
             .unwrap()
             .contains(FAKE_VALUE));
+    }
+
+    // ------------------------------------------------------------ config groups
+
+    fn group_facts(variables: &[(&str, bool, &str)]) -> SecretFacts {
+        SecretFacts {
+            group_vars: Some(
+                variables
+                    .iter()
+                    .map(|(name, secret, plain)| GroupVarFact {
+                        name: (*name).to_owned(),
+                        secret: *secret,
+                        plain: (*plain).to_owned(),
+                    })
+                    .collect(),
+            ),
+            ..facts("", &[])
+        }
+    }
+
+    fn group_binding(secret: &str, variables: Option<&[&str]>) -> PlanBinding {
+        PlanBinding {
+            secret_id: secret.to_owned(),
+            capability: String::new(),
+            model_id: String::new(),
+            env: PlanEnv::default(),
+            variables: variables.map(|names| names.iter().map(|n| (*n).to_owned()).collect()),
+        }
+    }
+
+    #[test]
+    fn group_bindings_expand_all_or_a_subset_and_reject_conflicts() {
+        let secrets = secrets(vec![
+            (
+                "g1",
+                group_facts(&[
+                    ("SSH_HOST", false, "203.0.113.7"),
+                    ("SSH_PASSWORD", true, ""),
+                    ("SSH_PORT", false, "22"),
+                ]),
+            ),
+            ("g2", group_facts(&[("SSH_HOST", false, "198.51.100.1")])),
+            ("s1", facts("", &[])),
+        ]);
+        let all = expand_bindings(&[group_binding("g1", None)], &secrets, &catalog()).unwrap();
+        assert_eq!(
+            all.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+            ["SSH_HOST", "SSH_PASSWORD", "SSH_PORT"]
+        );
+        let subset = expand_bindings(
+            &[group_binding("g1", Some(&["SSH_PORT", "SSH_PASSWORD"]))],
+            &secrets,
+            &catalog(),
+        )
+        .unwrap();
+        assert_eq!(
+            subset.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+            ["SSH_PORT", "SSH_PASSWORD"]
+        );
+        assert!(matches!(
+            &subset[1].source,
+            Source::GroupVar { secret: true, plain, .. } if plain.is_empty()
+        ));
+        // The same group twice is fine; two groups producing the same name are not.
+        assert!(expand_bindings(
+            &[
+                group_binding("g1", Some(&["SSH_HOST"])),
+                group_binding("g1", None)
+            ],
+            &secrets,
+            &catalog()
+        )
+        .is_ok());
+        let clash = expand_bindings(
+            &[
+                group_binding("g1", Some(&["SSH_HOST"])),
+                group_binding("g2", None),
+            ],
+            &secrets,
+            &catalog(),
+        )
+        .unwrap_err();
+        assert_eq!(clash.code, "env_conflict");
+        // Unknown variable, empty subset, group binding with env names, variables on a key.
+        for bad in [
+            group_binding("g1", Some(&["NOPE"])),
+            group_binding("g1", Some(&[])),
+            PlanBinding {
+                env: env(Some("X"), None, None),
+                ..group_binding("g1", None)
+            },
+            PlanBinding {
+                capability: "chat".to_owned(),
+                ..group_binding("g1", None)
+            },
+            PlanBinding {
+                variables: Some(vec!["X".to_owned()]),
+                ..binding("s1", "chat", "", env(Some("API_KEY"), None, None))
+            },
+        ] {
+            let code = expand_bindings(&[bad], &secrets, &catalog())
+                .unwrap_err()
+                .code;
+            assert_eq!(code, "invalid_plan");
+        }
+    }
+
+    fn group_in(vault: &VaultService) -> String {
+        use secrethub_core::{NewGroup, NewVariable};
+        let variable = |name: &str, value: &str, secret: bool| NewVariable {
+            name: name.to_owned(),
+            value: value.to_owned(),
+            secret,
+            description: String::new(),
+        };
+        vault
+            .create_group(NewGroup {
+                name: "Fake server".to_owned(),
+                category: "server".to_owned(),
+                variables: vec![
+                    variable("SSH_HOST", "203.0.113.7", false),
+                    variable("SSH_PASSWORD", "fake-ssh-password", true),
+                    variable("SSH_PORT", "22", false),
+                ],
+                notes: "fake notes".to_owned(),
+                tags: Vec::new(),
+                favorite: false,
+                ai_values: true,
+            })
+            .unwrap()
+    }
+
+    fn group_plan(
+        project: &Path,
+        secret_ids: Vec<String>,
+        bindings: Vec<PlanBinding>,
+    ) -> PendingPlan {
+        PendingPlan {
+            request_id: "plan-9-gg".to_owned(),
+            kind: "prepare_project_env".to_owned(),
+            project_path: project.to_string_lossy().into_owned(),
+            secret_ids,
+            version: if bindings.is_empty() { 1 } else { 2 },
+            bindings,
+            created_at: "t".to_owned(),
+        }
+    }
+
+    #[test]
+    fn v1_plans_write_the_whole_group_and_v2_plans_a_subset() {
+        let data = tempfile::tempdir().unwrap();
+        let (vault, _key) = vault_with_key(data.path());
+        let group = group_in(&vault);
+
+        let whole = tempfile::tempdir().unwrap();
+        let plan = group_plan(whole.path(), vec![group.clone()], Vec::new());
+        let preview = preview_plan(&plan, &vault);
+        assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+        assert_eq!(preview.entries.len(), 3);
+        assert!(!serde_json::to_string(&preview)
+            .unwrap()
+            .contains("fake-ssh-password"));
+        let outcome = process_plan(&plan, &HashSet::new(), &vault).unwrap();
+        assert_eq!(outcome.written, ["SSH_HOST", "SSH_PASSWORD", "SSH_PORT"]);
+        let env_text = fs::read_to_string(whole.path().join(".env")).unwrap();
+        assert!(env_text.contains("SSH_HOST=\"203.0.113.7\""));
+        assert!(env_text.contains("SSH_PASSWORD=\"fake-ssh-password\""));
+        let example = fs::read_to_string(whole.path().join(".env.example")).unwrap();
+        assert!(!example.contains("fake-ssh-password") && !example.contains("203.0.113.7"));
+
+        let part = tempfile::tempdir().unwrap();
+        let plan = group_plan(
+            part.path(),
+            Vec::new(),
+            vec![group_binding(&group, Some(&["SSH_HOST", "SSH_PASSWORD"]))],
+        );
+        let preview = preview_plan(&plan, &vault);
+        assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+        let shown: Vec<_> = preview
+            .entries
+            .iter()
+            .map(|e| (e.key.as_str(), e.kind, e.display.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("SSH_HOST", "group_var", "203.0.113.7"),
+                ("SSH_PASSWORD", "group_var", MASK)
+            ]
+        );
+        let outcome = process_plan(&plan, &HashSet::from(["SSH_HOST".to_owned()]), &vault).unwrap();
+        assert_eq!(outcome.written, ["SSH_PASSWORD"]);
+        assert_eq!(outcome.skipped, ["SSH_HOST"]);
+        let env_text = fs::read_to_string(part.path().join(".env")).unwrap();
+        assert!(env_text.contains("SSH_PASSWORD=") && !env_text.contains("SSH_PORT"));
+
+        // A subset naming a missing variable fails before anything is written.
+        let bad = tempfile::tempdir().unwrap();
+        let plan = group_plan(
+            bad.path(),
+            Vec::new(),
+            vec![group_binding(&group, Some(&["NOPE"]))],
+        );
+        assert_eq!(
+            process_plan(&plan, &HashSet::new(), &vault)
+                .err()
+                .unwrap()
+                .code,
+            "invalid_plan"
+        );
+        assert!(!bad.path().join(".env").exists());
+
+        // v1 whole-group names collide with a binding that produces the same name.
+        let both = tempfile::tempdir().unwrap();
+        let plan = PendingPlan {
+            secret_ids: vec![group.clone()],
+            ..group_plan(
+                both.path(),
+                Vec::new(),
+                vec![group_binding(&group, Some(&["SSH_HOST"]))],
+            )
+        };
+        assert_eq!(
+            process_plan(&plan, &HashSet::new(), &vault)
+                .err()
+                .unwrap()
+                .code,
+            "env_conflict"
+        );
     }
 }

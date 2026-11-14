@@ -1,11 +1,13 @@
 use super::caps;
+use super::import::{self, ImportPreviewRow};
 use super::plan::{self, PendingPlan, PlanError, PlanPreview, PlanResult, WriteOptions};
+use super::restore;
 use super::AppState;
 use arboard::Clipboard;
 use secrethub_core::{NewSecretInput, VaultService};
 use secrethub_exporter::{
     detect_conflicts, parse_env_entries, parse_json_entries, render_env, validate_export_directory,
-    write_atomic, EnvEntry,
+    write_atomic, EnvEntry, ExportError,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -78,6 +80,9 @@ pub struct ProfileRequest {
     pub name: String,
     pub description: String,
     pub secret_ids: Vec<String>,
+    /// Config group variable subsets by secret id; a group without an entry means every variable.
+    #[serde(default)]
+    pub variables: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,7 +116,7 @@ pub struct ProjectEnvSaveRequest {
     pub entries: Vec<ProjectEnvSaveEntry>,
 }
 
-fn vault_from_state<'a>(
+pub(crate) fn vault_from_state<'a>(
     state: &'a State<'_, AppState>,
 ) -> Result<MutexGuard<'a, Option<VaultService>>, String> {
     state
@@ -120,7 +125,7 @@ fn vault_from_state<'a>(
         .map_err(|_| "vault state is unavailable".to_owned())
 }
 
-fn touch_activity(state: &State<'_, AppState>) -> Result<(), String> {
+pub(crate) fn touch_activity(state: &State<'_, AppState>) -> Result<(), String> {
     let now = super::now_seconds();
     let expired = state
         .policy
@@ -194,6 +199,21 @@ pub fn unlock(password: String, state: State<'_, AppState>) -> Result<(), String
     Ok(())
 }
 
+/// Re-encrypts the vault under a new master password (single transaction, all or nothing).
+#[tauri::command]
+pub fn vault_change_password(
+    current: String,
+    new_password: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_mut()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .change_master_password(&current, &new_password)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn lock(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(vault) = vault_from_state(&state)?.as_mut() {
@@ -249,6 +269,7 @@ pub fn secret_create(
                 model_env_key: request.model_env_key,
                 endpoint_url: request.endpoint_url,
                 endpoint_env_key: request.endpoint_env_key,
+                ..Default::default()
             },
         )
         .map_err(|error| error.to_string())
@@ -279,6 +300,7 @@ pub fn secret_update(
         model_env_key: request.model_env_key,
         endpoint_url: request.endpoint_url,
         endpoint_env_key: request.endpoint_env_key,
+        ..Default::default()
     };
     let vault = vault_from_state(&state)?;
     let vault = vault
@@ -310,11 +332,11 @@ pub fn secret_copy(id: String, state: State<'_, AppState>) -> Result<(), String>
     touch_activity(&state)?;
     let value = {
         let vault = vault_from_state(&state)?;
-        vault
+        let vault = vault
             .as_ref()
-            .ok_or_else(|| "vault unavailable".to_owned())?
-            .read_secret(&id)
-            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        reject_json_item(vault, &id)?;
+        vault.read_secret(&id).map_err(|error| error.to_string())?
     };
     copy_to_clipboard(value, 30)?;
     vault_from_state(&state)?
@@ -325,7 +347,7 @@ pub fn secret_copy(id: String, state: State<'_, AppState>) -> Result<(), String>
     Ok(())
 }
 
-fn copy_to_clipboard(value: String, timeout_seconds: u64) -> Result<(), String> {
+pub(crate) fn copy_to_clipboard(value: String, timeout_seconds: u64) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
     clipboard
         .set_text(&value)
@@ -349,7 +371,7 @@ fn copy_to_clipboard(value: String, timeout_seconds: u64) -> Result<(), String> 
 #[tauri::command]
 pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), String> {
     touch_activity(&state)?;
-    let (metadata, value, rows) = {
+    let entries = {
         let vault = vault_from_state(&state)?;
         let vault = vault
             .as_ref()
@@ -360,13 +382,21 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| "secret not found".to_owned())?;
-        let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
-        let rows = vault
-            .list_capability_models(&id)
-            .map_err(|error| error.to_string())?;
-        (metadata, value, rows)
+        if !metadata.ai_visible() {
+            return Err(UNAVAILABLE.to_owned());
+        }
+        if metadata.value_type == "login" {
+            login_entries(vault, &metadata)?
+        } else if metadata.value_type == "env_group" {
+            group_entries(vault, &id, None)?
+        } else {
+            let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
+            let rows = vault
+                .list_capability_models(&id)
+                .map_err(|error| error.to_string())?;
+            selected_entries_from_metadata(&metadata, value, &rows)
+        }
     };
-    let entries = selected_entries_from_metadata(&metadata, value, &rows);
     let copied = render_env(&entries).map_err(|error| error.to_string())?;
     copy_to_clipboard(copied, 30)?;
     vault_from_state(&state)?
@@ -390,22 +420,43 @@ pub struct ValidationResult {
     pub models_sync_status: String,
 }
 
+/// A key is checked again after a day; `0` means it was never checked.
+const STALE_AFTER_SECONDS: i64 = 24 * 60 * 60;
+
+fn needs_validation(validated_at: i64, now: i64) -> bool {
+    validated_at <= 0 || now - validated_at >= STALE_AFTER_SECONDS
+}
+
+/// All API keys, or with `only_stale` just the active ones that were never checked or whose
+/// last check is a day old.
+fn validation_targets(
+    items: Vec<secrethub_storage::SecretMetadata>,
+    only_stale: bool,
+    now: i64,
+) -> Vec<String> {
+    items
+        .into_iter()
+        .filter(|item| item.value_type == "api_key")
+        .filter(|item| !only_stale || (!item.archived && needs_validation(item.validated_at, now)))
+        .map(|item| item.id)
+        .collect()
+}
+
 #[tauri::command]
 pub async fn secret_validate_many(
+    only_stale: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ValidationResult>, String> {
     touch_activity(&state)?;
+    let now = super::now_seconds() as i64;
     let ids = {
         let vault = vault_from_state(&state)?;
-        vault
+        let items = vault
             .as_ref()
             .ok_or_else(|| "vault unavailable".to_owned())?
             .list_metadata()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .filter(|item| item.value_type == "api_key")
-            .map(|item| item.id)
-            .collect::<Vec<_>>()
+            .map_err(|error| error.to_string())?;
+        validation_targets(items, only_stale.unwrap_or(false), now)
     };
     let mut results = Vec::with_capacity(ids.len());
     for id in ids {
@@ -515,6 +566,9 @@ pub(crate) async fn check_secret(
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| "secret not found".to_owned())?;
+        if metadata.is_json_item() {
+            return Err(UNAVAILABLE.to_owned());
+        }
         (
             metadata.provider_id,
             vault.read_secret(id).map_err(|error| error.to_string())?,
@@ -620,11 +674,11 @@ pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), Strin
     touch_activity(&state)?;
     let value = {
         let vault = vault_from_state(&state)?;
-        vault
+        let vault = vault
             .as_ref()
-            .ok_or_else(|| "vault unavailable".to_owned())?
-            .read_secret(&id)
-            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        reject_json_item(vault, &id)?;
+        vault.read_secret(&id).map_err(|error| error.to_string())?
     };
     rfd::MessageDialog::new()
         .set_title("SecretHub")
@@ -637,6 +691,146 @@ pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), Strin
         .record_action("secret_revealed", Some(&id), "{\"source\":\"desktop\"}")
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Stable text for "this item may not leave the vault through developer features".
+pub(crate) const UNAVAILABLE: &str = "secret_unavailable: personal items cannot be exported";
+
+/// Typed items have their own commands; the raw-string ones must not hand out the JSON payload.
+fn reject_json_item(vault: &VaultService, id: &str) -> Result<(), String> {
+    let json = vault
+        .list_metadata()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .any(|item| item.id == id && item.is_json_item());
+    if json {
+        return Err("use the item commands for this item".to_owned());
+    }
+    Ok(())
+}
+
+/// Fails for any id that is not AI/export visible (personal items). Unknown ids are left to
+/// the caller, as before.
+pub(crate) fn ensure_ai_visible(
+    metadata: &[secrethub_storage::SecretMetadata],
+    ids: &[String],
+) -> Result<(), String> {
+    if metadata
+        .iter()
+        .any(|item| ids.contains(&item.id) && !item.ai_visible())
+    {
+        return Err(UNAVAILABLE.to_owned());
+    }
+    Ok(())
+}
+
+/// `{prefix}_USERNAME` and `{prefix}_PASSWORD` of a "dev use" login.
+pub(crate) fn login_env_names(prefix: &str) -> [String; 2] {
+    [format!("{prefix}_USERNAME"), format!("{prefix}_PASSWORD")]
+}
+
+fn login_entries(
+    vault: &VaultService,
+    item: &secrethub_storage::SecretMetadata,
+) -> Result<Vec<EnvEntry>, String> {
+    if !item.dev_use || !is_env_key(&item.env_key) {
+        return Err(UNAVAILABLE.to_owned());
+    }
+    let mut fields = vault
+        .read_item_fields(&item.id)
+        .map_err(|error| error.to_string())?;
+    let [username_key, password_key] = login_env_names(&item.env_key);
+    let (Some(username), Some(password)) = (fields.remove("username"), fields.remove("password"))
+    else {
+        return Err("login needs an account and a password for dev use".to_owned());
+    };
+    Ok(vec![
+        EnvEntry::new(username_key, username),
+        EnvEntry::new(password_key, password),
+    ])
+}
+
+/// `NAME=value` entries of a config group, all variables or just the named ones, in the
+/// group's own order. Secret values are decrypted here, right before they are written.
+pub(crate) fn group_entries(
+    vault: &VaultService,
+    id: &str,
+    names: Option<&[String]>,
+) -> Result<Vec<EnvEntry>, String> {
+    let descriptions: std::collections::HashMap<String, String> = vault
+        .group_variables(id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|row| (row.name, row.description))
+        .collect();
+    let header = vault
+        .list_metadata()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|item| item.id == id)
+        .map(|item| group_comment(&item.name, &item.category));
+    Ok(vault
+        .group_values(id, names)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, value, _))| {
+            // Comments only: the group's name and category above its first variable, then one
+            // line of purpose per variable. Never a value.
+            let description = descriptions.get(&name).map_or("", |text| text.trim());
+            let mut lines: Vec<&str> = Vec::new();
+            if index == 0 {
+                lines.extend(header.as_deref());
+            }
+            if !description.is_empty() {
+                lines.push(description);
+            }
+            if lines.is_empty() {
+                EnvEntry::new(name, value)
+            } else {
+                EnvEntry::with_comment(name, value, lines.join("\n"))
+            }
+        })
+        .collect())
+}
+
+/// `<group name>（<category in Chinese>）`, the header comment of a group in an exported file.
+pub(crate) fn group_comment(name: &str, category: &str) -> String {
+    let label = match category {
+        "server" => "服务器",
+        "database" => "数据库",
+        "storage" => "对象存储",
+        "other" => "其他",
+        other => other,
+    };
+    format!("{}（{label}）", name.trim())
+}
+
+/// Comment above an exported key: `<provider name> API Key` for provider keys, followed by the
+/// user's own purpose text (not the automatic "Imported ..." marker); other secrets only carry
+/// their purpose text.
+fn key_comment(item: &secrethub_storage::SecretMetadata) -> String {
+    let description = item.description.trim();
+    let own = if description.starts_with("Imported ") {
+        ""
+    } else {
+        description
+    };
+    if item.value_type != "api_key" {
+        return own.to_owned();
+    }
+    let name = crate::catalog::effective_registry()
+        .into_iter()
+        .find(|provider| provider.id == item.provider_id)
+        .map_or_else(|| item.provider_id.clone(), |provider| provider.name);
+    if own.is_empty() {
+        format!("{name} API Key")
+    } else {
+        format!(
+            "{name} API Key
+{own}"
+        )
+    }
 }
 
 /// Entries for legacy plans: key, primary model and endpoint only (plan previews rely on this).
@@ -653,7 +847,7 @@ fn export_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>,
     entries_for(vault, ids, true)
 }
 
-fn entries_for(
+pub(crate) fn entries_for(
     vault: &VaultService,
     ids: &[String],
     with_capabilities: bool,
@@ -665,19 +859,46 @@ fn entries_for(
             .iter()
             .find(|item| item.id == *id)
             .ok_or_else(|| "secret not found".to_owned())?;
-        let value = vault.read_secret(id).map_err(|error| error.to_string())?;
+        if !item.ai_visible() {
+            return Err(UNAVAILABLE.to_owned());
+        }
         let group_start = entries.len();
         let separator_before = group_start > 0;
+        if item.value_type == "login" {
+            for (index, entry) in login_entries(vault, item)?.into_iter().enumerate() {
+                entries.push(if separator_before && index == 0 {
+                    entry.with_separator_before()
+                } else {
+                    entry
+                });
+            }
+            continue;
+        }
+        if item.value_type == "env_group" {
+            for (index, entry) in group_entries(vault, id, None)?.into_iter().enumerate() {
+                entries.push(if separator_before && index == 0 {
+                    entry.with_separator_before()
+                } else {
+                    entry
+                });
+            }
+            continue;
+        }
+        let value = vault.read_secret(id).map_err(|error| error.to_string())?;
         if !item.env_key.trim().is_empty() {
             let mut api_entry =
-                entry_with_optional_comment(&item.env_key, value.clone(), &item.description);
+                entry_with_optional_comment(&item.env_key, value.clone(), &key_comment(item));
             if separator_before {
                 api_entry = api_entry.with_separator_before();
             }
             entries.push(api_entry);
         }
         if !item.model_id.trim().is_empty() {
-            let model_entry = EnvEntry::new(safe_model_env_key(item), item.model_id.clone());
+            let model_entry = EnvEntry::with_comment(
+                safe_model_env_key(item),
+                item.model_id.clone(),
+                "调用的模型名",
+            );
             entries.push(if separator_before && entries.len() == group_start {
                 model_entry.with_separator_before()
             } else {
@@ -692,9 +913,10 @@ fn entries_for(
             ));
         }
         if !item.endpoint_url.trim().is_empty() {
-            entries.push(EnvEntry::new(
+            entries.push(EnvEntry::with_comment(
                 safe_endpoint_env_key(item),
                 item.endpoint_url.clone(),
+                "接口基础地址",
             ));
         }
     }
@@ -717,7 +939,7 @@ pub(crate) fn selected_entries_from_metadata(
     let mut entries = Vec::new();
     if !metadata.env_key.trim().is_empty() {
         let mut api_entry =
-            entry_with_optional_comment(&metadata.env_key, value, &metadata.description);
+            entry_with_optional_comment(&metadata.env_key, value, &key_comment(metadata));
         if !entries.is_empty() {
             api_entry = api_entry.with_separator_before();
         }
@@ -789,52 +1011,148 @@ fn entry_with_optional_comment(key: &str, value: String, comment: &str) -> EnvEn
     }
 }
 
-fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {
-    match request.format.as_str() {
-        "env" => parse_env_entries(&request.contents),
-        "json" => parse_json_entries(&request.contents),
-        _ => return Err("import format must be env or json".to_owned()),
+/// Parser errors can echo the offending line of the file, so they are replaced by a generic text.
+fn import_error_message(error: ExportError) -> String {
+    match error {
+        ExportError::Parse(_) => "dotenv parse failed: check the syntax of the file".to_owned(),
+        other => other.to_string(),
     }
-    .map_err(|error| error.to_string())
 }
 
+fn parse_entries(format: &str, contents: &str) -> Result<Vec<EnvEntry>, String> {
+    match format {
+        "env" => parse_env_entries(contents),
+        "json" => parse_json_entries(contents),
+        _ => return Err("import format must be env or json".to_owned()),
+    }
+    .map_err(import_error_message)
+}
+
+fn parse_import(request: &ImportRequest) -> Result<Vec<EnvEntry>, String> {
+    parse_entries(&request.format, &request.contents)
+}
+
+fn preview_rows_for(entries: &[EnvEntry]) -> Vec<ImportPreviewRow> {
+    let registry = crate::catalog::effective_registry();
+    import::preview_rows(&import::plan_import(entries, &registry), &registry)
+}
+
+/// Previews list variable names only, grouped the way they will be imported.
 #[tauri::command]
-pub fn secret_import_preview(request: ImportRequest) -> Result<Vec<String>, String> {
-    Ok(parse_import(&request)?
+pub fn secret_import_preview(request: ImportRequest) -> Result<Vec<ImportPreviewRow>, String> {
+    Ok(preview_rows_for(&parse_import(&request)?))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOutcome {
+    pub ids: Vec<String>,
+    /// New provider API keys, which the UI validates one by one afterwards.
+    pub api_key_ids: Vec<String>,
+}
+
+/// Provider credentials import as API keys; every other variable is a developer secret.
+pub(crate) fn import_attributes(
+    secret: &import::PlannedSecret,
+) -> secrethub_storage::SecretAttributes {
+    if secret.provider_credential {
+        secrethub_storage::SecretAttributes {
+            category: "ai".into(),
+            model_id: secret.model_id.clone(),
+            model_env_key: secret.model_env_key.clone(),
+            endpoint_url: secret.endpoint_url.clone(),
+            endpoint_env_key: secret.endpoint_env_key.clone(),
+            ..Default::default()
+        }
+    } else {
+        secrethub_storage::SecretAttributes {
+            value_type: "dev_secret".into(),
+            ..Default::default()
+        }
+    }
+}
+
+fn import_entries(
+    entries: &[EnvEntry],
+    state: &State<'_, AppState>,
+) -> Result<ImportOutcome, String> {
+    touch_activity(state)?;
+    let vault = vault_from_state(state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    let existing: Vec<String> = vault
+        .list_metadata()
+        .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|entry| entry.key)
-        .collect())
+        .map(|item| item.name)
+        .collect();
+    let mut planned = import::plan_import(entries, &crate::catalog::effective_registry());
+    import::assign_names(&mut planned, &existing);
+    let mut outcome = ImportOutcome {
+        ids: Vec::new(),
+        api_key_ids: Vec::new(),
+    };
+    for secret in planned {
+        let attributes = import_attributes(&secret);
+        let id = vault
+            .create_secret_with_attributes(
+                NewSecretInput {
+                    name: secret.name,
+                    provider_id: secret.provider_id,
+                    env_key: secret.env_key,
+                    description: "Imported locally".to_owned(),
+                    tags: vec!["imported".to_owned()],
+                    value: secret.value,
+                },
+                attributes,
+            )
+            .map_err(|error| error.to_string())?;
+        if secret.provider_credential {
+            outcome.api_key_ids.push(id.clone());
+        }
+        outcome.ids.push(id);
+    }
+    Ok(outcome)
 }
 
 #[tauri::command]
 pub fn secret_import(
     request: ImportRequest,
     state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<ImportOutcome, String> {
     if !request.confirmed {
         return Err("import requires explicit confirmation after preview".to_owned());
     }
-    touch_activity(&state)?;
-    let entries = parse_import(&request)?;
-    let vault = vault_from_state(&state)?;
-    let vault = vault
-        .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?;
-    entries
-        .into_iter()
-        .map(|entry| {
-            vault
-                .create_secret(NewSecretInput {
-                    name: entry.key.clone(),
-                    provider_id: "generic".to_owned(),
-                    env_key: entry.key,
-                    description: "Imported locally".to_owned(),
-                    tags: vec!["imported".to_owned()],
-                    value: entry.value,
-                })
-                .map_err(|error| error.to_string())
-        })
-        .collect()
+    import_entries(&parse_import(&request)?, &state)
+}
+
+#[tauri::command]
+pub fn choose_import_file() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("Env / JSON", &["env", "json"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// The file is read here, so its contents never reach the WebView.
+fn entries_from_file(path: &str) -> Result<Vec<EnvEntry>, String> {
+    let (contents, format) = import::read_import_file(path)?;
+    parse_entries(format, &contents)
+}
+
+#[tauri::command]
+pub fn secret_import_file_preview(path: String) -> Result<Vec<ImportPreviewRow>, String> {
+    Ok(preview_rows_for(&entries_from_file(&path)?))
+}
+
+#[tauri::command]
+pub fn secret_import_file(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<ImportOutcome, String> {
+    import_entries(&entries_from_file(&path)?, &state)
 }
 
 fn plan_directory(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1078,13 +1396,24 @@ pub fn profile_save(request: ProfileRequest, state: State<'_, AppState>) -> Resu
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
-    vault_from_state(&state)?
+    let vault = vault_from_state(&state)?;
+    let vault = vault
         .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    ensure_ai_visible(
+        &vault.list_metadata().map_err(|error| error.to_string())?,
+        &request.secret_ids,
+    )?;
+    vault
         .save_profile(secrethub_storage::StoredProfile {
             id: request.id,
             name: request.name,
             description: request.description,
+            variables: request
+                .variables
+                .into_iter()
+                .filter(|(id, names)| request.secret_ids.contains(id) && !names.is_empty())
+                .collect(),
             secret_ids: request.secret_ids,
             created_at: now,
             updated_at: now,
@@ -1138,7 +1467,11 @@ fn metadata_for_env_key<'a>(
     key: &str,
 ) -> Option<&'a secrethub_storage::SecretMetadata> {
     metadata.iter().find(|item| {
-        item.env_key == key || safe_model_env_key(item) == key || safe_endpoint_env_key(item) == key
+        item.ai_visible()
+            && !item.is_json_item()
+            && (item.env_key == key
+                || safe_model_env_key(item) == key
+                || safe_endpoint_env_key(item) == key)
     })
 }
 
@@ -1304,31 +1637,114 @@ pub fn settings_update(
     Ok(())
 }
 
+/// `SecretHub-YYYYMMDD-HHmm`; a numeric suffix is added when the name is already taken.
+fn backup_file_stem(now: chrono::NaiveDateTime) -> String {
+    format!("SecretHub-{}", now.format("%Y%m%d-%H%M"))
+}
+
+/// Creates the file with `create_new`, so an existing backup is never overwritten.
+fn write_new_backup(directory: &Path, stem: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    for attempt in 1u32.. {
+        let name = if attempt == 1 {
+            format!("{stem}.secrethub-backup")
+        } else {
+            format!("{stem}-{attempt}.secrethub-backup")
+        };
+        let target = directory.join(name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                file.sync_all()?;
+                return Ok(target);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the attempt counter does not run out")
+}
+
+/// Writes an SHB2 backup into `directory` and returns the file path.
 #[tauri::command]
-pub fn backup_export(path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn backup_export(directory: String, state: State<'_, AppState>) -> Result<String, String> {
     touch_activity(&state)?;
     let bytes = vault_from_state(&state)?
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?
         .encrypted_backup()
         .map_err(|error| error.to_string())?;
-    let target = Path::new(&path);
-    if target.file_name().and_then(|value| value.to_str()) != Some("SecretHub.secrethub-backup") {
-        return Err("backup must use .secrethub-backup extension".to_owned());
-    }
-    let parent = target
-        .parent()
-        .ok_or_else(|| "backup parent directory is required".to_owned())?;
-    let directory = validate_export_directory(parent).map_err(|error| error.to_string())?;
-    std::fs::write(directory.join("SecretHub.secrethub-backup"), bytes)
+    let directory =
+        validate_export_directory(Path::new(&directory)).map_err(|error| error.to_string())?;
+    let stem = backup_file_stem(chrono::Local::now().naive_local());
+    write_new_backup(&directory, &stem, &bytes)
+        .map(|path| path.to_string_lossy().into_owned())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn choose_backup_file() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("SecretHub backup", &["secrethub-backup"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Replaces the vault with a backup. Works from the lock screen too (no activity check):
+/// the current vault files are moved to `vault-backup-<stamp>`, never deleted.
+#[tauri::command]
+pub fn backup_restore(
+    path: String,
+    password: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db_path = super::database_path(&app)?;
+    let backup = restore::read_backup_file(Path::new(&path)).map_err(|error| error.to_string())?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut guard = vault_from_state(&state)?;
+    restore::restore_vault(
+        &mut guard,
+        &db_path,
+        &backup,
+        &password,
+        &stamp,
+        restore::Retry::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    if let Some(vault) = guard.as_ref() {
+        let _ = vault.record_action("backup_restored", None, "{\"source\":\"desktop\"}");
+        let minutes = vault
+            .get_settings()
+            .map(|settings| settings.auto_lock_minutes)
+            .unwrap_or(15);
+        *state
+            .policy
+            .lock()
+            .map_err(|_| "vault policy is unavailable".to_owned())? =
+            secrethub_core::AutoLockPolicy::new(minutes as u64 * 60, super::now_seconds());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_env_key, plan_writes, selected_entries_from_metadata, ModelsWrite};
+    use super::{
+        backup_file_stem, ensure_ai_visible, export_entries, import_attributes, is_env_key,
+        login_env_names, parse_entries, plan_writes, selected_entries,
+        selected_entries_from_metadata, validation_targets, write_new_backup, ModelsWrite,
+        UNAVAILABLE,
+    };
     use crate::model_sync::Fetched;
+    use secrethub_core::{items::Fields, NewItem, NewSecretInput, VaultService};
     use secrethub_providers::{DiscoveredModel, ModelsEndpoint, Protocol};
+    use secrethub_storage::Database;
+    use std::fs;
 
     fn endpoint(is_fallback: bool) -> ModelsEndpoint {
         ModelsEndpoint {
@@ -1399,6 +1815,10 @@ mod tests {
             endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
             models_synced_at: 0,
             models_sync_status: String::new(),
+            validated_at: 0,
+            subtitle: String::new(),
+            dev_use: false,
+            ai_values: true,
         };
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
@@ -1410,7 +1830,11 @@ mod tests {
             }],
         ))
         .unwrap();
-        assert!(rendered.contains("# local project only"));
+        assert!(rendered.contains(
+            "# DeepSeek API Key
+# local project only
+DEEPSEEK_API_KEY="
+        ));
         assert!(rendered.contains("DEEPSEEK_API_KEY=\"fixture-key\""));
         assert!(rendered.contains("DEEPSEEK_MODEL=\"deepseek-v4.1-flash\""));
         assert!(rendered.contains("DEEPSEEK_BASE_URL=\"https://api.deepseek.com\""));
@@ -1418,6 +1842,223 @@ mod tests {
         assert!(rendered.find("DEEPSEEK_MODEL").unwrap() < rendered.find("IMAGE_MODEL").unwrap());
         assert!(!rendered.contains("value_type"));
         assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH=\""));
+    }
+
+    fn stale_candidate(
+        id: &str,
+        validated_at: i64,
+        archived: bool,
+        value_type: &str,
+    ) -> secrethub_storage::SecretMetadata {
+        secrethub_storage::SecretMetadata {
+            id: id.into(),
+            name: id.into(),
+            provider_id: "openai".into(),
+            env_key: "OPENAI_API_KEY".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            status: "valid".into(),
+            created_at: 0,
+            updated_at: 0,
+            value_type: value_type.into(),
+            category: "ai".into(),
+            scope: "global".into(),
+            favorite: false,
+            archived,
+            model_id: String::new(),
+            model_env_key: String::new(),
+            endpoint_url: String::new(),
+            endpoint_env_key: String::new(),
+            models_synced_at: 0,
+            models_sync_status: String::new(),
+            validated_at,
+            subtitle: String::new(),
+            dev_use: false,
+            ai_values: true,
+        }
+    }
+
+    #[test]
+    fn stale_only_validation_skips_recent_archived_and_non_api_keys() {
+        let now = 1_000_000;
+        let day = 24 * 60 * 60;
+        let items = || {
+            vec![
+                stale_candidate("never", 0, false, "api_key"),
+                stale_candidate("old", now - day, false, "api_key"),
+                stale_candidate("fresh", now - day + 1, false, "api_key"),
+                stale_candidate("archived", 0, true, "api_key"),
+                stale_candidate("token", 0, false, "token"),
+            ]
+        };
+        assert_eq!(validation_targets(items(), true, now), ["never", "old"]);
+        // "Validate all" keeps checking every API key, archived ones included.
+        assert_eq!(
+            validation_targets(items(), false, now),
+            ["never", "old", "fresh", "archived"]
+        );
+    }
+
+    #[test]
+    fn backup_files_get_a_timestamped_name_and_are_never_overwritten() {
+        let when = chrono::NaiveDate::from_ymd_opt(2026, 11, 9)
+            .unwrap()
+            .and_hms_opt(8, 5, 59)
+            .unwrap();
+        let stem = backup_file_stem(when);
+        assert_eq!(stem, "SecretHub-20261109-0805");
+        let directory = tempfile::tempdir().unwrap();
+        let first = write_new_backup(directory.path(), &stem, b"one").unwrap();
+        let second = write_new_backup(directory.path(), &stem, b"two").unwrap();
+        assert_eq!(
+            first.file_name().unwrap(),
+            "SecretHub-20261109-0805.secrethub-backup"
+        );
+        assert_eq!(
+            second.file_name().unwrap(),
+            "SecretHub-20261109-0805-2.secrethub-backup"
+        );
+        assert_eq!(fs::read(&first).unwrap(), b"one");
+        assert_eq!(fs::read(&second).unwrap(), b"two");
+    }
+
+    #[test]
+    fn import_parse_errors_never_echo_file_content() {
+        let bad_inputs = [
+            "KEY=\"unterminated fake-secret-value",
+            "lower case key=fake-secret-value",
+            "=fake-secret-value",
+            "A=\"ok\" fake-secret-value ===",
+        ];
+        let messages: Vec<String> = bad_inputs
+            .iter()
+            .filter_map(|input| parse_entries("env", input).err())
+            .collect();
+        assert!(!messages.is_empty(), "at least one input must be rejected");
+        assert!(messages
+            .iter()
+            .all(|message| !message.contains("fake-secret-value")));
+        assert!(parse_entries("xml", "").is_err());
+    }
+
+    fn fields(pairs: &[(&str, &str)]) -> Fields {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect()
+    }
+
+    fn typed_vault(directory: &std::path::Path) -> VaultService {
+        let mut vault =
+            VaultService::open(Database::open(directory.join("vault.sqlite")).unwrap()).unwrap();
+        vault.setup_master("a-long-test-master-password").unwrap();
+        vault
+    }
+
+    fn typed(vault: &VaultService, item_type: &str, input: Fields, dev: Option<&str>) -> String {
+        vault
+            .create_item(NewItem {
+                item_type: item_type.into(),
+                name: format!("Fake {item_type}"),
+                fields: input,
+                tags: Vec::new(),
+                favorite: false,
+                dev_use: dev.is_some(),
+                env_key: dev.unwrap_or_default().into(),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn exports_and_copy_all_refuse_personal_items_but_allow_dev_logins() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = typed_vault(directory.path());
+        let login_fields = || fields(&[("username", "fake-user"), ("password", "fake-password")]);
+        let plain_login = typed(&vault, "login", login_fields(), None);
+        let card = typed(
+            &vault,
+            "bank_card",
+            fields(&[("bank", "Fake Bank"), ("card_number", "4111111111111111")]),
+            None,
+        );
+        let note = typed(&vault, "note", fields(&[("body", "fake note")]), None);
+        let dev_login = typed(&vault, "login", login_fields(), Some("DOUYIN_TEST"));
+        let api = vault
+            .create_secret(NewSecretInput {
+                name: "key".into(),
+                provider_id: "generic".into(),
+                env_key: "FAKE_KEY".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                value: "fake-key-value".into(),
+            })
+            .unwrap();
+
+        for id in [&plain_login, &card, &note] {
+            let ids = [id.clone()];
+            assert_eq!(export_entries(&vault, &ids).unwrap_err(), UNAVAILABLE);
+            assert_eq!(selected_entries(&vault, &ids).unwrap_err(), UNAVAILABLE);
+            // Mixed with a visible item the whole export still fails.
+            assert!(export_entries(&vault, &[api.clone(), id.clone()]).is_err());
+        }
+
+        let rendered = secrethub_exporter::render_env(
+            &export_entries(&vault, &[api.clone(), dev_login.clone()]).unwrap(),
+        )
+        .unwrap();
+        assert!(rendered.contains("FAKE_KEY=\"fake-key-value\""));
+        assert!(rendered.contains("DOUYIN_TEST_USERNAME=\"fake-user\""));
+        assert!(rendered.contains("DOUYIN_TEST_PASSWORD=\"fake-password\""));
+        assert_eq!(
+            login_env_names("DOUYIN_TEST"),
+            ["DOUYIN_TEST_USERNAME", "DOUYIN_TEST_PASSWORD"]
+        );
+        // Card and note values appear nowhere in any export.
+        assert!(!rendered.contains("4111") && !rendered.contains("fake note"));
+    }
+
+    #[test]
+    fn profiles_may_only_hold_ai_visible_items() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = typed_vault(directory.path());
+        let card = typed(
+            &vault,
+            "bank_card",
+            fields(&[("bank", "Fake Bank"), ("card_number", "4111111111111111")]),
+            None,
+        );
+        let dev = typed(
+            &vault,
+            "login",
+            fields(&[("username", "u"), ("password", "fake-password")]),
+            Some("FAKE_LOGIN"),
+        );
+        let metadata = vault.list_metadata().unwrap();
+        assert_eq!(
+            ensure_ai_visible(&metadata, std::slice::from_ref(&card)).unwrap_err(),
+            UNAVAILABLE
+        );
+        assert!(ensure_ai_visible(&metadata, &[dev.clone(), card]).is_err());
+        assert!(ensure_ai_visible(&metadata, &[dev, "unknown-id".into()]).is_ok());
+    }
+
+    #[test]
+    fn imported_generic_entries_become_dev_secrets() {
+        let entries = vec![
+            secrethub_exporter::EnvEntry::new("DATABASE_URL", "postgres://fake"),
+            secrethub_exporter::EnvEntry::new("OPENAI_API_KEY", "fake-key"),
+        ];
+        let planned = crate::import::plan_import(&entries, &crate::catalog::effective_registry());
+        let generic = planned
+            .iter()
+            .find(|item| !item.provider_credential)
+            .unwrap();
+        let credential = planned
+            .iter()
+            .find(|item| item.provider_credential)
+            .unwrap();
+        assert_eq!(import_attributes(generic).value_type, "dev_secret");
+        assert_eq!(import_attributes(credential).value_type, "api_key");
     }
 
     #[test]

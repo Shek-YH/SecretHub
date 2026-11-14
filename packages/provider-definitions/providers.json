@@ -17,6 +17,7 @@
   },
   {
     "id": "deepseek",
+    "featured": true,
     "name": "DeepSeek",
     "keyUrl": "https://platform.deepseek.com/api_keys",
     "baseUrl": "https://api.deepseek.com",
@@ -92,6 +93,7 @@
   },
   {
     "id": "minimax",
+    "featured": true,
     "name": "MiniMax CN",
     "keyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     "baseUrl": "https://api.minimaxi.com/v1",
@@ -127,6 +129,7 @@
   },
   {
     "id": "glm",
+    "featured": true,
     "name": "GLM 智谱",
     "keyUrl": "https://bigmodel.cn/usercenter/apikeys",
     "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
@@ -174,6 +177,7 @@
   },
   {
     "id": "kimi",
+    "featured": true,
     "name": "Kimi 月之暗面",
     "keyUrl": "https://platform.moonshot.cn/console/api-keys",
     "baseUrl": "https://api.moonshot.cn/v1",
@@ -264,6 +268,7 @@
   },
   {
     "id": "openai",
+    "featured": true,
     "name": "OpenAI",
     "keyUrl": "https://platform.openai.com/api-keys",
     "baseUrl": "https://api.openai.com/v1",
@@ -319,6 +324,7 @@
   },
   {
     "id": "gemini",
+    "featured": true,
     "name": "Google Gemini",
     "keyUrl": "https://aistudio.google.com/apikey",
     "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -596,6 +602,7 @@
   },
   {
     "id": "qwen",
+    "featured": true,
     "name": "通义千问 / Qwen",
     "keyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
     "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -686,6 +693,7 @@
   },
   {
     "id": "anthropic",
+    "featured": true,
     "name": "Anthropic",
     "keyUrl": "https://console.anthropic.com/settings/keys",
     "baseUrl": "https://api.anthropic.com",
@@ -1068,6 +1076,7 @@
   },
   {
     "id": "volcengine",
+    "featured": true,
     "name": "火山引擎 / 豆包",
     "keyUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
     "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
@@ -1138,6 +1147,7 @@
   },
   {
     "id": "openrouter",
+    "featured": true,
     "name": "OpenRouter",
     "keyUrl": "https://openrouter.ai/settings/keys",
     "baseUrl": "https://openrouter.ai/api/v1",
