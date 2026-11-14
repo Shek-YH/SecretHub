@@ -7,7 +7,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke": "npm run build && node tests/protocol.mjs"
+    "build:sea": "node scripts/build-sea.mjs",
+    "smoke": "npm run build && node tests/protocol.mjs",
+    "smoke:sea": "node tests/protocol.mjs --exe"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -15,6 +17,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6",
     "typescript": "^5.9.2",
     "vitest": "^5.0.0"
   }

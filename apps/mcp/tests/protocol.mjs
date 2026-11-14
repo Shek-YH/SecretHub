@@ -2,9 +2,15 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 
+// `--exe [path]` runs the standalone sidecar exe instead of dist/index.js.
+const exeFlag = process.argv.indexOf('--exe');
+const exePath = exeFlag === -1 ? null : (process.argv[exeFlag + 1] ?? fileURLToPath(new URL('../../desktop/src-tauri/binaries/secrethub-mcp-x86_64-pc-windows-msvc.exe', import.meta.url)));
+const serverCommand = exePath ?? process.execPath;
+const serverArgs = exePath ? [] : ['dist/index.js'];
 const directory = mkdtempSync(join(tmpdir(), 'secrethub-mcp-'));
 const databasePath = join(directory, 'vault.sqlite');
 const planDirectory = join(directory, 'plans');
@@ -56,11 +62,13 @@ const messages = [
   { jsonrpc: '2.0', id: 35, method: 'tools/call', params: { name: 'secrethub_request_import', arguments: { paths: ['relative/folder'], response_format: 'json' } } },
   { jsonrpc: '2.0', id: 36, method: 'tools/call', params: { name: 'secrethub_get_import_status', arguments: { request_id: 'import-../x', response_format: 'json' } } },
 ];
-const result = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
+const result = spawnSync(serverCommand, serverArgs, { cwd: new URL('..', import.meta.url), input: `${messages.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
 try {
   assert.equal(result.status, 0, result.stderr);
   const responses = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
   const tools = responses.find((response) => response.id === 2).result.tools;
+  assert.equal(tools.length, 26);
+  if (exePath) assert.equal(/ExperimentalWarning/.test(result.stderr), false, 'sea exe must not print the sqlite warning');
   assert.ok(tools.some((tool) => tool.name === 'secrethub_list_secret_catalog'));
   assert.ok(tools.some((tool) => tool.name === 'secrethub_prepare_project_env'));
   const catalogResponse = responses.find((response) => response.id === 3);
@@ -163,7 +171,7 @@ try {
     { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'secrethub_get_plan_status', arguments: { request_id: requestId, response_format: 'json' } } },
     { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'secrethub_get_plan_status', arguments: { request_id: 'plan-../x', response_format: 'json' } } },
   ];
-  const statusRun = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${statusCalls.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
+  const statusRun = spawnSync(serverCommand, serverArgs, { cwd: new URL('..', import.meta.url), input: `${statusCalls.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
   assert.equal(statusRun.status, 0, statusRun.stderr);
   const statuses = statusRun.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
   assert.deepEqual(statuses.find((r) => r.id === 2).result.structuredContent, { status: 'written', requestId: v2Response.requestId, writtenKeys: ['DEEPSEEK_API_KEY'], skippedKeys: [], warnings: [] });
@@ -175,7 +183,7 @@ try {
   const call = (id, name, args) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: { ...args, response_format: 'json' } } });
   const session = (calls) => {
     const input = [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } }, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, ...calls];
-    const run = spawnSync(process.execPath, ['dist/index.js'], { cwd: new URL('..', import.meta.url), input: `${input.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
+    const run = spawnSync(serverCommand, serverArgs, { cwd: new URL('..', import.meta.url), input: `${input.map((message) => JSON.stringify(message)).join('\n')}\n`, encoding: 'utf8', env: { ...process.env, SECRETHUB_DB_PATH: databasePath, SECRETHUB_PLAN_DIR: planDirectory, SECRETHUB_RESULT_DIR: resultDirectory } });
     assert.equal(run.status, 0, run.stderr);
     return run.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
   };

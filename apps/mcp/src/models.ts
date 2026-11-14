@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { aiVisibleCondition } from './visibility.js';
+import { bundledProvidersJson } from './providers-data.js';
 
 // Fixed vocabulary shared with Rust and the skill (design §4).
 export const CAPABILITIES = ['chat', 'code', 'reasoning', 'vision', 'image_gen', 'video_gen', 'tts', 'asr', 'embedding', 'rerank'] as const;
@@ -207,7 +208,7 @@ export function effectiveModelsPath(dbPath: string): string {
 // Only model lists and the default come from the effective file; URLs, protocols and env names stay bundled.
 // The file lives in the same local directory as the vault, so it is trusted like the vault and not re-verified.
 export function loadModelProviders(effectivePath?: string): ModelProvider[] {
-  const bundled: ModelProvider[] = JSON.parse(readFileSync(new URL('../../../packages/provider-definitions/providers.json', import.meta.url), 'utf8'));
+  const bundled: ModelProvider[] = JSON.parse(bundledProvidersJson());
   if (!effectivePath) return bundled;
   let effective: Record<string, { defaultModel?: unknown; models?: unknown }>;
   try {

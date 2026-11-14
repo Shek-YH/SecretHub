@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { aiVisibleCondition } from './visibility.js';
+import { bundledProvidersJson } from './providers-data.js';
 
 export type CatalogSecret = {
   id: string;
@@ -100,7 +101,7 @@ function readCatalogSeed(path: string): CatalogSeed {
 type ProviderDefinition = { id: string; envKeys: string[]; aliases?: string[] };
 
 // Shared with the desktop UI and Rust crates; resolves from both src/ and dist/.
-const providerDefinitions: ProviderDefinition[] = JSON.parse(readFileSync(new URL('../../../packages/provider-definitions/providers.json', import.meta.url), 'utf8'));
+const providerDefinitions: ProviderDefinition[] = JSON.parse(bundledProvidersJson());
 
 export function recommendForStack(stack: string[], store: CatalogStore) {
   const normalized = stack.map((value) => value.toLowerCase());

@@ -69,6 +69,8 @@ export type ProjectEnvEntry = { original_key: string; key: string; value: string
 
 export type CatalogLastCheck = { at: number; result: 'updated' | 'up_to_date' | 'failed'; code?: string | null; detail: string };
 export type CatalogStatus = { serial: number; publishedAt: string; source: 'bundled' | 'remote'; urlConfigured: boolean; autoUpdate: boolean; lastCheck?: CatalogLastCheck | null };
+export type ConnectItem = { id: string; status: 'connected' | 'skipped' | 'failed'; detail: string };
+export type ConnectStatus = { connectedVersion: string | null; appVersion: string; sidecarFound: boolean };
 export type CatalogCheckResult = { result: 'updated' | 'up_to_date' | 'not_configured' | 'failed'; detail: string; status: CatalogStatus };
 
 export function isTauriRuntime() { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window; }
@@ -143,6 +145,8 @@ export const backend = {
   catalogStatus: () => invoke<CatalogStatus>('catalog_status'),
   catalogSetAutoUpdate: (enabled: boolean) => invoke<CatalogStatus>('catalog_set_auto_update', { enabled }),
   catalogCheckNow: () => invoke<CatalogCheckResult>('catalog_check_now'),
+  aiConnect: () => invoke<ConnectItem[]>('ai_connect'),
+  aiConnectStatus: () => invoke<ConnectStatus>('ai_connect_status'),
   audit: () => invoke<BackendAuditEvent[]>('audit_list'),
   backup: (directory: string) => invoke<string>('backup_export', { directory }),
   chooseBackupFile: () => invoke<string | null>('choose_backup_file'),

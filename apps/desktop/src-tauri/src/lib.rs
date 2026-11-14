@@ -28,6 +28,7 @@ mod queue;
 mod restore;
 mod scan;
 mod sync;
+mod connect;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
@@ -77,6 +78,7 @@ pub fn run() {
             catalog_update::start(app.handle().clone());
             sync::start(app.handle().clone());
             organize::start(app.handle().clone());
+            connect::refresh_after_upgrade(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -157,6 +159,8 @@ pub fn run() {
             commands::audit_list,
             commands::catalog_effective,
             sync::mcp_pending_sync_requests,
+            connect::ai_connect,
+            connect::ai_connect_status,
             capture::key_capture_start,
             capture::key_capture_cancel,
             capture::key_capture_status,
