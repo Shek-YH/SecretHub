@@ -33,6 +33,86 @@ pub struct SecretMetadata {
     pub model_env_key: String,
     pub endpoint_url: String,
     pub endpoint_env_key: String,
+    /// Unix seconds of the last model-list sync attempt; 0 means never.
+    pub models_synced_at: i64,
+    /// `""` (never), `ok`, `failed` or `unsupported`.
+    pub models_sync_status: String,
+}
+
+/// One synced model of one key, with any capability override already applied.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderModelRow {
+    pub model_id: String,
+    pub display_name: String,
+    pub input: Vec<String>,
+    pub output: Vec<String>,
+    pub capabilities: Vec<String>,
+    /// provider|catalog|heuristic|unknown, or the override source (user|ai).
+    pub capability_source: String,
+    pub synced_at: i64,
+}
+
+/// One library file (design M4). Media is not secret: no encryption, readable while locked.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MediaAsset {
+    pub id: String,
+    /// image | video | audio | text | other
+    pub kind: String,
+    /// Original file name (display only).
+    pub filename: String,
+    /// Absolute path of the copy inside the media directory.
+    pub stored_path: String,
+    pub sha256: String,
+    pub size_bytes: i64,
+    pub mime: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub description: String,
+    pub tags: Vec<String>,
+    /// user | ai
+    pub source: String,
+    pub created_at: i64,
+}
+
+const MEDIA_COLUMNS: &str = "id, kind, filename, stored_path, sha256, size_bytes, mime, width, height, duration_ms, description, tags_json, source, created_at";
+
+/// A non-chat capability model chosen for a key (the chat model stays in `secrets.model_id`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityModelRow {
+    pub capability: String,
+    pub model_id: String,
+    /// Environment variable name for manual export; empty means "do not export".
+    pub env_key: String,
+}
+
+/// Capabilities that can have a dedicated model besides the chat model, in display order.
+pub const CAPABILITY_MODEL_ORDER: [&str; 9] = [
+    "code",
+    "reasoning",
+    "vision",
+    "image_gen",
+    "video_gen",
+    "tts",
+    "asr",
+    "embedding",
+    "rerank",
+];
+
+/// Default environment variable name for a capability model row.
+pub fn default_capability_env_key(capability: &str) -> Option<&'static str> {
+    Some(match capability {
+        "code" => "CODE_MODEL",
+        "reasoning" => "REASONING_MODEL",
+        "vision" => "VISION_MODEL",
+        "image_gen" => "IMAGE_MODEL",
+        "video_gen" => "VIDEO_MODEL",
+        "tts" => "TTS_MODEL",
+        "asr" => "ASR_MODEL",
+        "embedding" => "EMBEDDING_MODEL",
+        "rerank" => "RERANK_MODEL",
+        _ => return None,
+    })
 }
 
 pub struct NewSecret {
@@ -208,6 +288,52 @@ impl Database {
                 display_name TEXT NOT NULL,
                 last_used_at INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS provider_models (
+                secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                input_json TEXT NOT NULL DEFAULT '[]',
+                output_json TEXT NOT NULL DEFAULT '[]',
+                capabilities_json TEXT NOT NULL DEFAULT '[]',
+                capability_source TEXT NOT NULL DEFAULT 'unknown',
+                synced_at INTEGER NOT NULL,
+                PRIMARY KEY (secret_id, model_id)
+             );
+             CREATE TABLE IF NOT EXISTS secret_capability_models (
+                secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                capability TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                env_key TEXT NOT NULL,
+                PRIMARY KEY (secret_id, capability)
+             );
+             CREATE TABLE IF NOT EXISTS media_assets (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                sha256 TEXT NOT NULL UNIQUE,
+                size_bytes INTEGER NOT NULL,
+                mime TEXT NOT NULL DEFAULT '',
+                width INTEGER,
+                height INTEGER,
+                duration_ms INTEGER,
+                description TEXT NOT NULL DEFAULT '',
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                source TEXT NOT NULL DEFAULT 'user',
+                created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS model_capability_overrides (
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                capabilities_json TEXT NOT NULL,
+                source TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (provider_id, model_id)
+             );
+             CREATE TABLE IF NOT EXISTS tags (
+                name TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 locale TEXT NOT NULL DEFAULT 'zh-CN',
@@ -272,6 +398,24 @@ impl Database {
             "archived",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "models_synced_at",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "secrets",
+            "models_sync_status",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "settings",
+            "catalog_auto_update",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         Ok(Self {
             connection,
             database_path,
@@ -335,14 +479,14 @@ impl Database {
 
     pub fn get_metadata(&self, id: &str) -> Result<Option<SecretMetadata>, StorageError> {
         self.connection.query_row(
-            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key FROM secrets WHERE id = ?1",
+            "SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets WHERE id = ?1",
             params![id],
             metadata_from_row,
         ).optional().map_err(Into::into)
     }
 
     pub fn list_metadata(&self) -> Result<Vec<SecretMetadata>, StorageError> {
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key FROM secrets ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map([], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -351,7 +495,7 @@ impl Database {
 
     pub fn search_metadata(&self, query: &str) -> Result<Vec<SecretMetadata>, StorageError> {
         let pattern = format!("%{}%", query);
-        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
+        let mut statement = self.connection.prepare("SELECT id, name, provider_id, env_key, description, tags_json, status, created_at, updated_at, value_type, category, scope, favorite, archived, model_id, model_env_key, endpoint_url, endpoint_env_key, models_synced_at, models_sync_status FROM secrets WHERE name LIKE ?1 COLLATE NOCASE OR provider_id LIKE ?1 COLLATE NOCASE OR env_key LIKE ?1 COLLATE NOCASE OR description LIKE ?1 COLLATE NOCASE OR tags_json LIKE ?1 COLLATE NOCASE OR category LIKE ?1 COLLATE NOCASE OR value_type LIKE ?1 COLLATE NOCASE OR model_id LIKE ?1 COLLATE NOCASE OR endpoint_url LIKE ?1 COLLATE NOCASE ORDER BY updated_at DESC")?;
         let rows = statement
             .query_map(params![pattern], metadata_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -413,6 +557,275 @@ impl Database {
             "UPDATE secrets SET name = ?1, provider_id = ?2, env_key = ?3, description = ?4, tags_json = ?5, value_type = ?6, category = ?7, scope = ?8, favorite = ?9, archived = ?10, model_id = ?11, model_env_key = ?12, endpoint_url = ?13, endpoint_env_key = ?14, updated_at = ?15 WHERE id = ?16",
             params![metadata.name, metadata.provider_id, metadata.env_key, metadata.description, tags_json, attributes.value_type, attributes.category, attributes.scope, attributes.favorite as i64, attributes.archived as i64, attributes.model_id, attributes.model_env_key, attributes.endpoint_url, attributes.endpoint_env_key, now, id],
         )? > 0)
+    }
+
+    /// Replaces all synced models of one key and records the sync outcome atomically.
+    pub fn replace_provider_models(
+        &self,
+        secret_id: &str,
+        rows: &[ProviderModelRow],
+        synced_at: i64,
+        status: &str,
+    ) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM provider_models WHERE secret_id = ?1",
+            params![secret_id],
+        )?;
+        {
+            let mut insert = transaction.prepare(
+                "INSERT OR REPLACE INTO provider_models(secret_id, model_id, display_name, input_json, output_json, capabilities_json, capability_source, synced_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for row in rows {
+                insert.execute(params![
+                    secret_id,
+                    row.model_id,
+                    row.display_name,
+                    to_json(&row.input)?,
+                    to_json(&row.output)?,
+                    to_json(&row.capabilities)?,
+                    row.capability_source,
+                    synced_at,
+                ])?;
+            }
+        }
+        transaction.execute(
+            "UPDATE secrets SET models_synced_at = ?1, models_sync_status = ?2 WHERE id = ?3",
+            params![synced_at, status, secret_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Records a failed/unsupported sync without touching stored model rows.
+    pub fn set_models_sync_status(
+        &self,
+        secret_id: &str,
+        status: &str,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "UPDATE secrets SET models_synced_at = ?1, models_sync_status = ?2 WHERE id = ?3",
+            params![at, status, secret_id],
+        )? > 0)
+    }
+
+    /// Lists a key's synced models; an override for (provider, model) wins over inferred tags.
+    pub fn list_provider_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<ProviderModelRow>, StorageError> {
+        type Raw = (String, String, String, String, String, String, i64);
+        let mut statement = self.connection.prepare(
+            "SELECT m.model_id, m.display_name, m.input_json, m.output_json,
+                    COALESCE(o.capabilities_json, m.capabilities_json),
+                    COALESCE(o.source, m.capability_source), m.synced_at
+             FROM provider_models m
+             JOIN secrets s ON s.id = m.secret_id
+             LEFT JOIN model_capability_overrides o
+               ON o.provider_id = s.provider_id AND o.model_id = m.model_id
+             WHERE m.secret_id = ?1
+             ORDER BY m.model_id",
+        )?;
+        let raw = statement
+            .query_map(params![secret_id], |row| -> rusqlite::Result<Raw> {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        raw.into_iter()
+            .map(
+                |(model_id, display_name, input, output, caps, source, synced_at)| {
+                    Ok(ProviderModelRow {
+                        model_id,
+                        display_name,
+                        input: from_json(&input)?,
+                        output: from_json(&output)?,
+                        capabilities: from_json(&caps)?,
+                        capability_source: source,
+                        synced_at,
+                    })
+                },
+            )
+            .collect()
+    }
+
+    pub fn insert_media(&self, asset: &MediaAsset) -> Result<(), StorageError> {
+        self.connection.execute(
+            &format!("INSERT INTO media_assets({MEDIA_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"),
+            params![
+                asset.id,
+                asset.kind,
+                asset.filename,
+                asset.stored_path,
+                asset.sha256,
+                asset.size_bytes,
+                asset.mime,
+                asset.width,
+                asset.height,
+                asset.duration_ms,
+                asset.description,
+                to_json(&asset.tags)?,
+                asset.source,
+                asset.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_media(&self, id: &str) -> Result<Option<MediaAsset>, StorageError> {
+        self.query_media("WHERE id = ?1", params![id])
+            .map(|mut rows| rows.pop())
+    }
+
+    pub fn find_media_by_sha(&self, sha256: &str) -> Result<Option<MediaAsset>, StorageError> {
+        self.query_media("WHERE sha256 = ?1", params![sha256])
+            .map(|mut rows| rows.pop())
+    }
+
+    /// Every asset, newest first.
+    pub fn list_media(&self) -> Result<Vec<MediaAsset>, StorageError> {
+        self.query_media("", params![])
+    }
+
+    fn query_media(
+        &self,
+        condition: &str,
+        arguments: impl rusqlite::Params,
+    ) -> Result<Vec<MediaAsset>, StorageError> {
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT {MEDIA_COLUMNS} FROM media_assets {condition} ORDER BY created_at DESC, id"
+        ))?;
+        let raw = statement
+            .query_map(arguments, |row| {
+                Ok((
+                    MediaAsset {
+                        id: row.get(0)?,
+                        kind: row.get(1)?,
+                        filename: row.get(2)?,
+                        stored_path: row.get(3)?,
+                        sha256: row.get(4)?,
+                        size_bytes: row.get(5)?,
+                        mime: row.get(6)?,
+                        width: row.get(7)?,
+                        height: row.get(8)?,
+                        duration_ms: row.get(9)?,
+                        description: row.get(10)?,
+                        tags: Vec::new(),
+                        source: row.get(12)?,
+                        created_at: row.get(13)?,
+                    },
+                    row.get::<_, String>(11)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        raw.into_iter()
+            .map(|(mut asset, tags)| {
+                asset.tags = from_json(&tags)?;
+                Ok(asset)
+            })
+            .collect()
+    }
+
+    pub fn update_media_meta(
+        &self,
+        id: &str,
+        description: &str,
+        tags: &[String],
+    ) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "UPDATE media_assets SET description = ?1, tags_json = ?2 WHERE id = ?3",
+            params![description, to_json(tags)?, id],
+        )? > 0)
+    }
+
+    /// Removes the row and returns it so the caller can delete the stored copy.
+    pub fn delete_media(&self, id: &str) -> Result<Option<MediaAsset>, StorageError> {
+        let existing = self.get_media(id)?;
+        if existing.is_some() {
+            self.connection
+                .execute("DELETE FROM media_assets WHERE id = ?1", params![id])?;
+        }
+        Ok(existing)
+    }
+
+    /// A key's per-capability model choices in display order.
+    pub fn list_capability_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<CapabilityModelRow>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT capability, model_id, env_key FROM secret_capability_models WHERE secret_id = ?1",
+        )?;
+        let mut rows = statement
+            .query_map(params![secret_id], |row| {
+                Ok(CapabilityModelRow {
+                    capability: row.get(0)?,
+                    model_id: row.get(1)?,
+                    env_key: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.sort_by_key(|row| {
+            CAPABILITY_MODEL_ORDER
+                .iter()
+                .position(|item| *item == row.capability)
+                .unwrap_or(usize::MAX)
+        });
+        Ok(rows)
+    }
+
+    /// Replaces all capability model rows of one key atomically. Validation is the caller's job.
+    pub fn replace_capability_models(
+        &self,
+        secret_id: &str,
+        rows: &[CapabilityModelRow],
+    ) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM secret_capability_models WHERE secret_id = ?1",
+            params![secret_id],
+        )?;
+        {
+            let mut insert = transaction.prepare(
+                "INSERT INTO secret_capability_models(secret_id, capability, model_id, env_key) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for row in rows {
+                insert.execute(params![
+                    secret_id,
+                    row.capability,
+                    row.model_id,
+                    row.env_key
+                ])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Stores a confirmed capability override; syncing never touches this table.
+    pub fn upsert_capability_override(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        capabilities: &[String],
+        source: &str,
+    ) -> Result<(), StorageError> {
+        self.connection.execute(
+            "INSERT INTO model_capability_overrides(provider_id, model_id, capabilities_json, source, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider_id, model_id) DO UPDATE SET capabilities_json = excluded.capabilities_json, source = excluded.source, updated_at = excluded.updated_at",
+            params![provider_id, model_id, to_json(capabilities)?, source, unix_time()],
+        )?;
+        Ok(())
     }
 
     pub fn update_status(&self, id: &str, status: &str) -> Result<bool, StorageError> {
@@ -550,10 +963,79 @@ impl Database {
         Ok(projects)
     }
 
+    /// Tag library: stored tags unioned with tags used on secrets, deduped case-insensitively.
+    pub fn list_tags(&self) -> Result<Vec<String>, StorageError> {
+        let mut names: Vec<String> = self
+            .connection
+            .prepare("SELECT name FROM tags")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        for secret in self.list_metadata()? {
+            names.extend(secret.tags);
+        }
+        for asset in self.list_media()? {
+            names.extend(asset.tags);
+        }
+        let mut seen = std::collections::HashSet::new();
+        names.retain(|name| !name.trim().is_empty() && seen.insert(name.trim().to_lowercase()));
+        names.sort_by_key(|name| (name.to_lowercase(), name.clone()));
+        Ok(names)
+    }
+
+    /// Adds a tag to the library; a case-insensitive duplicate returns the existing spelling.
+    pub fn create_tag(&self, name: &str) -> Result<String, StorageError> {
+        let name = name.trim();
+        let length = name.chars().count();
+        if length == 0 || length > 32 || name.contains(',') || name.chars().any(char::is_control) {
+            return Err(StorageError::InvalidData("invalid tag name".to_owned()));
+        }
+        if let Some(existing) = self
+            .list_tags()?
+            .into_iter()
+            .find(|tag| tag.to_lowercase() == name.to_lowercase())
+        {
+            return Ok(existing);
+        }
+        self.connection.execute(
+            "INSERT INTO tags(name, created_at) VALUES (?1, ?2)",
+            params![name, unix_time()],
+        )?;
+        Ok(name.to_owned())
+    }
+
+    /// Removes a tag from the library only; secrets keep their tags.
+    pub fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+        Ok(self.connection.execute(
+            "DELETE FROM tags WHERE lower(name) = lower(?1)",
+            params![name.trim()],
+        )? > 0)
+    }
+
     pub fn get_settings(&self) -> Result<Settings, StorageError> {
         self.connection
             .execute("INSERT OR IGNORE INTO settings(id) VALUES (1)", [])?;
         self.connection.query_row("SELECT locale, theme, auto_lock_minutes, clipboard_timeout_seconds, require_auth_before_export, require_auth_before_reveal FROM settings WHERE id = 1", [], |row| Ok(Settings { locale: row.get(0)?, theme: row.get(1)?, auto_lock_minutes: row.get(2)?, clipboard_timeout_seconds: row.get(3)?, require_auth_before_export: row.get::<_, i64>(4)? != 0, require_auth_before_reveal: row.get::<_, i64>(5)? != 0 })).map_err(Into::into)
+    }
+
+    /// Whether the remote model catalog is fetched automatically (default on).
+    pub fn catalog_auto_update(&self) -> Result<bool, StorageError> {
+        self.connection
+            .execute("INSERT OR IGNORE INTO settings(id) VALUES (1)", [])?;
+        Ok(self.connection.query_row(
+            "SELECT catalog_auto_update FROM settings WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? != 0)
+    }
+
+    pub fn set_catalog_auto_update(&self, enabled: bool) -> Result<(), StorageError> {
+        self.connection
+            .execute("INSERT OR IGNORE INTO settings(id) VALUES (1)", [])?;
+        self.connection.execute(
+            "UPDATE settings SET catalog_auto_update = ?1 WHERE id = 1",
+            params![enabled as i64],
+        )?;
+        Ok(())
     }
 
     pub fn update_settings(&self, settings: &Settings) -> Result<(), StorageError> {
@@ -586,7 +1068,17 @@ fn metadata_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecretMetadata
         model_env_key: row.get(15)?,
         endpoint_url: row.get(16)?,
         endpoint_env_key: row.get(17)?,
+        models_synced_at: row.get(18)?,
+        models_sync_status: row.get(19)?,
     })
+}
+
+fn to_json(values: &[String]) -> Result<String, StorageError> {
+    serde_json::to_string(values).map_err(|error| StorageError::InvalidData(error.to_string()))
+}
+
+fn from_json(text: &str) -> Result<Vec<String>, StorageError> {
+    serde_json::from_str(text).map_err(|error| StorageError::InvalidData(error.to_string()))
 }
 
 fn add_column_if_missing(

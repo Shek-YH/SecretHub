@@ -1,0 +1,11 @@
+[
+  { "pattern": "embed|(^|[-_/.:])(bge|e5)($|[-_/.:])", "capabilities": ["embedding"] },
+  { "pattern": "rerank", "capabilities": ["rerank"] },
+  { "pattern": "(^|[-_/.:])tts($|[-_/.:])|cosyvoice|text-to-speech", "capabilities": ["tts"] },
+  { "pattern": "whisper|paraformer|transcribe|sensevoice|(^|[-_/.:])asr($|[-_/.:])", "capabilities": ["asr"] },
+  { "pattern": "seedream|gpt-image|dall-e|dalle|stable-diffusion|imagen|midjourney|cogview|(^|[-_/.:])(flux|sdxl)($|[-_/.:0-9])", "capabilities": ["image_gen"] },
+  { "pattern": "seedance|kling|hailuo|cogvideo|(^|[-_/.:])(sora|veo)($|[-_/.:0-9])|(^|[-_/.:])(t2v|i2v)($|[-_/.:])", "capabilities": ["video_gen"] },
+  { "pattern": "vision|llava|pixtral|(^|[-_/.:])(vl|vlm)($|[-_/.:0-9])", "capabilities": ["vision"] },
+  { "pattern": "coder|codestral|devstral|codex|(^|[-_/.:])code($|[-_/.:])", "capabilities": ["code"] },
+  { "pattern": "thinking|reasoner|reasoning|magistral|(^|[-_/.:])(r1|qwq)($|[-_/.:])|(^|[-_/.:])o[134]($|[-_/.:])", "capabilities": ["reasoning"] }
+]

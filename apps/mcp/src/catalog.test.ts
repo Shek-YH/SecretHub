@@ -26,4 +26,36 @@ describe('AI-safe catalog', () => {
     expect(result.available).toEqual(['OPENAI_API_KEY', 'SUPABASE_URL']);
     expect(result.missing).toEqual(['SUPABASE_ANON_KEY']);
   });
+
+  it('recommends keys for any provider in the shared catalog, including aliases', () => {
+    expect(recommendForStack(['claude-code', 'Kimi', 'grok'], store()).recommended).toEqual(['MOONSHOT_API_KEY', 'ANTHROPIC_API_KEY', 'XAI_API_KEY']);
+  });
+});
+
+describe('vault-backed catalog', () => {
+  it('sees secrets added after the MCP server opened the vault', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { DatabaseSync } = await import('node:sqlite');
+    const { openCatalogStore } = await import('./catalog.js');
+    const directory = mkdtempSync(join(tmpdir(), 'secrethub-mcp-'));
+    const path = join(directory, 'vault.sqlite');
+    const db = new DatabaseSync(path);
+    db.exec(`CREATE TABLE secrets (id TEXT PRIMARY KEY, name TEXT, provider_id TEXT, env_key TEXT, status TEXT, tags_json TEXT, value_type TEXT, category TEXT, scope TEXT, favorite INTEGER, archived INTEGER, model_id TEXT, model_env_key TEXT, endpoint_url TEXT, endpoint_env_key TEXT, updated_at INTEGER);
+      CREATE TABLE secret_payloads (secret_id TEXT PRIMARY KEY);
+      CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at INTEGER);
+      CREATE TABLE profile_secrets (profile_id TEXT, secret_id TEXT, position INTEGER);
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT, display_name TEXT, last_used_at INTEGER);`);
+    try {
+      const catalog = openCatalogStore(path);
+      expect(catalog.list({ limit: 10, offset: 0 }).total).toBe(0);
+      db.exec(`INSERT INTO secrets VALUES ('secret-1', 'OpenAI', 'openai', 'OPENAI_API_KEY', 'valid', '[]', 'api_key', 'ai', 'global', 0, 0, '', '', '', '', 1)`);
+      db.exec(`INSERT INTO secret_payloads VALUES ('secret-1')`);
+      expect(catalog.get('secret-1')).toEqual(expect.objectContaining({ envKey: 'OPENAI_API_KEY', status: 'valid', hasValue: true }));
+    } finally {
+      db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

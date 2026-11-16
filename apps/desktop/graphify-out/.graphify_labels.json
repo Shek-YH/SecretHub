@@ -1,0 +1,17 @@
+{
+  "0": "App.tsx",
+  "1": "String",
+  "2": "commands.rs",
+  "3": "compilerOptions",
+  "4": "devDependencies",
+  "5": "tauri.conf.json",
+  "6": "package.json",
+  "7": "compilerOptions",
+  "8": "database_path",
+  "9": "tsconfig.json",
+  "10": "build.rs",
+  "11": "main.rs",
+  "12": "test-setup.ts",
+  "13": "vite.config.ts",
+  "14": "vitest.config.ts"
+}

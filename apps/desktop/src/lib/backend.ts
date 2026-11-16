@@ -1,11 +1,46 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import type { EffectiveModels } from '../providers';
 
-export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; created_at: number; updated_at: number };
+/** Dispatched on window whenever a backend call fails because the vault auto-locked. */
+export const AUTO_LOCK_EVENT = 'secrethub:auto-locked';
+
+export function isAutoLockError(error: unknown): boolean {
+  return String(error).includes('auto-locked');
+}
+
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await tauriInvoke<T>(command, args);
+  } catch (error) {
+    if (isAutoLockError(error)) window.dispatchEvent(new Event(AUTO_LOCK_EVENT));
+    throw error;
+  }
+}
+
+export type BackendSecret = { id: string; name: string; provider_id: string; env_key: string; description: string; tags: string[]; status: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string; models_synced_at: number; models_sync_status: string; created_at: number; updated_at: number };
 export type VaultStatus = { initialized: boolean; unlocked: boolean };
-export type PendingPlan = { request_id: string; kind: string; project_path: string; secret_ids: string[]; created_at: string };
+export type PendingPlan = { request_id: string; kind: string; project_path: string; secret_ids: string[]; version?: number; bindings?: unknown[]; created_at: string };
+export type PlanPreviewEntry = { key: string; secretName?: string; kind: 'api_key' | 'base_url' | 'model' | 'v1'; display: string; capability?: string; conflict: boolean; warnings: string[] };
+export type PlanPreview = { requestId: string; projectPath: string; version: number; entries: PlanPreviewEntry[]; errors: Array<{ code: string; message: string }> };
+export type CapabilitySuggestion = { modelId: string; capabilities: string[]; evidenceUrl?: string; current?: { capabilities: string[]; source: string } };
+export type CapabilitySuggestionBatch = { requestId: string; providerId: string; createdAt: string; suggestions: CapabilitySuggestion[] };
 export type BackendAuditEvent = { id: string; operation: string; secret_id?: string | null; result: string; created_at: number };
-export type BackendValidationResult = { id: string; status: string };
+export type BackendValidationResult = { id: string; status: string; models_sync_status: string };
+export type BackendModel = { model_id: string; display_name: string; input: string[]; output: string[]; capabilities: string[]; capability_source: string; synced_at: number };
+export type CapabilityModelRow = { capability: string; model_id: string; env_key: string };
+export type PendingSyncRequest = { requestId: string; secretCount: number | null; createdAt: string };
+export type CaptureStatus = { state: 'idle' | 'waiting' | 'captured' | 'timeout' | 'cancelled'; providerId: string | null; remainingSeconds: number; secretId: string | null; validation: string | null };
+export type CaptureRequest = { requestId: string; providerId: string; providerName: string; createdAt: string };
+export type MediaAsset = { id: string; kind: string; filename: string; stored_path: string; sha256: string; size_bytes: number; mime: string; width: number | null; height: number | null; duration_ms: number | null; description: string; tags: string[]; source: string; created_at: number };
+export type MediaListing = { assets: MediaAsset[]; count: number; usage_bytes: number; ffprobe: boolean };
+export type MediaImportItem = { path: string; ok: boolean; id: string | null; duplicate: boolean; error: string | null };
+export type MediaRequest = { requestId: string; path: string; filename: string; sizeBytes: number | null; problem: string | null; description: string; tags: string[]; createdAt: string };
+export type BackendModelSync = { id: string; status: string; count: number };
 export type ProjectEnvEntry = { original_key: string; key: string; value: string; source: 'managed' | 'manual'; secret_id?: string | null };
+
+export type CatalogLastCheck = { at: number; result: 'updated' | 'up_to_date' | 'failed'; code?: string | null; detail: string };
+export type CatalogStatus = { serial: number; publishedAt: string; source: 'bundled' | 'remote'; urlConfigured: boolean; autoUpdate: boolean; lastCheck?: CatalogLastCheck | null };
+export type CatalogCheckResult = { result: 'updated' | 'up_to_date' | 'not_configured' | 'failed'; detail: string; status: CatalogStatus };
 
 export function isTauriRuntime() { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window; }
 
@@ -14,6 +49,7 @@ export const backend = {
   setupMaster: (password: string) => invoke<void>('setup_master', { password }),
   unlock: (password: string) => invoke<void>('unlock', { password }),
   lock: () => invoke<void>('lock'),
+  touch: () => invoke<void>('vault_touch'),
   list: (query?: string) => invoke<BackendSecret[]>('secret_list', { query }),
   create: (request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<string>('secret_create', { request }),
   update: (id: string, request: { name: string; provider_id: string; env_key: string; description: string; tags: string[]; value: string; value_type: string; category: string; scope: string; favorite: boolean; archived: boolean; model_id: string; model_env_key: string; endpoint_url: string; endpoint_env_key: string }) => invoke<void>('secret_update', { id, request }),
@@ -25,6 +61,10 @@ export const backend = {
   reveal: (id: string) => invoke<void>('secret_reveal', { id }),
   validate: (id: string) => invoke<string>('secret_validate', { id }),
   validateMany: () => invoke<BackendValidationResult[]>('secret_validate_many'),
+  syncModels: (id: string) => invoke<BackendModelSync>('secret_sync_models', { id }),
+  models: (id: string) => invoke<BackendModel[]>('secret_models', { id }),
+  capabilityModels: (id: string) => invoke<CapabilityModelRow[]>('secret_capability_models', { id }),
+  setCapabilityModels: (id: string, rows: CapabilityModelRow[]) => invoke<void>('secret_set_capability_models', { id, rows }),
   openExternalUrl: (url: string) => invoke<void>('open_external_url', { url }),
   preview: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<string>('export_preview', { request }),
   export: (request: { directory: string; secret_ids: string[]; write_example: boolean; replace_existing: boolean; ensure_gitignore: boolean }) => invoke<void>('export_env', { request }),
@@ -38,8 +78,35 @@ export const backend = {
   openProjectDirectory: (path: string) => invoke<void>('open_project_directory', { path }),
   projectEnvPreview: (path: string) => invoke<ProjectEnvEntry[]>('project_env_preview', { path }),
   projectEnvSave: (request: { directory: string; entries: ProjectEnvEntry[] }) => invoke<void>('project_env_save', { request }),
+  tagList: () => invoke<string[]>('tag_list'),
+  tagCreate: (name: string) => invoke<string>('tag_create', { name }),
+  tagDelete: (name: string) => invoke<boolean>('tag_delete', { name }),
+  catalogEffective: () => invoke<EffectiveModels>('catalog_effective'),
+  catalogStatus: () => invoke<CatalogStatus>('catalog_status'),
+  catalogSetAutoUpdate: (enabled: boolean) => invoke<CatalogStatus>('catalog_set_auto_update', { enabled }),
+  catalogCheckNow: () => invoke<CatalogCheckResult>('catalog_check_now'),
   audit: () => invoke<BackendAuditEvent[]>('audit_list'),
   backup: (path: string) => invoke<void>('backup_export', { path }),
   pendingPlans: () => invoke<PendingPlan[]>('mcp_pending_plans'),
-  confirmPlan: (request_id: string, confirmed: boolean) => invoke<void>('mcp_confirm_plan', { requestId: request_id, confirmed }),
+  planPreview: (request_id: string) => invoke<PlanPreview>('mcp_plan_preview', { requestId: request_id }),
+  pendingCapabilitySuggestions: () => invoke<CapabilitySuggestionBatch[]>('mcp_pending_capability_suggestions'),
+  resolveCapabilitySuggestions: (request_id: string, accepted_model_ids: string[]) => invoke<void>('mcp_resolve_capability_suggestions', { requestId: request_id, acceptedModelIds: accepted_model_ids }),
+  pendingSyncRequests: () => invoke<PendingSyncRequest[]>('mcp_pending_sync_requests'),
+  captureStart: (providerId: string) => invoke<CaptureStatus>('key_capture_start', { providerId }),
+  captureCancel: () => invoke<CaptureStatus>('key_capture_cancel'),
+  captureStatus: () => invoke<CaptureStatus>('key_capture_status'),
+  pendingCaptureRequests: () => invoke<CaptureRequest[]>('mcp_pending_capture_requests'),
+  captureDecision: (requestId: string, accept: boolean) => invoke<CaptureStatus>('mcp_capture_decision', { requestId, accept }),
+  mediaList: () => invoke<MediaListing>('media_list'),
+  mediaChooseFiles: () => invoke<string[] | null>('media_choose_files'),
+  mediaImport: (paths: string[]) => invoke<MediaImportItem[]>('media_import', { paths }),
+  mediaCreateText: (name: string, content: string, description: string, tags: string[]) => invoke<MediaAsset>('media_create_text', { name, content, description, tags }),
+  mediaUpdate: (id: string, description: string, tags: string[]) => invoke<boolean>('media_update', { id, description, tags }),
+  mediaDelete: (id: string) => invoke<boolean>('media_delete', { id }),
+  mediaCopyPath: (id: string) => invoke<void>('media_copy_path', { id }),
+  mediaReveal: (id: string) => invoke<void>('media_reveal', { id }),
+  mediaThumbnail: (id: string) => invoke<string | null>('media_thumbnail', { id }),
+  pendingMediaRequests: () => invoke<MediaRequest[]>('mcp_pending_media_requests'),
+  mediaDecision: (requestId: string, accept: boolean) => invoke<void>('mcp_media_decision', { requestId, accept }),
+  confirmPlan: (request_id: string, confirmed: boolean, skip_keys?: string[]) => invoke<void>('mcp_confirm_plan', { requestId: request_id, confirmed, skipKeys: skip_keys }),
 };

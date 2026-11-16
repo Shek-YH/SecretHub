@@ -1,0 +1,20 @@
+{
+  "models": [
+    {
+      "name": "models/gemini-3.5-flash",
+      "version": "3.5",
+      "displayName": "Gemini 3.5 Flash",
+      "inputTokenLimit": 1048576,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": ["generateContent", "countTokens"],
+      "thinking": true
+    },
+    {
+      "name": "models/text-embedding-004",
+      "version": "004",
+      "displayName": "Text Embedding 004",
+      "supportedGenerationMethods": ["embedContent"]
+    }
+  ],
+  "nextPageToken": "page-2-token"
+}

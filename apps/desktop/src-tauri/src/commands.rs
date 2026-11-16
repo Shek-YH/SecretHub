@@ -1,10 +1,11 @@
+use super::caps;
+use super::plan::{self, PendingPlan, PlanError, PlanPreview, PlanResult, WriteOptions};
 use super::AppState;
 use arboard::Clipboard;
 use secrethub_core::{NewSecretInput, VaultService};
 use secrethub_exporter::{
-    detect_conflicts, ensure_gitignore_env, env_is_tracked, gitignore_has_env, parse_env_entries,
-    parse_json_entries, render_env, render_example, validate_export_directory, write_atomic,
-    EnvEntry,
+    detect_conflicts, parse_env_entries, parse_json_entries, render_env, validate_export_directory,
+    write_atomic, EnvEntry,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -66,6 +67,9 @@ pub struct ExportRequest {
     pub write_example: bool,
     pub replace_existing: bool,
     pub ensure_gitignore: bool,
+    /// Upsert into existing `.env`/`.env.example` instead of writing fresh files.
+    #[serde(default)]
+    pub merge_existing: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,15 +85,6 @@ pub struct ImportRequest {
     pub format: String,
     pub contents: String,
     pub confirmed: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PendingPlan {
-    pub request_id: String,
-    pub kind: String,
-    pub project_path: String,
-    pub secret_ids: Vec<String>,
-    pub created_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,6 +155,13 @@ pub fn vault_status(state: State<'_, AppState>) -> Result<VaultStatus, String> {
         initialized: vault.is_initialized().map_err(|error| error.to_string())?,
         unlocked: vault.is_unlocked(),
     })
+}
+
+/// Records user activity (typing/clicking in the UI) so idle auto-lock measures
+/// real inactivity rather than the time since the last backend call.
+#[tauri::command]
+pub fn vault_touch(state: State<'_, AppState>) -> Result<(), String> {
+    touch_activity(&state)
 }
 
 #[tauri::command]
@@ -347,7 +349,7 @@ fn copy_to_clipboard(value: String, timeout_seconds: u64) -> Result<(), String> 
 #[tauri::command]
 pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), String> {
     touch_activity(&state)?;
-    let (metadata, value) = {
+    let (metadata, value, rows) = {
         let vault = vault_from_state(&state)?;
         let vault = vault
             .as_ref()
@@ -359,9 +361,12 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
             .find(|item| item.id == id)
             .ok_or_else(|| "secret not found".to_owned())?;
         let value = vault.read_secret(&id).map_err(|error| error.to_string())?;
-        (metadata, value)
+        let rows = vault
+            .list_capability_models(&id)
+            .map_err(|error| error.to_string())?;
+        (metadata, value, rows)
     };
-    let entries = selected_entries_from_metadata(&metadata, value);
+    let entries = selected_entries_from_metadata(&metadata, value, &rows);
     let copied = render_env(&entries).map_err(|error| error.to_string())?;
     copy_to_clipboard(copied, 30)?;
     vault_from_state(&state)?
@@ -372,19 +377,23 @@ pub fn secret_copy_all(id: String, state: State<'_, AppState>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn secret_validate(id: String, state: State<'_, AppState>) -> Result<String, String> {
     touch_activity(&state)?;
-    validate_secret_inner(&id, &state)
+    let report = check_secret(&id, &state, true).await?;
+    Ok(report.validation.unwrap_or_default())
 }
 
 #[derive(Debug, Serialize)]
 pub struct ValidationResult {
     pub id: String,
     pub status: String,
+    pub models_sync_status: String,
 }
 
 #[tauri::command]
-pub fn secret_validate_many(state: State<'_, AppState>) -> Result<Vec<ValidationResult>, String> {
+pub async fn secret_validate_many(
+    state: State<'_, AppState>,
+) -> Result<Vec<ValidationResult>, String> {
     touch_activity(&state)?;
     let ids = {
         let vault = vault_from_state(&state)?;
@@ -398,17 +407,103 @@ pub fn secret_validate_many(state: State<'_, AppState>) -> Result<Vec<Validation
             .map(|item| item.id)
             .collect::<Vec<_>>()
     };
-    ids.iter()
-        .map(|id| {
-            validate_secret_inner(id, &state).map(|status| ValidationResult {
-                id: id.clone(),
-                status,
-            })
-        })
-        .collect()
+    let mut results = Vec::with_capacity(ids.len());
+    for id in ids {
+        let report = check_secret(&id, &state, true).await?;
+        results.push(ValidationResult {
+            id,
+            status: report.validation.unwrap_or_default(),
+            models_sync_status: report.models_status,
+        });
+    }
+    Ok(results)
 }
 
-fn validate_secret_inner(id: &str, state: &State<'_, AppState>) -> Result<String, String> {
+#[derive(Debug, Serialize)]
+pub struct ModelSyncResult {
+    pub id: String,
+    pub status: String,
+    pub count: usize,
+}
+
+/// Re-fetches only the model list ("Sync models"); the validation status is left as is.
+#[tauri::command]
+pub async fn secret_sync_models(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<ModelSyncResult, String> {
+    touch_activity(&state)?;
+    let report = check_secret(&id, &state, false).await?;
+    Ok(ModelSyncResult {
+        id,
+        status: report.models_status,
+        count: report.count,
+    })
+}
+
+/// Per-capability model choices of one key (metadata only).
+#[tauri::command]
+pub fn secret_capability_models(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<secrethub_storage::CapabilityModelRow>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .list_capability_models(&id)
+        .map_err(|error| error.to_string())
+}
+
+/// Replaces the per-capability model choices of one key; rows with an empty model are dropped.
+#[tauri::command]
+pub fn secret_set_capability_models(
+    id: String,
+    rows: Vec<secrethub_storage::CapabilityModelRow>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .set_capability_models(&id, &rows)
+        .map_err(|error| error.to_string())
+}
+
+/// Stored model metadata of one key (no secret values), overrides applied.
+#[tauri::command]
+pub fn secret_models(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<secrethub_storage::ProviderModelRow>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .list_provider_models(&id)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) struct CheckReport {
+    pub(crate) validation: Option<String>,
+    pub(crate) models_status: String,
+    pub(crate) count: usize,
+}
+
+/// What to store for the model list after a check.
+enum ModelsWrite {
+    Rows(Vec<secrethub_storage::ProviderModelRow>),
+    Status(&'static str),
+    Keep,
+}
+
+/// Validates the key and syncs its model list with one request path.
+/// The vault lock is never held across an `.await`.
+pub(crate) async fn check_secret(
+    id: &str,
+    state: &State<'_, AppState>,
+    update_validation: bool,
+) -> Result<CheckReport, String> {
     let (provider_id, value) = {
         let vault = vault_from_state(state)?;
         let vault = vault
@@ -425,45 +520,90 @@ fn validate_secret_inner(id: &str, state: &State<'_, AppState>) -> Result<String
             vault.read_secret(id).map_err(|error| error.to_string())?,
         )
     };
-    let Some(endpoint) = secrethub_providers::validation_endpoint(&provider_id) else {
-        vault_from_state(state)?
-            .as_ref()
-            .ok_or_else(|| "vault unavailable".to_owned())?
-            .update_validation_status(id, "unsupported")
-            .map_err(|error| error.to_string())?;
-        return Ok("unsupported".to_owned());
-    };
-    let client = reqwest::blocking::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|_| "network_error".to_owned())?;
-    let mut request = client.get(endpoint);
-    if provider_id == "gemini" {
-        request = request.header("x-goog-api-key", &value);
-    } else if provider_id == "anthropic" {
-        request = request
-            .header("x-api-key", &value)
-            .header("anthropic-version", "2023-06-01");
-    } else {
-        request = request.bearer_auth(&value);
-    }
-    let status = match request.send() {
-        Ok(response) if response.status().is_success() => "valid",
-        Ok(response) if response.status().as_u16() == 401 || response.status().as_u16() == 403 => {
-            "unauthorized"
+    let endpoint = secrethub_providers::models_endpoint(&provider_id);
+    let (validation, write) = match &endpoint {
+        None => {
+            drop(value);
+            ("unsupported", ModelsWrite::Status("unsupported"))
         }
-        Ok(response) if response.status().as_u16() == 429 => "rate_limited",
-        Ok(response) if response.status().is_client_error() => "invalid",
-        Ok(_) | Err(_) => "network_error",
+        Some(endpoint) => {
+            let fetched = crate::model_sync::fetch(endpoint, &value, endpoint.lists_models).await;
+            drop(value);
+            plan_writes(endpoint, &provider_id, fetched, update_validation)
+        }
     };
-    drop(value);
-    vault_from_state(state)?
-        .as_ref()
-        .ok_or_else(|| "vault unavailable".to_owned())?
-        .update_validation_status(id, status)
-        .map_err(|error| error.to_string())?;
-    Ok(status.to_owned())
+    let now = super::now_seconds() as i64;
+    let (models_status, count) = {
+        let guard = vault_from_state(state)?;
+        let vault = guard
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        if update_validation {
+            vault
+                .update_validation_status(id, validation)
+                .map_err(|error| error.to_string())?;
+        }
+        let (status, count) = match write {
+            ModelsWrite::Rows(rows) => {
+                vault
+                    .replace_provider_models(id, &rows, now, "ok")
+                    .map_err(|error| error.to_string())?;
+                ("ok", rows.len())
+            }
+            ModelsWrite::Status(status) => {
+                vault
+                    .set_models_sync_status(id, status, now)
+                    .map_err(|error| error.to_string())?;
+                (status, 0)
+            }
+            ModelsWrite::Keep => ("", 0),
+        };
+        if !status.is_empty() {
+            vault
+                .record_action(
+                    "models_synced",
+                    Some(id),
+                    &serde_json::json!({"source": "desktop", "status": status, "count": count})
+                        .to_string(),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        (status.to_owned(), count)
+    };
+    Ok(CheckReport {
+        validation: update_validation.then(|| validation.to_owned()),
+        models_status,
+        count,
+    })
+}
+
+/// Pure mapping from a fetch result to the validation status and model-list write.
+fn plan_writes(
+    endpoint: &secrethub_providers::ModelsEndpoint,
+    provider_id: &str,
+    fetched: crate::model_sync::Fetched,
+    update_validation: bool,
+) -> (&'static str, ModelsWrite) {
+    let outcome = fetched
+        .http_status
+        .map(|status| secrethub_providers::map_validation_status(status, endpoint.is_fallback));
+    let validation = outcome.map_or("network_error", |outcome| outcome.status);
+    let write = match (outcome, fetched.models) {
+        (Some(outcome), _) if outcome.models_unsupported => ModelsWrite::Status("unsupported"),
+        (Some(outcome), models) if outcome.status == "valid" => {
+            if !endpoint.lists_models {
+                ModelsWrite::Status("unsupported")
+            } else if let Some(models) = models {
+                ModelsWrite::Rows(crate::model_sync::build_rows(provider_id, &models))
+            } else {
+                ModelsWrite::Status("failed")
+            }
+        }
+        // Key rejected or network trouble: a plain validation run keeps the last sync result.
+        _ if update_validation => ModelsWrite::Keep,
+        _ => ModelsWrite::Status("failed"),
+    };
+    (validation, write)
 }
 
 #[tauri::command]
@@ -499,7 +639,25 @@ pub fn secret_reveal(id: String, state: State<'_, AppState>) -> Result<(), Strin
     Ok(())
 }
 
-fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>, String> {
+/// Entries for legacy plans: key, primary model and endpoint only (plan previews rely on this).
+pub(crate) fn selected_entries(
+    vault: &VaultService,
+    ids: &[String],
+) -> Result<Vec<EnvEntry>, String> {
+    entries_for(vault, ids, false)
+}
+
+/// Entries for manual export: like `selected_entries`, plus the per-capability model rows
+/// right after the primary model.
+fn export_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry>, String> {
+    entries_for(vault, ids, true)
+}
+
+fn entries_for(
+    vault: &VaultService,
+    ids: &[String],
+    with_capabilities: bool,
+) -> Result<Vec<EnvEntry>, String> {
     let metadata = vault.list_metadata().map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
     for id in ids {
@@ -526,6 +684,13 @@ fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry
                 model_entry
             });
         }
+        if with_capabilities {
+            entries.extend(capability_entries(
+                &vault
+                    .list_capability_models(&item.id)
+                    .map_err(|error| error.to_string())?,
+            ));
+        }
         if !item.endpoint_url.trim().is_empty() {
             entries.push(EnvEntry::new(
                 safe_endpoint_env_key(item),
@@ -536,9 +701,18 @@ fn selected_entries(vault: &VaultService, ids: &[String]) -> Result<Vec<EnvEntry
     Ok(entries)
 }
 
-fn selected_entries_from_metadata(
+/// `ENV=model_id` rows for the per-capability models; rows without an env name are not exported.
+fn capability_entries(rows: &[secrethub_storage::CapabilityModelRow]) -> Vec<EnvEntry> {
+    rows.iter()
+        .filter(|row| is_env_key(&row.env_key) && !row.model_id.trim().is_empty())
+        .map(|row| EnvEntry::new(row.env_key.clone(), row.model_id.clone()))
+        .collect()
+}
+
+pub(crate) fn selected_entries_from_metadata(
     metadata: &secrethub_storage::SecretMetadata,
     value: String,
+    capability_rows: &[secrethub_storage::CapabilityModelRow],
 ) -> Vec<EnvEntry> {
     let mut entries = Vec::new();
     if !metadata.env_key.trim().is_empty() {
@@ -553,6 +727,7 @@ fn selected_entries_from_metadata(
         let model_env_key = safe_model_env_key(metadata);
         entries.push(EnvEntry::new(model_env_key, metadata.model_id.clone()));
     }
+    entries.extend(capability_entries(capability_rows));
     if !metadata.endpoint_url.trim().is_empty() {
         entries.push(EnvEntry::new(
             safe_endpoint_env_key(metadata),
@@ -681,6 +856,14 @@ pub fn mcp_pending_plans(app: AppHandle) -> Result<Vec<PendingPlan>, String> {
         if path.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
+        // Only `plan-*` files; capability suggestions (`caps-*`) have their own reader.
+        let is_plan = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(plan::valid_request_id);
+        if !is_plan {
+            continue;
+        }
         if let Ok(contents) = fs::read_to_string(path) {
             if let Ok(plan) = serde_json::from_str::<PendingPlan>(&contents) {
                 plans.push(plan);
@@ -691,41 +874,122 @@ pub fn mcp_pending_plans(app: AppHandle) -> Result<Vec<PendingPlan>, String> {
     Ok(plans)
 }
 
+fn result_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("mcp-results"))
+}
+
+fn pending_plan_path(app: &AppHandle, request_id: &str) -> Result<PathBuf, String> {
+    if !plan::valid_request_id(request_id) {
+        return Err("invalid pending plan id".to_owned());
+    }
+    Ok(plan_directory(app)?.join(format!("{request_id}.json")))
+}
+
+fn read_pending_plan(path: &Path, request_id: &str) -> Result<PendingPlan, String> {
+    let contents = fs::read_to_string(path).map_err(|_| "pending plan not found".to_owned())?;
+    let plan = serde_json::from_str::<PendingPlan>(&contents)
+        .map_err(|_| "pending plan is invalid".to_owned())?;
+    if plan.request_id != request_id {
+        return Err("pending plan is invalid".to_owned());
+    }
+    Ok(plan)
+}
+
+/// Read-only review data for a pending plan; API keys are masked and never decrypted.
+#[tauri::command]
+pub fn mcp_plan_preview(
+    request_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlanPreview, String> {
+    touch_activity(&state)?;
+    let plan = read_pending_plan(&pending_plan_path(&app, &request_id)?, &request_id)?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    Ok(plan::preview_plan(&plan, vault))
+}
+
+/// Approves (`confirmed`) or declines a pending plan, records the outcome in
+/// `mcp-results/<requestId>.json` and removes the pending file. A locked vault
+/// leaves the plan pending so it can be retried after unlocking.
 #[tauri::command]
 pub fn mcp_confirm_plan(
     request_id: String,
     confirmed: bool,
+    skip_keys: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let path = pending_plan_path(&app, &request_id)?;
+    let results = result_directory(&app)?;
+    let finish = |result: PlanResult| -> Result<(), String> {
+        plan::write_result(&results, &result).map_err(|error| error.to_string())?;
+        fs::remove_file(&path).map_err(|error| error.to_string())
+    };
+    let plan = match read_pending_plan(&path, &request_id) {
+        Ok(plan) => plan,
+        Err(message) if path.exists() => {
+            let error = PlanError::new("invalid_plan", message.clone());
+            finish(PlanResult::failed(&request_id, &error))?;
+            return Err(message);
+        }
+        Err(message) => return Err(message),
+    };
     if !confirmed {
-        return Err("plan confirmation was declined".to_owned());
+        return finish(PlanResult::declined(&request_id));
     }
-    if !request_id.starts_with("plan-") || request_id.contains(['/', '\\', '.']) {
-        return Err("invalid pending plan id".to_owned());
+    touch_activity(&state)?;
+    let skip = skip_keys.unwrap_or_default().into_iter().collect();
+    let outcome = {
+        let vault = vault_from_state(&state)?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| "vault unavailable".to_owned())?;
+        plan::process_plan(&plan, &skip, vault)
+    };
+    match outcome {
+        Ok(outcome) => finish(PlanResult::written(&request_id, outcome)),
+        Err(error) if error.code == "vault_locked" => Err(error.to_string()),
+        Err(error) => {
+            finish(PlanResult::failed(&request_id, &error))?;
+            Err(error.to_string())
+        }
     }
-    let path = plan_directory(&app)?.join(format!("{request_id}.json"));
-    let contents = fs::read_to_string(&path).map_err(|_| "pending plan not found".to_owned())?;
-    let plan: PendingPlan =
-        serde_json::from_str(&contents).map_err(|_| "pending plan is invalid".to_owned())?;
-    if plan.request_id != request_id
-        || plan.secret_ids.is_empty()
-        || plan.project_path.trim().is_empty()
-    {
-        return Err("pending plan is invalid".to_owned());
-    }
-    export_env(
-        ExportRequest {
-            directory: plan.project_path,
-            secret_ids: plan.secret_ids,
-            write_example: true,
-            replace_existing: false,
-            ensure_gitignore: true,
-        },
-        state,
-    )?;
-    fs::remove_file(path).map_err(|error| error.to_string())?;
-    Ok(())
+}
+
+/// Pending AI capability suggestions (`caps-*.json`), enriched with the stored capabilities.
+/// Works while the vault is locked, just without the "current" column.
+#[tauri::command]
+pub fn mcp_pending_capability_suggestions(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<caps::SuggestionBatch>, String> {
+    let directory = plan_directory(&app)?;
+    let vault = vault_from_state(&state)?;
+    Ok(caps::enriched_pending(&directory, vault.as_ref()))
+}
+
+/// Applies the accepted model ids as `ai` overrides and discards the rest. Needs an unlocked vault.
+#[tauri::command]
+pub fn mcp_resolve_capability_suggestions(
+    request_id: String,
+    accepted_model_ids: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    touch_activity(&state)?;
+    let directory = plan_directory(&app)?;
+    let vault = vault_from_state(&state)?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?;
+    caps::resolve(&directory, &request_id, &accepted_model_ids, vault).map(|_| ())
 }
 
 #[tauri::command]
@@ -738,7 +1002,7 @@ pub fn export_preview(
     let vault = vault
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?;
-    let entries = selected_entries(vault, &request.secret_ids)?;
+    let entries = export_entries(vault, &request.secret_ids)?;
     let masked = entries
         .iter()
         .map(|entry| EnvEntry::new(&entry.key, "••••••••"))
@@ -759,7 +1023,7 @@ pub fn export_conflicts(
     let directory = validate_export_directory(Path::new(&request.directory))
         .map_err(|error| error.to_string())?;
     let existing = std::fs::read_to_string(directory.join(".env")).unwrap_or_default();
-    let entries = selected_entries(vault, &request.secret_ids)?;
+    let entries = export_entries(vault, &request.secret_ids)?;
     detect_conflicts(&existing, &entries).map_err(|error| error.to_string())
 }
 
@@ -770,36 +1034,18 @@ pub fn export_env(request: ExportRequest, state: State<'_, AppState>) -> Result<
     let vault = vault
         .as_ref()
         .ok_or_else(|| "vault unavailable".to_owned())?;
-    let directory = validate_export_directory(Path::new(&request.directory))
-        .map_err(|error| error.to_string())?;
-    if env_is_tracked(&directory).map_err(|error| error.to_string())? {
-        return Err(
-            ".env is already tracked by Git; remediation required before export".to_owned(),
-        );
-    }
-    let gitignore = directory.join(".gitignore");
-    if !gitignore_has_env(&gitignore).map_err(|error| error.to_string())? {
-        if request.ensure_gitignore {
-            ensure_gitignore_env(&gitignore).map_err(|error| error.to_string())?;
-        } else {
-            return Err(
-                ".env is not protected by .gitignore; explicit remediation required".to_owned(),
-            );
-        }
-    }
-    let entries = selected_entries(vault, &request.secret_ids)?;
-    let content = render_env(&entries).map_err(|error| error.to_string())?;
-    write_atomic(&directory.join(".env"), &content, request.replace_existing)
-        .map_err(|error| error.to_string())?;
-    if request.write_example {
-        let example = render_example(&entries).map_err(|error| error.to_string())?;
-        write_atomic(
-            &directory.join(".env.example"),
-            &example,
-            request.replace_existing,
-        )
-        .map_err(|error| error.to_string())?;
-    }
+    let entries = export_entries(vault, &request.secret_ids)?;
+    plan::write_project_env(
+        Path::new(&request.directory),
+        &entries,
+        &WriteOptions {
+            ensure_gitignore: request.ensure_gitignore,
+            write_example: request.write_example,
+            merge_existing: request.merge_existing,
+            replace_existing: request.replace_existing,
+        },
+    )
+    .map_err(|error| error.message)?;
     for secret_id in &request.secret_ids {
         vault
             .record_action("env_exported", Some(secret_id), "{\"source\":\"desktop\"}")
@@ -1021,6 +1267,13 @@ pub fn audit_list(
         .map_err(|error| error.to_string())
 }
 
+/// Models-only effective catalog (bundled data plus any verified remote overlay).
+/// Needs no vault access: it holds no secrets.
+#[tauri::command]
+pub fn catalog_effective() -> secrethub_providers::EffectiveModels {
+    crate::catalog::current_models()
+}
+
 #[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> Result<secrethub_storage::Settings, String> {
     vault_from_state(&state)?
@@ -1073,7 +1326,55 @@ pub fn backup_export(path: String, state: State<'_, AppState>) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use super::{is_env_key, selected_entries_from_metadata};
+    use super::{is_env_key, plan_writes, selected_entries_from_metadata, ModelsWrite};
+    use crate::model_sync::Fetched;
+    use secrethub_providers::{DiscoveredModel, ModelsEndpoint, Protocol};
+
+    fn endpoint(is_fallback: bool) -> ModelsEndpoint {
+        ModelsEndpoint {
+            url: "https://example.com/v1/models".into(),
+            protocol: Protocol::Openai,
+            is_fallback,
+            lists_models: true,
+        }
+    }
+
+    fn fetched(status: Option<u16>, models: bool) -> Fetched {
+        Fetched {
+            http_status: status,
+            models: models.then(|| {
+                vec![DiscoveredModel {
+                    id: "m1".into(),
+                    ..Default::default()
+                }]
+            }),
+        }
+    }
+
+    #[test]
+    fn plans_validation_and_model_writes_from_fetch_results() {
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(Some(200), true), true);
+        assert_eq!(status, "valid");
+        assert!(matches!(write, ModelsWrite::Rows(rows) if rows.len() == 1));
+        // Parse/read failure after 2xx: still valid, sync failed.
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(Some(200), false), true);
+        assert_eq!(status, "valid");
+        assert!(matches!(write, ModelsWrite::Status("failed")));
+        // Fallback 404 is unsupported for both.
+        let (status, write) = plan_writes(&endpoint(true), "x", fetched(Some(404), false), true);
+        assert_eq!(status, "unsupported");
+        assert!(matches!(write, ModelsWrite::Status("unsupported")));
+        // Explicit URL 404 stays invalid and keeps the last sync result.
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(Some(404), false), true);
+        assert_eq!(status, "invalid");
+        assert!(matches!(write, ModelsWrite::Keep));
+        let (status, write) = plan_writes(&endpoint(false), "x", fetched(None, false), true);
+        assert_eq!(status, "network_error");
+        assert!(matches!(write, ModelsWrite::Keep));
+        // Sync-only run marks failure instead.
+        let (_, write) = plan_writes(&endpoint(false), "x", fetched(Some(401), false), false);
+        assert!(matches!(write, ModelsWrite::Status("failed")));
+    }
 
     #[test]
     fn project_copy_contains_only_env_pairs_and_comment() {
@@ -1096,16 +1397,25 @@ mod tests {
             model_env_key: "DEEPSEEK-V4.1-FLASH".into(),
             endpoint_url: "https://api.deepseek.com".into(),
             endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
+            models_synced_at: 0,
+            models_sync_status: String::new(),
         };
         let rendered = secrethub_exporter::render_env(&selected_entries_from_metadata(
             &metadata,
             "fixture-key".into(),
+            &[secrethub_storage::CapabilityModelRow {
+                capability: "image_gen".into(),
+                model_id: "img-1".into(),
+                env_key: "IMAGE_MODEL".into(),
+            }],
         ))
         .unwrap();
         assert!(rendered.contains("# local project only"));
         assert!(rendered.contains("DEEPSEEK_API_KEY=\"fixture-key\""));
         assert!(rendered.contains("DEEPSEEK_MODEL=\"deepseek-v4.1-flash\""));
         assert!(rendered.contains("DEEPSEEK_BASE_URL=\"https://api.deepseek.com\""));
+        assert!(rendered.contains("IMAGE_MODEL=\"img-1\""));
+        assert!(rendered.find("DEEPSEEK_MODEL").unwrap() < rendered.find("IMAGE_MODEL").unwrap());
         assert!(!rendered.contains("value_type"));
         assert!(!rendered.contains("DEEPSEEK-V4.1-FLASH=\""));
     }
@@ -1115,4 +1425,34 @@ mod tests {
         assert!(is_env_key("DEEPSEEK_MODEL"));
         assert!(!is_env_key("DEEPSEEK-V4.1-FLASH"));
     }
+}
+
+#[tauri::command]
+pub fn tag_list(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .list_tags()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn tag_create(name: String, state: State<'_, AppState>) -> Result<String, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .create_tag(&name)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn tag_delete(name: String, state: State<'_, AppState>) -> Result<bool, String> {
+    touch_activity(&state)?;
+    vault_from_state(&state)?
+        .as_ref()
+        .ok_or_else(|| "vault unavailable".to_owned())?
+        .delete_tag(&name)
+        .map_err(|error| error.to_string())
 }

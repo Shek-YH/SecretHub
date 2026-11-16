@@ -1,6 +1,6 @@
 use secrethub_exporter::{
-    detect_conflicts, ensure_gitignore_env, gitignore_has_env, parse_env_entries,
-    parse_json_entries, render_env, render_example, EnvEntry,
+    detect_conflicts, ensure_gitignore_env, gitignore_has_env, merge_env, merge_example,
+    parse_env_entries, parse_json_entries, render_env, render_example, EnvEntry,
 };
 
 #[test]
@@ -98,4 +98,90 @@ fn previews_env_and_json_imports_without_persisting_values() {
         "true"
     );
     assert!(parse_json_entries(r#"["not-an-object"]"#).is_err());
+}
+
+#[test]
+fn merges_into_existing_env_keeping_unrelated_lines_and_replacing_planned_keys() {
+    let existing = "# app settings
+PORT=3000
+export OPENAI_API_KEY=old
+CERT=\"line one
+OPENAI_MODEL=not-a-key\"
+OPENAI_API_KEY=duplicate
+";
+    let entries = vec![
+        EnvEntry::new("OPENAI_API_KEY", "fixture value"),
+        EnvEntry::new("OPENAI_MODEL", "gpt-fixture"),
+    ];
+
+    let merged = merge_env(existing, &entries).unwrap();
+
+    assert_eq!(
+        merged,
+        "# app settings
+PORT=3000
+OPENAI_API_KEY=\"fixture value\"
+CERT=\"line one
+OPENAI_MODEL=not-a-key\"
+
+OPENAI_MODEL=\"gpt-fixture\"
+"
+    );
+    let parsed = parse_env_entries(&merged).unwrap();
+    assert!(parsed.contains(&EnvEntry::new("PORT", "3000")));
+    assert!(parsed.contains(&EnvEntry::new("OPENAI_API_KEY", "fixture value")));
+    assert!(parsed.contains(&EnvEntry::new(
+        "CERT",
+        "line one
+OPENAI_MODEL=not-a-key"
+    )));
+}
+
+#[test]
+fn merge_into_missing_env_matches_a_fresh_render_and_rejects_malformed_files() {
+    let entries = vec![EnvEntry::new("OPENAI_API_KEY", "fixture value")];
+    assert_eq!(
+        merge_env("", &entries).unwrap(),
+        render_env(&entries).unwrap()
+    );
+    assert!(merge_env(
+        "NOT A DOTENV LINE
+",
+        &entries
+    )
+    .is_err());
+}
+
+#[test]
+fn merges_example_by_appending_only_missing_keys() {
+    let entries = vec![
+        EnvEntry::new("OPENAI_API_KEY", "fixture value"),
+        EnvEntry::new("OPENAI_MODEL", "gpt-fixture"),
+    ];
+    let merged = merge_example(
+        "OPENAI_API_KEY=your-key-here
+",
+        &entries,
+    )
+    .unwrap();
+    assert_eq!(
+        merged,
+        "OPENAI_API_KEY=your-key-here
+
+OPENAI_MODEL=\"\"
+"
+    );
+    assert!(!merged.contains("fixture value"));
+    assert_eq!(
+        merge_example(
+            "OPENAI_API_KEY=
+",
+            &entries
+        )
+        .unwrap(),
+        "OPENAI_API_KEY=
+
+OPENAI_MODEL=\"\"
+"
+    );
 }

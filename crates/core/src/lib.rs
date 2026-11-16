@@ -1,7 +1,10 @@
 //! Vault use cases and policy boundary.
 
 use secrethub_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError, VaultKey};
-use secrethub_storage::{Database, NewSecret, SecretMetadata, StorageError, UpdatedSecret};
+use secrethub_storage::{
+    CapabilityModelRow, Database, MediaAsset, NewSecret, ProviderModelRow, SecretMetadata,
+    StorageError, UpdatedSecret, CAPABILITY_MODEL_ORDER,
+};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -66,7 +69,7 @@ impl VaultService {
         if self.is_initialized()? {
             return Err(VaultError::AlreadyInitialized);
         }
-        if password.len() < 12 {
+        if password.len() < 9 {
             return Err(VaultError::InvalidPassword);
         }
         let salt = generate_salt();
@@ -143,6 +146,12 @@ impl VaultService {
             "{\"source\":\"desktop\"}",
         )?;
         Ok(id)
+    }
+
+    /// Whether an encrypted payload exists for `id`; never decrypts.
+    pub fn has_secret_value(&self, id: &str) -> Result<bool, VaultError> {
+        self.require_key()?;
+        Ok(self.database.get_payload(id)?.is_some())
     }
 
     pub fn read_secret(&self, id: &str) -> Result<String, VaultError> {
@@ -273,6 +282,160 @@ impl VaultService {
             .record_audit(operation, secret_id, None, "success", metadata_json)
             .map_err(Into::into)
     }
+    /// Replaces a key's synced model list and records the sync outcome in one transaction.
+    pub fn replace_provider_models(
+        &self,
+        secret_id: &str,
+        rows: &[ProviderModelRow],
+        synced_at: i64,
+        status: &str,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        self.database
+            .replace_provider_models(secret_id, rows, synced_at, status)
+            .map_err(Into::into)
+    }
+
+    /// Records a failed/unsupported sync; stored model rows are kept.
+    pub fn set_models_sync_status(
+        &self,
+        secret_id: &str,
+        status: &str,
+        at: i64,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        if !self
+            .database
+            .set_models_sync_status(secret_id, status, at)?
+        {
+            return Err(VaultError::InvalidSecret);
+        }
+        Ok(())
+    }
+
+    pub fn list_provider_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<ProviderModelRow>, VaultError> {
+        self.require_key()?;
+        self.database
+            .list_provider_models(secret_id)
+            .map_err(Into::into)
+    }
+
+    // Media assets are not secrets: these work while the vault is locked.
+    pub fn insert_media(&self, asset: &MediaAsset) -> Result<(), VaultError> {
+        self.database.insert_media(asset).map_err(Into::into)
+    }
+    pub fn get_media(&self, id: &str) -> Result<Option<MediaAsset>, VaultError> {
+        self.database.get_media(id).map_err(Into::into)
+    }
+    pub fn find_media_by_sha(&self, sha256: &str) -> Result<Option<MediaAsset>, VaultError> {
+        self.database.find_media_by_sha(sha256).map_err(Into::into)
+    }
+    pub fn list_media(&self) -> Result<Vec<MediaAsset>, VaultError> {
+        self.database.list_media().map_err(Into::into)
+    }
+    pub fn update_media_meta(
+        &self,
+        id: &str,
+        description: &str,
+        tags: &[String],
+    ) -> Result<bool, VaultError> {
+        self.database
+            .update_media_meta(id, description, tags)
+            .map_err(Into::into)
+    }
+    pub fn delete_media(&self, id: &str) -> Result<Option<MediaAsset>, VaultError> {
+        self.database.delete_media(id).map_err(Into::into)
+    }
+
+    /// A key's per-capability model choices (everything except the chat model).
+    pub fn list_capability_models(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<CapabilityModelRow>, VaultError> {
+        self.require_key()?;
+        self.database
+            .list_capability_models(secret_id)
+            .map_err(Into::into)
+    }
+
+    /// Replaces a key's capability models. Rows with an empty model id are dropped; env names
+    /// must be valid, unique within the key and distinct from the key's own env names.
+    pub fn set_capability_models(
+        &self,
+        secret_id: &str,
+        rows: &[CapabilityModelRow],
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        let Some(metadata) = self.database.get_metadata(secret_id)? else {
+            return Err(VaultError::InvalidSecret);
+        };
+        let mut used: Vec<&str> = [
+            metadata.env_key.as_str(),
+            metadata.model_env_key.as_str(),
+            metadata.endpoint_env_key.as_str(),
+        ]
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .collect();
+        let mut seen_capabilities = Vec::new();
+        let mut kept = Vec::new();
+        for row in rows.iter().filter(|row| !row.model_id.trim().is_empty()) {
+            if !CAPABILITY_MODEL_ORDER.contains(&row.capability.as_str())
+                || seen_capabilities.contains(&row.capability.as_str())
+                || row.model_id.chars().count() > 200
+                || row.model_id.chars().any(char::is_control)
+            {
+                return Err(VaultError::InvalidSecret);
+            }
+            seen_capabilities.push(row.capability.as_str());
+            let env_key = row.env_key.trim();
+            if !env_key.is_empty() {
+                if !valid_env_name(env_key) || used.contains(&env_key) {
+                    return Err(VaultError::InvalidSecret);
+                }
+                used.push(env_key);
+            }
+            kept.push(CapabilityModelRow {
+                capability: row.capability.clone(),
+                model_id: row.model_id.trim().to_owned(),
+                env_key: env_key.to_owned(),
+            });
+        }
+        self.database.replace_capability_models(secret_id, &kept)?;
+        self.database.record_audit(
+            "capability_models_set",
+            Some(secret_id),
+            None,
+            "success",
+            &format!("{{\"source\":\"desktop\",\"count\":{}}}", kept.len()),
+        )?;
+        Ok(())
+    }
+
+    /// Stores a user-confirmed capability override for (provider, model). Metadata only.
+    pub fn set_capability_override(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        capabilities: &[String],
+        source: &str,
+    ) -> Result<(), VaultError> {
+        self.require_key()?;
+        if provider_id.is_empty()
+            || model_id.is_empty()
+            || capabilities.is_empty()
+            || !matches!(source, "user" | "ai")
+        {
+            return Err(VaultError::InvalidSecret);
+        }
+        self.database
+            .upsert_capability_override(provider_id, model_id, capabilities, source)
+            .map_err(Into::into)
+    }
+
     pub fn update_validation_status(&self, id: &str, status: &str) -> Result<(), VaultError> {
         self.require_key()?;
         if !self.database.update_status(id, status)? {
@@ -316,11 +479,31 @@ impl VaultService {
         self.require_key()?;
         self.database.list_projects().map_err(Into::into)
     }
+    pub fn list_tags(&self) -> Result<Vec<String>, VaultError> {
+        self.require_key()?;
+        self.database.list_tags().map_err(Into::into)
+    }
+    pub fn create_tag(&self, name: &str) -> Result<String, VaultError> {
+        self.require_key()?;
+        self.database.create_tag(name).map_err(Into::into)
+    }
+    pub fn delete_tag(&self, name: &str) -> Result<bool, VaultError> {
+        self.require_key()?;
+        self.database.delete_tag(name).map_err(Into::into)
+    }
     pub fn get_settings(&self) -> Result<secrethub_storage::Settings, VaultError> {
         self.database.get_settings().map_err(Into::into)
     }
     pub fn update_settings(&self, settings: secrethub_storage::Settings) -> Result<(), VaultError> {
         self.database.update_settings(&settings).map_err(Into::into)
+    }
+    pub fn catalog_auto_update(&self) -> Result<bool, VaultError> {
+        self.database.catalog_auto_update().map_err(Into::into)
+    }
+    pub fn set_catalog_auto_update(&self, enabled: bool) -> Result<(), VaultError> {
+        self.database
+            .set_catalog_auto_update(enabled)
+            .map_err(Into::into)
     }
     pub fn encrypted_backup(&self) -> Result<Vec<u8>, VaultError> {
         let key = self.require_key()?;
@@ -334,6 +517,14 @@ impl VaultService {
     fn require_key(&self) -> Result<&VaultKey, VaultError> {
         self.key.as_ref().ok_or(VaultError::Locked)
     }
+}
+
+fn valid_env_name(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some('_' | 'A'..='Z'))
+        && characters.all(|character| {
+            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+        })
 }
 
 fn verifier_for(key: &VaultKey) -> Vec<u8> {
