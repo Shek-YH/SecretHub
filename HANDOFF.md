@@ -11,7 +11,7 @@
 - 使用说明 `docs/USAGE.md`（§6.1 发布安装包与自动更新）。
 
 ## 下一步
-- 首次发布：`powershell -File scripts\release-windows.ps1 -Notes "..." -DryRun` 演练，确认后去掉 `-DryRun`（默认上传到 tx-bt）。
+- 已发布 0.1.0（2026-11-16）：安装包固定下载链接 https://updates.9aizhuan.com/secrethub/SecretHub-setup-latest.exe（发布脚本每次自动更新这个软链接），已写入飞书「线上网站与管理后台」表格。
 - 升级链路要连发两个版本，在**另一台干净机器或虚拟机**上装旧版再测升级；本机正在使用 SecretHub，不要在本机装安装包。
 - 真机测「连接 AI 工具」按钮、按类型添加、AI 导入通知与撤销。
 - 已知小问题：撤销导入后，在非 API Key 页面看不到“撤销成功”提示。
@@ -30,5 +30,5 @@
 ## 各电脑本地路径
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
-| Windows | `F:\CCPJ\SecretHub` | feat/simplify-entry-and-providers | 2026-11-16 03:15 |
+| Windows | `F:\CCPJ\SecretHub` | main | 2026-11-16 03:47 |
 <!-- repo-sync:machines:end -->

@@ -94,4 +94,8 @@ foreach ($item in $uploads) {
     Invoke-Step "scp $($item.Local)" { scp $item.Local $item.Remote }
   }
 }
+# Stable download link for websites and docs: always points at the newest installer.
+$linkCmd = "ln -sfn '$installerName' '$RemoteDir/SecretHub-setup-latest.exe'"
+if ($DryRun) { Write-Host "[dry-run] ssh $SshHost $linkCmd" } else { Invoke-Step 'link latest installer' { ssh $SshHost $linkCmd } }
+Write-Host "download: $BaseUrl/SecretHub-setup-latest.exe"
 Write-Host ('done' + $(if ($DryRun) { ' (dry run, nothing uploaded)' } else { '' }))
