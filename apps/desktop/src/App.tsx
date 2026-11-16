@@ -5,7 +5,8 @@ import { AiImportNoticeBanner, CaptureRequestBanner, ImportRequestBanner, MediaR
 import { ImportReviewModal } from './ImportReview';
 import { MediaLibrary } from './MediaLibrary';
 import { CaptureModal } from './KeyCapture';
-import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type ImportApplyOutcome, type ImportReview, type PendingImportRequest, type PendingOrganizeRequest, type AiImportNotice, type ProfileVariables, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
+import { InputWaitingBanner, SecureInputModal } from './SecureInput';
+import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type BackendSettings, type CapabilityModelRow, type CapabilitySuggestionBatch, type CaptureRequest, type GroupPublic, type InputRequest, type InputSaved, type ImportApplyOutcome, type ImportReview, type PendingImportRequest, type PendingOrganizeRequest, type AiImportNotice, type ProfileVariables, type MediaRequest, type PendingPlan, type PendingSyncRequest, type PlanPreview, type ProjectEnvEntry, type VaultStatus } from './lib/backend';
 import { CatalogSettings } from './CatalogSettings';
 import { AiConnectSettings } from './AiConnectSettings';
 import { UpdateButton, UpdateSettings } from './UpdateControls';
@@ -62,6 +63,9 @@ export function App() {
   const previousOrganizeCount = useRef(0);
   const [captureRequests, setCaptureRequests] = useState<CaptureRequest[]>([]);
   const [captureName, setCaptureName] = useState<string | null>(null);
+  const [inputRequests, setInputRequests] = useState<InputRequest[]>([]);
+  const handledInputs = useRef(new Set<string>());
+  const focusedInputs = useRef(new Set<string>());
   const [mediaRequests, setMediaRequests] = useState<MediaRequest[]>([]);
   const [importRequests, setImportRequests] = useState<PendingImportRequest[]>([]);
   const [aiReview, setAiReview] = useState<ImportReview | null>(null);
@@ -197,6 +201,12 @@ export function App() {
       void backend.pendingOrganizeRequests().then((items) => { setPendingOrganize(items); if (previousOrganizeCount.current > 0 && items.length === 0) void refreshSecretsRef.current(); previousOrganizeCount.current = items.length; }).catch(() => undefined);
       void backend.aiImportNotices().then(setAiNotices).catch(() => setAiNotices([]));
       void backend.pendingCaptureRequests().then(setCaptureRequests).catch(() => undefined);
+      void backend.pendingInputRequests().then((items) => {
+        const open = items.filter((item) => !handledInputs.current.has(item.requestId));
+        setInputRequests(open);
+        // Bring the window forward once per new request so the user notices the form.
+        if (open.some((item) => !focusedInputs.current.has(item.requestId))) { open.forEach((item) => focusedInputs.current.add(item.requestId)); void backend.focusMainWindow().catch(() => undefined); }
+      }).catch(() => undefined);
       void backend.pendingMediaRequests().then(setMediaRequests).catch(() => undefined);
       void backend.pendingImportRequests().then(setImportRequests).catch(() => undefined); };
     loadPlans();
@@ -264,6 +274,16 @@ export function App() {
 
   const captureDone = useRef<(secretId: string) => void>(() => undefined);
   captureDone.current = (secretId: string) => { void refreshSecrets(); setActiveNav('all'); setSelectedId(secretId); setModelsRevision((value) => value + 1); };
+
+  function inputHandled(requestId: string) {
+    handledInputs.current.add(requestId);
+    setInputRequests((current) => current.filter((item) => item.requestId !== requestId));
+  }
+
+  function inputSaved(requestId: string, saved: InputSaved) {
+    inputHandled(requestId);
+    void refreshSecrets(); setActiveNav('all'); setSelectedId(saved.itemId); setModelsRevision((value) => value + 1);
+  }
 
   function planReviewed() {
     const id = reviewPlan?.request_id;
@@ -516,6 +536,7 @@ export function App() {
         {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus && !vaultStatus.unlocked && pendingOrganize.map((request) => <OrganizeWaitingBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus?.unlocked && aiNotices.map((notice) => <AiImportNoticeBanner key={notice.batchId} notice={notice} t={t} onView={() => { setActiveNav('env_group'); void refreshSecrets(); }} onUndo={() => void undoAiImport(notice)} onDismiss={() => void dismissAiNotice(notice)} />)}
+        {vaultStatus && !vaultStatus.unlocked && inputRequests.map((request) => <InputWaitingBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus?.unlocked && captureRequests.map((request) => <CaptureRequestBanner key={request.requestId} request={request} t={t} onStart={() => void decideCapture(request, true)} onDecline={() => void decideCapture(request, false)} />)}
         {vaultStatus?.unlocked && importRequests.map((request) => <ImportRequestBanner key={request.requestId} request={request} t={t} onView={() => void viewImport(request)} onDecline={() => void declineImport(request)} />)}
         {aiReview && <ImportReviewModal t={t} review={aiReview} onClose={() => setAiReview(null)} onDone={(outcome) => void aiImportDone(outcome)} />}
@@ -552,6 +573,7 @@ export function App() {
         )}
         <footer className="app-footer"><span>SecretHub / {t.footer.version}</span><span>{t.footer.vault} · {t.footer.synced}</span></footer>
       </main>
+      {vaultStatus?.unlocked && inputRequests[0] && <SecureInputModal key={inputRequests[0].requestId} t={t} request={inputRequests[0]} onSaved={(saved) => inputSaved(inputRequests[0].requestId, saved)} onCancelled={() => inputHandled(inputRequests[0].requestId)} />}
       {captureName && <CaptureModal t={t} providerName={captureName} onCaptured={(secretId) => captureDone.current(secretId)} onClose={() => { setCaptureName(null); void refreshSecrets(); setModelsRevision((value) => value + 1); }} />}
       {addStep === 'picker' && <ItemTypePicker t={t} onPick={pickKind} onClose={() => setAddStep(null)} />}
       {addStep === 'env_group' && <GroupForm key={editingSecret?.id ?? 'new'} t={t} knownTags={secrets.flatMap((secret) => secret.tags)} initial={editingSecret} initialPublic={editGroup} onBack={() => setAddStep('picker')} onClose={closeItemForm} onSave={saveGroup} />}

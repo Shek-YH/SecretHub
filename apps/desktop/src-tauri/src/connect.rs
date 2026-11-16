@@ -12,12 +12,13 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
-pub const SKILL_NAMES: [&str; 5] = [
+pub const SKILL_NAMES: [&str; 6] = [
     "secrethub-project-env",
     "secrethub-import",
     "secrethub-model-refresh",
     "secrethub-key-onboarding",
     "secrethub-catalog-maintainer",
+    "secrethub-secure-input",
 ];
 const SERVER_NAME: &str = "secrethub";
 const STATE_FILE: &str = "ai-connect.json";
@@ -239,7 +240,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copy the five bundled skills into `dest_root/<name>`; only those five directories are touched.
+/// Copy the bundled skills into `dest_root/<name>`; only those directories are touched.
 /// Links (dev machines point these at the repo) are left alone.
 pub fn copy_skills(source_root: &Path, dest_root: &Path) -> Vec<ConnectItem> {
     SKILL_NAMES
@@ -500,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn skills_are_copied_and_only_the_five_dirs_are_replaced() {
+    fn skills_are_copied_and_only_their_dirs_are_replaced() {
         let dir = tempdir().unwrap();
         let (source, dest) = (dir.path().join("src"), dir.path().join("dest"));
         make_source(&source);
@@ -509,7 +510,7 @@ mod tests {
         fs::create_dir_all(dest.join("unrelated")).unwrap();
         fs::write(dest.join("unrelated").join("keep.md"), "keep").unwrap();
         let items = copy_skills(&source, &dest);
-        assert_eq!(items.len(), 5);
+        assert_eq!(items.len(), SKILL_NAMES.len());
         assert!(items.iter().all(|item| item.status == "connected"));
         assert!(!dest.join("secrethub-import").join("stale.md").exists());
         assert_eq!(
@@ -566,7 +567,7 @@ mod tests {
         assert!(is_link(&link));
         assert_eq!(
             items.iter().filter(|item| item.status == "connected").count(),
-            4
+            SKILL_NAMES.len() - 1
         );
     }
 

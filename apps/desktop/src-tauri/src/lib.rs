@@ -27,6 +27,7 @@ mod plan;
 mod queue;
 mod restore;
 mod scan;
+mod secure_input;
 mod sync;
 mod connect;
 mod update;
@@ -185,6 +186,11 @@ pub fn run() {
             media::media_thumbnail,
             media::mcp_pending_media_requests,
             media::mcp_media_decision,
+            secure_input::mcp_pending_input_requests,
+            secure_input::mcp_input_fetch_models,
+            secure_input::mcp_input_submit,
+            secure_input::mcp_input_cancel,
+            secure_input::focus_main_window,
             catalog_update::catalog_status,
             catalog_update::catalog_set_auto_update,
             catalog_update::catalog_check_now,
