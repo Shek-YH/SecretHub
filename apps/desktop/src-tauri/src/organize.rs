@@ -1590,6 +1590,7 @@ mod tests {
         assert_eq!(values(&vault, "阿里宝塔服务器").len(), 4);
         let open = vault.open_import_batches().unwrap();
         assert_eq!(open.len(), 1);
+        assert_eq!(open[0].secret_ids.len(), 3); // new group, appended group, new key
 
         let summary = vault.undo_import_batch(&batch).unwrap();
         assert_eq!(summary.removed_items, 2); // the new group and the new key

@@ -95,6 +95,10 @@ describe('AI import plan banners', () => {
     vi.spyOn(backend, 'aiImportNotices').mockResolvedValue(notices);
     const undo = vi.spyOn(backend, 'aiImportUndo').mockResolvedValue({ removedItems: 1, removedVariables: 0 });
     render(<App />);
+    const list = vi.mocked(backend.list);
+    list.mockClear();
+    await userEvent.click(await screen.findByRole('button', { name: t.ai.noticeView }));
+    expect(list).toHaveBeenCalledWith('');
     await userEvent.click(await screen.findByRole('button', { name: t.ai.noticeUndo }));
     expect(undo).toHaveBeenCalledWith('batch-9');
     expect(screen.queryByText(t.ai.organizeWaitingTitle)).not.toBeInTheDocument();
