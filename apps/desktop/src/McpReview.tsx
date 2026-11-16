@@ -10,6 +10,7 @@ function purposeLabel(entry: PlanPreviewEntry, t: T) {
   if (entry.kind === 'api_key') return t.review.purposeKey;
   if (entry.kind === 'base_url') return t.review.purposeBaseUrl;
   if (entry.kind === 'model') return entry.capability ? `${t.review.purposeModel} · ${entry.capability}` : t.review.purposeModel;
+  if (entry.kind === 'group_var') return t.review.purposeGroup;
   return t.review.purposeLegacy;
 }
 

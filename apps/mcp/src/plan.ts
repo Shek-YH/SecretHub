@@ -21,10 +21,29 @@ export const bindingSchema = z.object({
 });
 export type Binding = z.infer<typeof bindingSchema>;
 
+// Config group binding: no capability, model or env names; `variables` omitted means every variable.
+export const groupBindingSchema = z.object({
+  secret_id: z.string().min(1).max(200),
+  variables: z.array(envName).min(1).max(200).optional(),
+}).strict();
+export type GroupBinding = z.infer<typeof groupBindingSchema>;
+export type AnyBinding = Binding | GroupBinding;
+const isGroupBinding = (binding: AnyBinding): binding is GroupBinding => !('env' in binding);
+
+// A profile with variable subsets becomes a v2 plan: subset groups are bound with `variables`,
+// everything else stays in `secretIds`. Profiles without subsets keep the plain v1 shape.
+export function profilePlanFields(profile: { secretIds: string[]; variables?: Record<string, string[]> }): Record<string, unknown> {
+  const subsets = profile.variables ?? {};
+  const bindings = profile.secretIds.filter((id) => subsets[id]?.length).map((id) => ({ secret_id: id, variables: subsets[id] }));
+  if (bindings.length === 0) return { secretIds: profile.secretIds };
+  const wholeIds = profile.secretIds.filter((id) => !subsets[id]?.length);
+  return { version: 2, bindings, ...(wholeIds.length > 0 ? { secretIds: wholeIds } : {}) };
+}
+
 export type PlanLookup = { secret(id: string): CatalogSecret | undefined; providers: ModelProvider[] };
 
 // Read-only metadata pre-check; Desktop validates again before anything is written.
-export function precheckPlan(input: { secretIds?: string[]; bindings?: Binding[] }, lookup: PlanLookup): string | undefined {
+export function precheckPlan(input: { secretIds?: string[]; bindings?: AnyBinding[] }, lookup: PlanLookup): string | undefined {
   const secretIds = input.secretIds ?? [];
   const bindings = input.bindings ?? [];
   if (secretIds.length === 0 && bindings.length === 0) return 'Provide secret_ids, bindings, or both.';
@@ -48,8 +67,30 @@ export function precheckPlan(input: { secretIds?: string[]; bindings?: Binding[]
     sources.set(name, source);
     return undefined;
   };
+  // Config group variables: a name may come from one group only (the same group twice is fine).
+  const groupVariables = (id: string, names?: string[]): string | undefined => {
+    const group = lookup.secret(id)!;
+    const known = (group.variables ?? []).map((variable) => variable.name);
+    for (const name of names ?? known) {
+      if (!known.includes(name)) return `Config group ${id} has no variable ${name}.`;
+      const problem = claim(name, `group:${id}:${name}`);
+      if (problem) return problem;
+    }
+    return undefined;
+  };
+  for (const id of secretIds) {
+    if (lookup.secret(id)!.valueType === 'env_group') { const problem = groupVariables(id); if (problem) return problem; }
+  }
   for (const binding of bindings) {
     const secret = lookup.secret(binding.secret_id)!;
+    const isGroup = secret.valueType === 'env_group';
+    if (isGroupBinding(binding)) {
+      if (!isGroup) return `Secret ${binding.secret_id} is not a config group; use capability and env instead of variables.`;
+      const problem = groupVariables(binding.secret_id, binding.variables);
+      if (problem) return problem;
+      continue;
+    }
+    if (isGroup) return `Secret ${binding.secret_id} is a config group; bind it with secret_id and optional variables only.`;
     const { api_key, base_url, model } = binding.env;
     if (api_key) { const problem = claim(api_key, `key:${binding.secret_id}`); if (problem) return problem; }
     if (base_url) {

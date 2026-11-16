@@ -352,6 +352,8 @@ fn escape_value(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+        // Keep `$` literal so dotenv readers do not expand it as a variable.
+        .replace('$', "\\$")
         .replace('\r', "\\r")
         .replace('\n', "\\n")
         .replace('\t', "\\t")

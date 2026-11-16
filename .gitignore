@@ -18,3 +18,7 @@ playwright-report/
 *.key
 *.pem
 catalog-private-key*
+
+# Build outputs for the standalone MCP sidecar
+apps/mcp/build/
+apps/desktop/src-tauri/binaries/

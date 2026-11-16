@@ -8,19 +8,38 @@ mod capture;
 mod catalog;
 mod catalog_update;
 mod commands;
+mod csv_import;
+#[cfg(test)]
+mod e2e_journey;
+mod export;
+mod groups;
+mod import;
+mod import_flow;
+mod items;
+mod mask;
 mod media;
 mod model_sync;
+mod organize;
+#[cfg(test)]
+mod organize_fixture;
+mod paste;
 mod plan;
 mod queue;
+mod restore;
+mod scan;
 mod sync;
+mod connect;
+mod update;
 
 pub struct AppState {
     pub vault: Mutex<Option<VaultService>>,
     pub policy: Mutex<AutoLockPolicy>,
     pub capture: capture::CaptureState,
+    pub imports: import_flow::Sessions,
+    pub inspections: mask::Inspections,
 }
 
-fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let data_dir = app
         .path()
         .app_data_dir()
@@ -31,6 +50,9 @@ fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .manage(update::UpdateState::default())
         .setup(|app| {
             let path = database_path(app.handle()).map_err(Box::<dyn std::error::Error>::from)?;
             if let Some(data_dir) = path.parent() {
@@ -54,9 +76,14 @@ pub fn run() {
                     now_seconds(),
                 )),
                 capture: capture::CaptureState::default(),
+                imports: import_flow::Sessions::default(),
+                inspections: mask::Inspections::default(),
             });
             catalog_update::start(app.handle().clone());
             sync::start(app.handle().clone());
+            organize::start(app.handle().clone());
+            connect::refresh_after_upgrade(app.handle().clone());
+            update::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -65,12 +92,43 @@ pub fn run() {
             commands::setup_master,
             commands::unlock,
             commands::lock,
+            commands::vault_change_password,
+            items::item_create,
+            items::item_update,
+            items::item_public_fields,
+            items::item_secret_fields,
+            items::item_field_reveal,
+            items::item_field_copy,
+            items::item_note_body,
+            groups::group_create,
+            groups::group_update,
+            groups::group_public,
+            groups::group_var_reveal,
+            groups::group_var_copy,
+            groups::group_notes,
+            groups::group_choose_key_path,
+            groups::group_export_key_file,
             commands::secret_list,
             commands::secret_create,
             commands::secret_update,
             commands::secret_delete,
             commands::secret_import_preview,
             commands::secret_import,
+            commands::choose_import_file,
+            import_flow::import_scan,
+            import_flow::import_apply,
+            import_flow::import_cancel,
+            import_flow::import_scan_text,
+            import_flow::import_choose_files,
+            import_flow::import_save_bank_template,
+            import_flow::mcp_pending_import_requests,
+            import_flow::mcp_import_decline,
+            organize::mcp_pending_organize_requests,
+            organize::ai_import_notices,
+            organize::ai_import_dismiss,
+            organize::ai_import_undo,
+            commands::secret_import_file_preview,
+            commands::secret_import_file,
             commands::mcp_pending_plans,
             commands::mcp_confirm_plan,
             commands::mcp_plan_preview,
@@ -89,6 +147,8 @@ pub fn run() {
             commands::export_preview,
             commands::export_conflicts,
             commands::export_env,
+            export::export_preview_v2,
+            export::export_apply_v2,
             commands::choose_project_directory,
             commands::profile_list,
             commands::profile_save,
@@ -104,6 +164,11 @@ pub fn run() {
             commands::audit_list,
             commands::catalog_effective,
             sync::mcp_pending_sync_requests,
+            connect::ai_connect,
+            connect::ai_connect_status,
+            update::update_status,
+            update::update_check_now,
+            update::update_install,
             capture::key_capture_start,
             capture::key_capture_cancel,
             capture::key_capture_status,
@@ -125,10 +190,17 @@ pub fn run() {
             catalog_update::catalog_check_now,
             commands::settings_get,
             commands::settings_update,
-            commands::backup_export
+            commands::backup_export,
+            commands::choose_backup_file,
+            commands::backup_restore
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running SecretHub");
+        .build(tauri::generate_context!())
+        .expect("error while building SecretHub")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                update::install_on_exit(app);
+            }
+        });
 }
 
 fn now_seconds() -> u64 {

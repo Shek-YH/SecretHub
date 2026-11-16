@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEffectiveCatalog, providerTemplate, providerTemplates } from './providers';
+import { applyEffectiveCatalog, detectProviderByPrefix, groupProviders, providerTemplate, providerTemplates, uniqueCredentialName } from './providers';
 
 describe('provider model templates', () => {
   it('contains unique providers with safe key pages and model env mappings', () => {
@@ -53,5 +53,60 @@ describe('effective catalog', () => {
     applyEffectiveCatalog({ ...none, providers: { deepseek: { models: [{ id: 'only-one' }] } } });
     applyEffectiveCatalog(none);
     expect(providerTemplate('deepseek').models.map((model) => model.id)).toContain('deepseek-v4-pro');
+  });
+});
+
+describe('detectProviderByPrefix', () => {
+  it('detects providers by distinctive prefixes, longest prefix first', () => {
+    expect(detectProviderByPrefix('sk-ant-FAKE-KEY', providerTemplates).match?.id).toBe('anthropic');
+    expect(detectProviderByPrefix('sk-or-FAKE-KEY', providerTemplates).match?.id).toBe('openrouter');
+    expect(detectProviderByPrefix('sk-deep-FAKE-KEY', providerTemplates).match?.id).toBe('deepseek');
+    expect(detectProviderByPrefix('AIzaFAKEKEY', providerTemplates).match?.id).toBe('gemini');
+    const custom = [{ id: 'short', keyPrefixes: ['sk-'] }, { id: 'long', keyPrefixes: ['sk-abcd-'] }];
+    expect(detectProviderByPrefix('sk-abcd-1', custom).match?.id).toBe('long');
+  });
+
+  it('never selects a provider from the generic "sk-" prefix and says it is ambiguous', () => {
+    expect(detectProviderByPrefix('sk-FAKE-KEY', providerTemplates)).toEqual({ match: null, ambiguous: true });
+    expect(detectProviderByPrefix('plain-value', providerTemplates)).toEqual({ match: null, ambiguous: false });
+    expect(detectProviderByPrefix('   ', providerTemplates)).toEqual({ match: null, ambiguous: false });
+  });
+
+  it('treats an identical longest prefix shared by two providers as ambiguous', () => {
+    const shared = [{ id: 'a', keyPrefixes: ['key-1234'] }, { id: 'b', keyPrefixes: ['key-1234'] }];
+    expect(detectProviderByPrefix('key-1234-x', shared)).toEqual({ match: null, ambiguous: true });
+  });
+});
+
+describe('provider groups', () => {
+  it('marks the intended providers as featured', () => {
+    const featured = providerTemplates.filter((provider) => provider.featured).map((provider) => provider.id).sort();
+    expect(featured).toEqual(['anthropic', 'deepseek', 'gemini', 'glm', 'kimi', 'minimax', 'openai', 'openrouter', 'qwen', 'volcengine']);
+  });
+
+  it('puts featured and already used providers in the common group with custom last', () => {
+    const plain = groupProviders(providerTemplates, []);
+    expect(plain.common.at(-1)?.id).toBe('custom');
+    expect(plain.common.slice(0, -1).every((provider) => provider.featured)).toBe(true);
+    expect(plain.more.some((provider) => provider.id === 'groq')).toBe(true);
+    const used = groupProviders(providerTemplates, ['groq']);
+    expect(used.common.some((provider) => provider.id === 'groq')).toBe(true);
+    expect(used.common.at(-1)?.id).toBe('custom');
+    expect(used.more.some((provider) => provider.id === 'groq')).toBe(false);
+    expect(used.common.length + used.more.length).toBe(providerTemplates.length);
+  });
+
+  it('filters both groups by the search term', () => {
+    const result = groupProviders(providerTemplates, [], 'GROQ');
+    expect(result.searching).toBe(true);
+    expect(result.more.map((provider) => provider.id)).toEqual(['groq']);
+    expect(result.common).toEqual([]);
+    expect(groupProviders(providerTemplates, [], 'deepseek').common.map((provider) => provider.id)).toEqual(['deepseek']);
+  });
+
+  it('suggests unique names with a numeric suffix', () => {
+    expect(uniqueCredentialName('OpenAI', [])).toBe('OpenAI');
+    expect(uniqueCredentialName('OpenAI', ['openai'])).toBe('OpenAI 2');
+    expect(uniqueCredentialName('OpenAI', ['OpenAI', 'OpenAI 2'])).toBe('OpenAI 3');
   });
 });

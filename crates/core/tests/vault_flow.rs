@@ -99,6 +99,7 @@ fn creates_secret_with_classification_attributes() {
                 model_env_key: "DEEPSEEK_MODEL".into(),
                 endpoint_url: "https://api.deepseek.com".into(),
                 endpoint_env_key: "DEEPSEEK_BASE_URL".into(),
+                ..Default::default()
             },
         )
         .unwrap();

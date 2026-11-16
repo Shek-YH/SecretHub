@@ -172,6 +172,18 @@ with the exact `project_path` and:
   it may be combined with `bindings`.
 - no Secret values, no guessed or unrelated credentials.
 
+- config groups (servers, databases, cloud services; catalog entries with
+  `valueType: env_group` and a `variables` list): bind them with
+  `{ secret_id, variables? }` and nothing else (no capability, model or env).
+  Omit `variables` for the whole group, or list only the variable names the
+  project needs; a name may come from one group only.
+  - Plain variables (`secret: false`) may carry a `value` in the catalog when
+    the group allows it. You may read those (host, port, user name, bucket) to
+    write deployment configuration.
+  - Secret variables (`secret: true`) never carry a value. Refer to them by
+    variable name only (for example `process.env.SSH_PASSWORD`) and never
+    inline a value in code, scripts or configuration files.
+
 If the tool returns an error (unknown, archived or value-less secret; no known
 base URL; one variable name bound to two different values), fix the bindings
 with the user instead of retrying blindly. On success keep the `requestId`.
