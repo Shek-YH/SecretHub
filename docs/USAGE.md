@@ -262,14 +262,14 @@ foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refre
 **一次性准备**
 
 - 更新签名密钥：`C:\Users\Administrator\.tauri\secrethub-updater.key`（无密码，只在本机，不进仓库；公钥已写进 `tauri.conf.json` 的 `plugins.updater.pubkey`）。**丢了这把私钥，已安装的老版本将永远收不到更新**，请离线备份。
-- 更新地址只有一处：`apps/desktop/src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints`，目前是占位 `https://UPDATE_HOST_PLACEHOLDER/secrethub/latest.json`，拿到真实域名后在这里替换。**第一个对外分发的安装包必须已经是真实地址**，否则老版本收不到更新。
+- 更新地址只有一处：`apps/desktop/src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints`，值为 `https://updates.9aizhuan.com/secrethub/latest.json`（腾讯宝塔服务器上的静态站点 `/www/wwwroot/updates.9aizhuan.com`，每个产品一个子目录）。**第一个对外分发的安装包必须已经是真实地址**，否则老版本收不到更新。
 - 服务器上准备一个静态目录（HTTPS 可访问），例如 `/var/www/secrethub`，对应 `-BaseUrl https://你的域名/secrethub`。
 
 **每次发布**
 
 1. 改版本号：`tauri.conf.json`、根 `package.json`、`Cargo.toml`（workspace）、`apps/desktop/package.json`、`apps/mcp/package.json` 保持一致。
 2. 先演练（构建并签名，生成 `latest.json`，只打印 scp 命令，不上传）：
-   `powershell -File scripts\release-windows.ps1 -SshHost <ssh别名> -RemoteDir /var/www/secrethub -BaseUrl https://你的域名/secrethub -DryRun`
+   `powershell -File scripts\release-windows.ps1 -Notes "本次更新说明" -DryRun`（默认上传到 tx-bt 的 `/www/wwwroot/updates.9aizhuan.com/secrethub`）
 3. 确认无误后去掉 `-DryRun` 正式上传（先传安装包，最后传 `latest.json`）。`-SkipBuild` 可复用已有产物，`-Notes` 写更新说明。
 4. 产物在 `target/release/bundle/nsis/`：`SecretHub_<版本>_x64-setup.exe`、`.sig`、`latest.json`。
 

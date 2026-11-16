@@ -11,16 +11,17 @@
 
   The updater private key never lives in the repo: pass -KeyPath or keep it at
   C:\Users\Administrator\.tauri\secrethub-updater.key (generated without a password).
-  The endpoint the app polls is plugins.updater.endpoints in tauri.conf.json (single place; replace
-  UPDATE_HOST_PLACEHOLDER there). -BaseUrl must be the directory that serves latest.json and the installer.
+  The endpoint the app polls is plugins.updater.endpoints in tauri.conf.json
+  (https://updates.9aizhuan.com/secrethub/latest.json). -BaseUrl must be the directory that serves
+  latest.json and the installer; the defaults publish to that directory on the tx-bt server.
 
 .EXAMPLE
-  powershell -File scripts\release-windows.ps1 -SshHost yc -RemoteDir /var/www/secrethub -BaseUrl https://example.com/secrethub -DryRun
+  powershell -File scripts\release-windows.ps1 -Notes "..." -DryRun
 #>
 param(
-  [Parameter(Mandatory = $true)][string]$SshHost,
-  [Parameter(Mandatory = $true)][string]$RemoteDir,
-  [Parameter(Mandatory = $true)][string]$BaseUrl,
+  [string]$SshHost = 'tx-bt',
+  [string]$RemoteDir = '/www/wwwroot/updates.9aizhuan.com/secrethub',
+  [string]$BaseUrl = 'https://updates.9aizhuan.com/secrethub',
   [string]$Notes = '',
   [string]$KeyPath = (Join-Path $env:USERPROFILE '.tauri\secrethub-updater.key'),
   [switch]$DryRun,

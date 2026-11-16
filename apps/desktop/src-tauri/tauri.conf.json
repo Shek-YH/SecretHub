@@ -59,7 +59,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGN0ZDREQxRTU0MDJCNDQKUldSRUswRGwwYzEvWDRRQlNJeHkxcDhGK1M2SnU1R3FoR2R5WkNBc3pYV2hSWWwzRXA5cjFTdSsK",
       "endpoints": [
-        "https://UPDATE_HOST_PLACEHOLDER/secrethub/latest.json"
+        "https://updates.9aizhuan.com/secrethub/latest.json"
       ],
       "windows": {
         "installMode": "quiet"
