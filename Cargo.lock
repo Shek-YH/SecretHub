@@ -4031,7 +4031,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "secrethub-backup"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "secrethub-crypto",
  "serde_json",
@@ -4041,7 +4041,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs 6.0.0",
  "rpassword",
@@ -4053,7 +4053,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "secrethub-backup",
  "secrethub-crypto",
@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-exporter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dotenvy",
  "serde_json",
@@ -4125,7 +4125,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-profiles"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "uuid",
@@ -4133,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-providers"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4145,7 +4145,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-proxy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "rand 0.8.8",
@@ -4155,7 +4155,7 @@ dependencies = [
 
 [[package]]
 name = "secrethub-proxy-http"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs 6.0.0",
  "reqwest 0.12.28",
@@ -4168,14 +4168,14 @@ dependencies = [
 
 [[package]]
 name = "secrethub-redaction"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "secrethub-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rusqlite",
  "serde",

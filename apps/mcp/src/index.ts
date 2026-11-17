@@ -22,7 +22,7 @@ const planDirectory = process.env.SECRETHUB_PLAN_DIR ?? join(dirname(dbPath), 'm
 const resultDirectory = process.env.SECRETHUB_RESULT_DIR ?? join(dirname(dbPath), 'mcp-results');
 const catalog = openCatalogStore(dbPath);
 const modelProviders = loadModelProviders(effectiveModelsPath(dbPath));
-const server = new McpServer({ name: 'secrethub-mcp-server', version: '0.1.0' });
+const server = new McpServer({ name: 'secrethub-mcp-server', version: '0.1.1' });
 
 const responseFormat = z.enum(['json', 'markdown']).default('markdown');
 const paging = { limit: z.number().int().min(1).max(100).default(20), offset: z.number().int().min(0).default(0), response_format: responseFormat };
