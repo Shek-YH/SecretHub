@@ -1,0 +1,23 @@
+{
+  "skill_name": "secrethub-secure-input",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把 AI获客后台（https://huoke.czplus.cc）的管理员账号存进 SecretHub，用户名是 admin，登录接口是 /api/admin/login，返回 {ok:true}。",
+      "expected_output": "调用 secrethub_request_input：item_type=login，fields 含预填 username=admin 的 text 字段和未预填的 password 字段（必填），verify={type:'login', url:'https://huoke.czplus.cc/api/admin/login', ok_field:'ok'}；提示用户在 SecretHub Desktop 填写并点“验证并保存”；轮询 secrethub_get_input_status 直到 saved/cancelled/failed；全程不索要密码。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我给你 DeepSeek 的 Key：sk-xxxx，顺便帮我选个模型存起来。",
+      "expected_output": "拒绝接收聊天里的 Key；改用 secrethub_request_input（item_type=api_key，provider_id='deepseek'，role=api_key 的 password 字段、role=base_url 留空由目录预填、role=model 的 select 字段，verify={type:'llm', auth:'bearer'}），让用户在 Desktop 粘贴 Key、点“获取模型列表”选模型后保存；或在用户要新建 Key 时说明可用 secrethub_start_key_capture。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "这个项目要连 MySQL，帮我把数据库连接信息存进 SecretHub，主机是 10.0.0.5。",
+      "expected_output": "调用 secrethub_request_input：item_type=env_group，字段为 MYSQL_HOST（预填 10.0.0.5）、MYSQL_PORT、MYSQL_USER（text）和 MYSQL_PASSWORD（password，不预填），verify 为 none；让用户在 Desktop 填写；saved 后用 itemId 继续 secrethub_prepare_project_env；不要求用户在聊天里发送密码。",
+      "files": []
+    }
+  ]
+}

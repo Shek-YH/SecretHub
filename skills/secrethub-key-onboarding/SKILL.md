@@ -19,6 +19,13 @@ Desktop opens the provider's key page in the **user's own browser**, waits for
 the user to copy a new key, and stores it. You only queue the request, wait for
 the outcome and handle the follow-ups.
 
+## Capture or form?
+
+Use the clipboard capture here when the user is about to create a new key on
+the provider's official key page. When the user already has the key, needs a
+custom base URL or wants to pick a model before saving, or the provider has no
+key page, use `secrethub_request_input` instead (see `secrethub-secure-input`).
+
 ## Non-negotiable prohibitions
 
 - **Never** ask the user to paste, type, send, screenshot or read out an API

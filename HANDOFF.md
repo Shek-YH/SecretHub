@@ -3,6 +3,7 @@
 > 推送前由 Claude 更新；另一台电脑打开 Claude 会话时会自动读到这里。
 
 ## 当前进度
+- 分支 `claude/secure-input-form-6eb1df`（2026-11-16，PR 待合并）：**安全录入表单**。新 MCP 工具 `secrethub_request_input` / `secrethub_get_input_status`；Desktop 新模块 `secure_input.rs` + 前端 `SecureInput.tsx`，验证（登录接口 / 大模型 `/models`）通过才写库，走 AI 导入批次可撤销；新 skill `secrethub-secure-input`（「连接 AI 工具」现复制 6 个 skill）。测试：Rust 全过、前端 210、MCP 新增 24 条 + smoke；dev 模式端到端（锁定横幅 → 解锁自动弹表单 → 假密码 401 提示 → 取消得 cancelled）已跑通。
 - 分支 `feat/simplify-entry-and-providers`（PR #2，基于 PR #1 的分支 `fix/p0-mcp-env-merge-provider-catalog`），全部测试通过（Rust 289、前端 200、MCP 268、smoke）：
   - 常用 10 家服务商、按类型录入、配置组导出、AI 整理导入（打码视图 + 护栏 + 批次撤销）、带注释导出；
   - **可分发安装包**：MCP 打成单文件 exe（Node SEA，sidecar `secrethub-mcp.exe`），用户无需装 Node；设置页「连接 AI 工具」一键注册 Claude Code / Claude Desktop / Cursor 的 MCP 并复制 5 个 skill；
@@ -11,6 +12,8 @@
 - 使用说明 `docs/USAGE.md`（§6.1 发布安装包与自动更新）。
 
 ## 下一步
+- 安全录入表单上线后：把全局 CLAUDE.md 第 18 节改成调用 `secrethub_request_input`（由主会话处理），再停用 `F:\AIrules\secure-input` 临时方案。
+- 真机试一次有效大模型 Key 的「获取模型列表」（单测用的是本地假服务）。
 - 已发布 0.1.0（2026-11-16）：安装包固定下载链接 https://updates.9aizhuan.com/secrethub/SecretHub-setup-latest.exe（发布脚本每次自动更新这个软链接），已写入飞书「线上网站与管理后台」表格。
 - 升级链路要连发两个版本，在**另一台干净机器或虚拟机**上装旧版再测升级；本机正在使用 SecretHub，不要在本机装安装包。
 - 真机测「连接 AI 工具」按钮、按类型添加、AI 导入通知与撤销。
@@ -22,6 +25,8 @@
 - **更新签名私钥** `C:\Users\Administrator\.tauri\secrethub-updater.key`（无密码，不进 git）：丢了老版本就收不到更新，需用户离线备份；在 Mac 上发版也要同一个文件。
 - 在 PowerShell 手动 `tauri build` 会因空的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 卡住，用发布脚本。
 - 安装包未做代码签名（用户决定先不签），会有 SmartScreen 提示；SEA 注入后 node.exe 原签名失效，可能被杀软误报。
+- `npm test`（apps/mcp）里 import-skill 的 front matter 用例在 Windows（autocrlf=true，CRLF 检出）下必失败，与功能无关；可用 `npx vitest run src` 并忽略这一条，或以后把用例的正则改成兼容 `
+`。
 - Mac 版尚未打包（sidecar 目前只构建 x86_64-pc-windows-msvc）。
 - 不要读取用户资料目录里的文件内容；导入一律走 secrethub-import skill。
 - `catalog-public-key.txt` 仍是开发用公钥；发布前需 `catalog:keygen`。
@@ -30,5 +35,5 @@
 ## 各电脑本地路径
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
-| Windows | `F:\CCPJ\SecretHub` | main | 2026-11-16 03:47 |
+| Windows | `F:\CCPJ\SecretHub` | claude/secure-input-form-6eb1df | 2026-11-16 11:17 |
 <!-- repo-sync:machines:end -->

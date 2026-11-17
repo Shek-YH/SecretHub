@@ -67,7 +67,7 @@ try {
   assert.equal(result.status, 0, result.stderr);
   const responses = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
   const tools = responses.find((response) => response.id === 2).result.tools;
-  assert.equal(tools.length, 26);
+  assert.equal(tools.length, 28);
   if (exePath) assert.equal(/ExperimentalWarning/.test(result.stderr), false, 'sea exe must not print the sqlite warning');
   assert.ok(tools.some((tool) => tool.name === 'secrethub_list_secret_catalog'));
   assert.ok(tools.some((tool) => tool.name === 'secrethub_prepare_project_env'));

@@ -149,6 +149,10 @@ SecretHub 配置未完成，暂不写入项目环境：
 粘贴到聊天中。完成后回复“已配置”，我会重新检查并继续。
 ```
 
+When a credential is missing entirely, you may offer to queue a SecretHub
+input form with `secrethub_request_input` (see `secrethub-secure-input`) so the
+user types it into Desktop instead of chat; then re-check as below.
+
 When a provider has an official key page in the metadata/UI, include the
 provider name and tell the user to use SecretHub's official link. Do not open
 or submit third-party forms with the user's Secret automatically.

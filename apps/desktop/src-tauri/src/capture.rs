@@ -392,7 +392,7 @@ struct CaptureResult<'a> {
     updated_at: String,
 }
 
-fn directories(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+pub(crate) fn directories(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     let data = app
         .path()
         .app_data_dir()

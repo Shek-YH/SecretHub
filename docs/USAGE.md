@@ -100,6 +100,17 @@ npm --prefix apps/desktop run tauri dev
 
 在服务商卡片上点“打开官网并自动捕获 Key”，SecretHub 会在你的浏览器里打开该服务商的 Key 页面。你创建 Key 并点“复制”后，SecretHub 从剪贴板读到它，直接保存、检测并同步模型，然后清空剪贴板。读取剪贴板必须由你点“开始”，最长等待 3 分钟。
 
+### 2.6.1 AI 请求你填写（安全录入表单）
+
+AI 需要密码、API Key、令牌、账号等敏感信息时，不会让你在聊天里粘贴，而是发起一张表单（MCP 工具 `secrethub_request_input`）：
+
+1. SecretHub 窗口自动弹到前面，显示 AI 按场景准备的表单（标题、说明、字段，能查到的已预填好）。保险库锁着时先显示“请先解锁”，解锁后自动弹出。
+2. 密码类字段打码；下拉框既可选也可手填。大模型 Key 的表单有“获取模型列表”按钮：用你填的 Key 请求服务商的 `/models`，把模型填进下拉框。
+3. 点“验证并保存”：网站账号会先用这组账号调用一次登录接口，大模型 Key 会先拉一次模型列表；表单上会写明值会发往哪个网站。验证失败会显示原因（如 HTTP 401），表单保留，改好再试；点“取消”则 AI 收到 cancelled。
+4. 验证通过才写进保险库，并出现“AI 导入”通知，可一键撤销。AI 只能拿到状态和新条目的 id，拿不到你填的值。
+
+和 §2.6 的区别：要在官网**新建** Key 时用剪贴板捕获；已有 Key、需要自定义请求地址或选模型、网站后台账号、数据库等其他凭据，用表单。
+
 ### 2.7 AI 请求的确认
 
 AI 发起的写入计划、模型能力建议、加入素材库、捕获 Key 等请求，都会在桌面端显示横幅，由你点“查看”审核。只有 **AI 整理导入**是自动写入的，靠程序规则保证安全（见 §4.2）：每次写入都有通知，可以一键“撤销此次导入”。
@@ -154,6 +165,7 @@ claude mcp get secrethub
 | 导入 | `secrethub_apply_import_plan` | 提交整理方案，按程序规则自动写入 |
 | 导入 | `secrethub_request_import` / `secrethub_get_import_status` | 手动审核方式的导入请求；查询导入结果 |
 | Key 获取 | `secrethub_start_key_capture` / `secrethub_get_capture_status` | 请求剪贴板捕获，查询结果 |
+| 安全录入 | `secrethub_request_input` / `secrethub_get_input_status` | 请桌面端弹出录入表单，验证后保存；查询结果（waiting / saved / cancelled / failed，只含条目 id） |
 | 素材 | `secrethub_media_search` / `secrethub_media_get` | 查找素材，拿到文件路径 |
 | 素材 | `secrethub_media_add` / `secrethub_get_media_add_status` | 请求把文件加入素材库（需你确认），查询结果 |
 
@@ -172,7 +184,7 @@ claude mcp get secrethub
 把仓库 `skills\` 下的各个目录链接到全局 skill 目录（Windows，PowerShell）：
 
 ```powershell
-foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refresh','secrethub-key-onboarding','secrethub-catalog-maintainer') { New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\$n" -Target "F:\CCPJ\SecretHub\skills\$n" }
+foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refresh','secrethub-key-onboarding','secrethub-catalog-maintainer','secrethub-secure-input') { New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\$n" -Target "F:\CCPJ\SecretHub\skills\$n" }
 ```
 
 用的是目录链接，仓库里的 skill 更新后自动生效。skill 依赖 §3 的 MCP 服务。
@@ -222,6 +234,15 @@ foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refre
 
   全程 Key 不经过聊天。
 
+#### secrethub-secure-input：让你安全地填写密码 / Key
+- **场景**：AI 需要你提供密码、API Key、令牌、网站或数据库账号。
+- **示例说法**：“把后台管理员账号存进 SecretHub”“这个项目要连 MySQL，帮我存一下数据库信息”。
+- **流程**：
+  1. AI 按场景准备表单并预填能查到的信息（用户名、请求地址、模型等）；
+  2. 你在桌面端填写，点“验证并保存”；
+  3. 验证通过后保存，AI 用新条目的 id 继续后续步骤。
+- **怎么选**：在官网新建大模型 Key → `secrethub-key-onboarding`（剪贴板捕获）；其余敏感信息 → 本 skill 的表单；文件里已有的资料 → `secrethub-import`。
+
 #### secrethub-catalog-maintainer：维护模型目录（维护者用）
 - **场景**：你作为维护者，为所有用户发布新的模型目录。
 - **流程**：
@@ -257,7 +278,7 @@ foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refre
 
 ### 6.1 发布安装包与自动更新（Windows）
 
-安装包是 NSIS `.exe`，按当前用户安装（不需要管理员权限）。MCP 服务已打成单文件 `secrethub-mcp.exe` 随包安装，不需要装 Node；用户在「设置 → 连接 AI 工具」点一次，即可注册到 Claude Code / Claude Desktop / Cursor 并安装 5 个 skill。
+安装包是 NSIS `.exe`，按当前用户安装（不需要管理员权限）。MCP 服务已打成单文件 `secrethub-mcp.exe` 随包安装，不需要装 Node；用户在「设置 → 连接 AI 工具」点一次，即可注册到 Claude Code / Claude Desktop / Cursor 并安装 6 个 skill。
 
 **一次性准备**
 
