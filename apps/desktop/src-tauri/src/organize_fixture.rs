@@ -301,8 +301,15 @@ fn organize_fixture_exports_a_commented_example_without_values() {
         example.contains("API Key\nDASHSCOPE_API_KEY=\"\""),
         "{example}"
     );
+    // Export order follows list_metadata (updated_at DESC, whole seconds), so when the plan's
+    // writes cross a second boundary any group may come first; only the separation is fixed.
+    let panel = "# 野草云宝塔面板（服务器）";
     assert!(
-        example.contains("\n\n# 野草云宝塔面板（服务器）"),
+        example.starts_with(panel) || example.contains(&format!("\n\n{panel}")),
+        "groups are separated: {example}"
+    );
+    assert!(
+        example.contains("\n\n# "),
         "groups are separated: {example}"
     );
     // The real .env carries the same comments and the values.

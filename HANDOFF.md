@@ -14,7 +14,7 @@
 ## 下一步
 - 0.1.1 已上线：把全局 CLAUDE.md 第 18 节改成调用 `secrethub_request_input`（由主会话处理），再停用 `F:\AIrules\secure-input` 临时方案。
 - 本机 SecretHub 跑的是 `F:\CCPJ\SecretHub\target\release\secrethub-desktop.exe`（不是安装版，不会自动更新）；要用上新表单需在主目录拉 main 后重新构建，或在另一台机器装 0.1.1。
-- 偶发失败：`organize_fixture::organize_fixture_exports_a_commented_example_without_values` 全量并行跑时偶尔失败、单跑和重跑都通过，待查。
+- 已修复（2026-11-18）：`organize_fixture` 偶发失败。根因是导出顺序跟随 `list_metadata`（`updated_at DESC`，秒级），写入跨秒时分组顺序会变，测试却假设「野草云宝塔面板」前面一定有空行；已改成与顺序无关的断言。
 - 真机试一次有效大模型 Key 的「获取模型列表」（单测用的是本地假服务）。
 - 已发布 0.1.0（2026-11-16）、0.1.1（2026-11-17）：安装包固定下载链接 https://updates.9aizhuan.com/secrethub/SecretHub-setup-latest.exe（发布脚本每次自动更新这个软链接），已写入飞书「线上网站与管理后台」表格。
 - 升级链路要连发两个版本，在**另一台干净机器或虚拟机**上装旧版再测升级；本机正在使用 SecretHub，不要在本机装安装包。
@@ -36,5 +36,5 @@
 ## 各电脑本地路径
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
-| Windows | `F:\CCPJ\SecretHub` | main | 2026-11-16 19:27 |
+| Windows | `F:\CCPJ\SecretHub` | main | 2026-11-18 09:59 |
 <!-- repo-sync:machines:end -->
