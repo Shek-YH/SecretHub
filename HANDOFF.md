@@ -21,7 +21,7 @@
 - 使用说明 `docs/USAGE.md`（§6.1 发布安装包与自动更新）。
 
 ## 下一步
-- **Mac 版收尾（需用户）**：把更新私钥从 Windows 安全拷到 Mac `~/.tauri/secrethub-updater.key`；在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」；决定是否办 Apple Developer（Developer ID 签名 + 公证，否则用户下载后被 Gatekeeper 拦）。
+- **Mac 版收尾**：更新私钥已在 Mac `~/.tauri/secrethub-updater.key`（已验证与应用公钥 ID `5F7FCDD1E5402B44` 一致）；用户已开通 Apple 开发者账号，发布脚本已接入 Developer ID 签名 + 公证（`--adhoc` 为测试用）。**待用户**：① 在 Xcode 创建「Developer ID Application」证书（钥匙串目前只有 Apple Development）；② 在 App Store Connect 建 API Key（.p8）并放到 `~/.appstoreconnect/private_keys/`，把 Issuer ID / Key ID 填进 `~/.config/secrethub-release/macos.env`；③ 在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」。之后跑一次正式签名构建，确认公证通过。
 - Mac 首发：`bash scripts/release-macos.sh --notes "..." --dry-run` → 去掉 `--dry-run`；之后用两个版本在另一台 Mac 实测升级。Intel Mac 暂不支持（只打 aarch64）。
 - Windows 已回归（62d6c16）：`build:sea` + SEA smoke 通过、Rust 303 全过、MCP 仅 import-skill CRLF 既有失败。**未做**：Windows `tauri build`（NSIS）和前端测试（该 worktree 未 `npm --prefix apps/desktop ci`；本次未改前端代码）。
 - 修复 MCP 普通 API Key 的同名检查缺口（`apps/mcp/src/plan.ts` 的 `precheckPlan`，对 `secret_ids` 中非配置组的 `envKey` 也 claim），并补测试。
@@ -41,7 +41,7 @@
 - 在 PowerShell 手动 `tauri build` 会因空的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 卡住，用发布脚本。
 - 安装包未做代码签名（用户决定先不签），会有 SmartScreen 提示；SEA 注入后 node.exe 原签名失效，可能被杀软误报。
 - `npm test`（apps/mcp）里 import-skill 的 front matter 用例在 Windows（autocrlf=true，CRLF 检出）下必失败，与功能无关；可用 `npx vitest run src` 并忽略这一条，或以后把用例的正则改成兼容 CRLF。
-- Mac：Rust 用 Homebrew 的 rustup（`/opt/homebrew/opt/rustup/bin` 要加进 PATH）；`apps/mcp/build/node-dist/` 缓存了官方 Node，勿删也无需提交。Mac 上数据目录与开发版共用 `~/Library/Application Support/com.secrethub.desktop`（目前只有空测试库）。
+- Mac：Rust 用 Homebrew 的 rustup（已写入 `~/.zprofile` 的 PATH）；`apps/mcp/build/node-dist/` 缓存了官方 Node，勿删也无需提交。Mac 上数据目录与开发版共用 `~/Library/Application Support/com.secrethub.desktop`（目前只有空测试库）。
 - 不要读取用户资料目录里的文件内容；导入一律走 secrethub-import skill。
 - `catalog-public-key.txt` 仍是开发用公钥；发布前需 `catalog:keygen`。
 
@@ -50,5 +50,5 @@
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
 | Windows | `F:\CCPJ\SecretHub\.claude\worktrees\secrethub-export-autotodo-e27656` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 04:50 |
-| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 08:38 |
+| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 09:42 |
 <!-- repo-sync:machines:end -->

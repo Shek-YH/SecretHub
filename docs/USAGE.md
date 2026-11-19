@@ -309,7 +309,7 @@ foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refre
 - MCP sidecar：`npm --prefix apps/mcp run build:sea` 在 Mac 上会自动下载 nodejs.org 官方 Node（版本见 `apps/mcp/scripts/sea-platform.mjs`，校验 SHA-256，缓存在 `apps/mcp/build/node-dist/`）；Homebrew 的 node 依赖系统外的动态库，不能打进包里。
 - 每次发布：`bash scripts/release-macos.sh --notes "本次更新说明" --dry-run`，确认后去掉 `--dry-run`。上传顺序：更新包 → dmg → `latest-macos.json`，并把 `SecretHub-latest-<架构>.dmg` 链接指向新 dmg。
 - 当前只打本机架构（Apple Silicon 为 `aarch64`）；Intel Mac 需要另外在 Intel 机器上构建，或以后改成 universal。
-- 未签 Developer ID、未公证：别人下载后会被 Gatekeeper 拦（「无法验证开发者」），需要右键 → 打开，或到「系统设置 → 隐私与安全性」点「仍要打开」。正式分发前要做 Developer ID 签名 + 公证。
+- 签名与公证：脚本自动使用钥匙串里的「Developer ID Application」证书，并用 App Store Connect API Key 公证 .app 和 .dmg（配置在仓库外的 `~/.config/secrethub-release/macos.env`：`APPLE_API_ISSUER`、`APPLE_API_KEY`、`APPLE_API_KEY_PATH`，`.p8` 放 `~/.appstoreconnect/private_keys/`）。缺证书或配置时脚本直接报错；`--adhoc` 只用于本机测试（别人下载会被 Gatekeeper 拦）。开发版（`tauri dev` / 手动 `tauri build`）仍是 ad-hoc 签名。
 - 与 Windows 的差异：Mac 安装更新只替换 `.app`，不会自行重启，所以点「更新」后由应用自己重启（`platform::INSTALLER_RESTARTS_APP`）；运行中的 `secrethub-mcp` 不用先结束（macOS 允许替换正在运行的文件）。
 
 更多设计细节见 `docs/superpowers/specs/`，安全模型见 `SECURITY.md` 和 `docs/security/`。
