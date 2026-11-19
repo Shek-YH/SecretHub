@@ -23,7 +23,7 @@
 ## 下一步
 - **Mac 版收尾（需用户）**：把更新私钥从 Windows 安全拷到 Mac `~/.tauri/secrethub-updater.key`；在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」；决定是否办 Apple Developer（Developer ID 签名 + 公证，否则用户下载后被 Gatekeeper 拦）。
 - Mac 首发：`bash scripts/release-macos.sh --notes "..." --dry-run` → 去掉 `--dry-run`；之后用两个版本在另一台 Mac 实测升级。Intel Mac 暂不支持（只打 aarch64）。
-- Windows 上回归本分支（`build:sea`、全量测试、`tauri build`），确认 Mac 改动没影响 Windows。
+- Windows 已回归（62d6c16）：`build:sea` + SEA smoke 通过、Rust 303 全过、MCP 仅 import-skill CRLF 既有失败。**未做**：Windows `tauri build`（NSIS）和前端测试（该 worktree 未 `npm --prefix apps/desktop ci`；本次未改前端代码）。
 - 修复 MCP 普通 API Key 的同名检查缺口（`apps/mcp/src/plan.ts` 的 `precheckPlan`，对 `secret_ids` 中非配置组的 `envKey` 也 claim），并补测试。
 - 0.1.1 已上线：把全局 CLAUDE.md 第 18 节改成调用 `secrethub_request_input`（由主会话处理），再停用 `F:\AIrules\secure-input` 临时方案。
 - 本机 SecretHub 跑的是 `F:\CCPJ\SecretHub\target\release\secrethub-desktop.exe`（不是安装版，不会自动更新）；要用上新表单需在主目录拉 main 后重新构建，或在另一台机器装 0.1.1。
@@ -50,5 +50,5 @@
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
 | Windows | `F:\CCPJ\SecretHub\.claude\worktrees\secrethub-export-autotodo-e27656` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 04:50 |
-| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 08:34 |
+| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 08:38 |
 <!-- repo-sync:machines:end -->
