@@ -24,6 +24,7 @@ mod organize;
 mod organize_fixture;
 mod paste;
 mod plan;
+mod platform;
 mod queue;
 mod restore;
 mod scan;

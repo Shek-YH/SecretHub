@@ -1,4 +1,3 @@
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -14,10 +13,11 @@ import { getImportStatus, importPathSchema, isValidImportRequestId, MAX_IMPORT_P
 import { getInspection, getOrganizeStatus, isValidInspectRequestId, isValidOrganizeRequestId, MAX_PLAN_ITEMS, planItemSchema, precheckInspect, precheckOrganizePlan, queueInspect, queueOrganize } from './organize.js';
 import { getSyncStatus, isValidSyncRequestId, MAX_SYNC_SECRETS, precheckSyncRequest, queueSyncRequest } from './sync.js';
 import { buildInvocation } from './invocation.js';
+import { defaultDbPath } from './data-dir.js';
 import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
 
 const CHARACTER_LIMIT = 25_000;
-const dbPath = process.env.SECRETHUB_DB_PATH ?? join(process.env.APPDATA ?? homedir(), 'com.secrethub.desktop', 'vault.sqlite');
+const dbPath = process.env.SECRETHUB_DB_PATH ?? defaultDbPath();
 const planDirectory = process.env.SECRETHUB_PLAN_DIR ?? join(dirname(dbPath), 'mcp-pending');
 const resultDirectory = process.env.SECRETHUB_RESULT_DIR ?? join(dirname(dbPath), 'mcp-results');
 const catalog = openCatalogStore(dbPath);

@@ -1,14 +1,16 @@
-// Builds the standalone Windows MCP exe: esbuild -> single CJS -> Node SEA blob -> postject into a copy of node.exe.
+// Builds the standalone MCP sidecar for the current platform: esbuild -> single CJS -> Node SEA blob ->
+// postject into a copy of node. Platform differences live in sea-platform.mjs.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { afterInject, baseNode, beforeInject, postjectArgs, sidecarFileName, targetTriple } from './sea-platform.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'build', 'sea');
-const target = join(root, '..', 'desktop', 'src-tauri', 'binaries', 'secrethub-mcp-x86_64-pc-windows-msvc.exe');
+const target = join(root, '..', 'desktop', 'src-tauri', 'binaries', sidecarFileName(targetTriple()));
 mkdirSync(out, { recursive: true });
 mkdirSync(dirname(target), { recursive: true });
 
@@ -31,9 +33,12 @@ await build({
 const blob = join(out, 'sea-prep.blob');
 const config = join(out, 'sea-config.json');
 writeFileSync(config, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true }));
-execFileSync(process.execPath, ['--experimental-sea-config', config], { stdio: 'inherit' });
+const node = await baseNode(join(root, 'build', 'node-dist'));
+execFileSync(node, ['--experimental-sea-config', config], { stdio: 'inherit' });
 
-copyFileSync(process.execPath, target);
+copyFileSync(node, target);
+beforeInject(target);
 const postject = createRequire(import.meta.url).resolve('postject/dist/cli.js');
-execFileSync(process.execPath, [postject, target, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'], { stdio: 'inherit' });
+execFileSync(process.execPath, [postject, target, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2', ...postjectArgs()], { stdio: 'inherit' });
+afterInject(target);
 console.log(`built ${target}`);

@@ -12,6 +12,8 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+use crate::platform;
+
 pub const SKILL_NAMES: [&str; 6] = [
     "secrethub-project-env",
     "secrethub-import",
@@ -57,25 +59,17 @@ pub struct ConnectStatus {
 
 // ---------- path helpers ----------
 
-fn sidecar_file_name() -> &'static str {
-    if cfg!(windows) {
-        "secrethub-mcp.exe"
-    } else {
-        "secrethub-mcp"
-    }
-}
-
 /// Installed layout: the sidecar sits next to the main exe. Dev builds fall back to `binaries/`.
 fn locate_sidecar() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
-    let beside = exe.parent()?.join(sidecar_file_name());
+    let beside = exe.parent()?.join(platform::SIDECAR_FILE);
     if beside.is_file() {
         return Some(beside);
     }
     if cfg!(debug_assertions) {
         let dev = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("binaries")
-            .join("secrethub-mcp-x86_64-pc-windows-msvc.exe");
+            .join(platform::dev_sidecar_file());
         if dev.is_file() {
             return Some(dev);
         }
@@ -117,12 +111,7 @@ fn find_in_path(
 }
 
 fn find_claude() -> Option<PathBuf> {
-    let exts: &[&str] = if cfg!(windows) {
-        &[".exe", ".cmd", ".bat"]
-    } else {
-        &[""]
-    };
-    find_in_path("claude", env::var_os("PATH"), exts)
+    find_in_path("claude", platform::tool_search_path(), platform::EXECUTABLE_EXTS)
 }
 
 // ---------- JSON config merge ----------
@@ -277,6 +266,10 @@ pub fn copy_skills(source_root: &Path, dest_root: &Path) -> Vec<ConnectItem> {
 fn run_claude(claude: &Path, args: &[&str]) -> Result<std::process::Output, String> {
     let mut command = Command::new(claude);
     command.args(args);
+    // npm-installed `claude` is a node script; it needs the same PATH it was found on.
+    if let Some(path) = platform::tool_search_path() {
+        command.env("PATH", path);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
