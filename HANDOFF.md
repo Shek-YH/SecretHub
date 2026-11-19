@@ -3,7 +3,7 @@
 > 推送前由 Claude 更新；另一台电脑打开 Claude 会话时会自动读到这里。
 
 ## 当前进度
-- **macOS 版（2026-11-19，Mac 上完成，未发布）**：Mac 上 `tauri dev` 能启动，`tauri build` 产出 `SecretHub.app` + `SecretHub_<版本>_aarch64.dmg`（ad-hoc 签名，未公证）。改动：
+- **macOS 版（2026-11-19，Mac 上完成，未发布）**：Mac 上 `tauri dev` 能启动，`tauri build` 产出 `SecretHub.app` + `SecretHub_<版本>_aarch64.dmg`（`release-macos.sh` 下为 Developer ID 签名 + 公证）。改动：
   - MCP 数据目录按平台计算（`apps/mcp/src/data-dir.ts`）：Mac 为 `~/Library/Application Support/com.secrethub.desktop`，Windows 行为不变；
   - SEA sidecar 支持 Mac（`apps/mcp/scripts/sea-platform.mjs`）：自动下载 nodejs.org 官方 Node 22.23.3（校验 SHA-256，Homebrew 的 node 不能用），Mach-O 注入 + ad-hoc 签名；
   - `tauri.macos.conf.json`（只在 Mac 合并）：app+dmg、`entitlements.plist`（allow-jit，**没有它打包后的 sidecar 一启动就 SIGTRAP**）、Mac 独立更新清单 `latest-macos.json`；
@@ -21,7 +21,7 @@
 - 使用说明 `docs/USAGE.md`（§6.1 发布安装包与自动更新）。
 
 ## 下一步
-- **Mac 版签名/公证（2026-11-19 已配好）**：更新私钥在 Mac `~/.tauri/secrethub-updater.key`（与应用公钥 ID `5F7FCDD1E5402B44` 一致）。Developer ID Application 证书（团队 853LA3T8VM，到期 2027-12-19）已导入登录钥匙串，私钥/CSR/证书备份在 `~/.config/secrethub-release/devid/`；公证 API Key `PNLMYNR4SZ`（Developer 角色）的 .p8 在 `~/.appstoreconnect/private_keys/`，配置在 `~/.config/secrethub-release/macos.env`（都不进 git）。首次正式构建已签名并提交公证（submission `84e38f66-e228-423c-aeeb-f40a0026008a`，提交时 In Progress），结果见下一次会话。**待用户**：在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」；把 `devid.key` 与 .p8 离线备份（.p8 苹果只给下载一次）。
+- **Mac 版签名/公证（2026-11-19 已配好）**：更新私钥在 Mac `~/.tauri/secrethub-updater.key`（与应用公钥 ID `5F7FCDD1E5402B44` 一致）。Developer ID Application 证书（团队 853LA3T8VM，到期 2027-12-19）已导入登录钥匙串，私钥/CSR/证书备份在 `~/.config/secrethub-release/devid/`；公证 API Key `PNLMYNR4SZ`（Developer 角色）的 .p8 在 `~/.appstoreconnect/private_keys/`，配置在 `~/.config/secrethub-release/macos.env`（都不进 git）。首次正式构建（`release-macos.sh --dry-run`）全流程通过：.app 与 .dmg 均公证 Accepted 并 staple，`spctl` 显示 `source=Notarized Developer ID`；只是没上传。正式发布去掉 `--dry-run` 即可（需用户同意）。**待用户**：在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」；把 `devid.key` 与 .p8 离线备份（.p8 苹果只给下载一次）。
 - Mac 首发：`bash scripts/release-macos.sh --notes "..." --dry-run` → 去掉 `--dry-run`；之后用两个版本在另一台 Mac 实测升级。Intel Mac 暂不支持（只打 aarch64）。
 - Windows 已回归（62d6c16）：`build:sea` + SEA smoke 通过、Rust 303 全过、MCP 仅 import-skill CRLF 既有失败。**未做**：Windows `tauri build`（NSIS）和前端测试（该 worktree 未 `npm --prefix apps/desktop ci`；本次未改前端代码）。
 - 修复 MCP 普通 API Key 的同名检查缺口（`apps/mcp/src/plan.ts` 的 `precheckPlan`，对 `secret_ids` 中非配置组的 `envKey` 也 claim），并补测试。
@@ -50,5 +50,5 @@
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
 | Windows | `F:\CCPJ\SecretHub\.claude\worktrees\secrethub-export-autotodo-e27656` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 04:50 |
-| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 10:17 |
+| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 14:44 |
 <!-- repo-sync:machines:end -->
