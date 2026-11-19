@@ -3,6 +3,8 @@
 > 推送前由 Claude 更新；另一台电脑打开 Claude 会话时会自动读到这里。
 
 ## 当前进度
+- 分支 `claude/secrethub-export-autotodo-e27656`（基于 main `43fac4f`）：MCP 同名变量冲突改为**分批导出**。`secrethub_prepare_project_env` 遇到同名变量来自不同来源时，自动拆成多个计划（返回 `requestIds`），每个计划在 Desktop 单独确认。MCP 测试 155 项通过（仅 import-skill CRLF 用例失败，既有问题），tsc 通过。
+- 已知缺口：普通 API Key 走 `secret_ids` 路径时没有做同名检查，同名 Key 会在同一个 `.env` 里重复写两行（dotenv 取最后一行）。待修。
 - **已发布 0.1.1**（2026-11-17，main `9ae27d6`，PR #3 已合并）：**安全录入表单**。新 MCP 工具 `secrethub_request_input` / `secrethub_get_input_status`；Desktop 新模块 `secure_input.rs` + 前端 `SecureInput.tsx`，验证（登录接口 / 大模型 `/models`）通过才写库，走 AI 导入批次可撤销；新 skill `secrethub-secure-input`（「连接 AI 工具」现复制 6 个 skill）。测试：Rust 全过、前端 210、MCP 新增 24 条 + smoke；dev 模式端到端（锁定横幅 → 解锁自动弹表单 → 假密码 401 提示 → 取消得 cancelled）已跑通。
 - 分支 `feat/simplify-entry-and-providers`（PR #2，基于 PR #1 的分支 `fix/p0-mcp-env-merge-provider-catalog`），全部测试通过（Rust 289、前端 200、MCP 268、smoke）：
   - 常用 10 家服务商、按类型录入、配置组导出、AI 整理导入（打码视图 + 护栏 + 批次撤销）、带注释导出；
@@ -12,6 +14,8 @@
 - 使用说明 `docs/USAGE.md`（§6.1 发布安装包与自动更新）。
 
 ## 下一步
+- **Mac 上开发 macOS 版**：先 `git fetch` 后切到 `claude/secrethub-export-autotodo-e27656`（或等合并后用 main），按 `docs/` 与本文件注意事项操作。Mac 版当前只有 sidecar 的 Windows 构建，需补 Mac 的 sidecar 与打包。
+- 修复 MCP 普通 API Key 的同名检查缺口（`apps/mcp/src/plan.ts` 的 `precheckPlan`，对 `secret_ids` 中非配置组的 `envKey` 也 claim），并补测试。
 - 0.1.1 已上线：把全局 CLAUDE.md 第 18 节改成调用 `secrethub_request_input`（由主会话处理），再停用 `F:\AIrules\secure-input` 临时方案。
 - 本机 SecretHub 跑的是 `F:\CCPJ\SecretHub\target\release\secrethub-desktop.exe`（不是安装版，不会自动更新）；要用上新表单需在主目录拉 main 后重新构建，或在另一台机器装 0.1.1。
 - 偶发失败：`organize_fixture::organize_fixture_exports_a_commented_example_without_values` 全量并行跑时偶尔失败、单跑和重跑都通过，待查。
@@ -36,5 +40,5 @@
 ## 各电脑本地路径
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
-| Windows | `F:\CCPJ\SecretHub` | main | 2026-11-16 19:27 |
+| Windows | `F:\CCPJ\SecretHub\.claude\worktrees\secrethub-export-autotodo-e27656` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 04:50 |
 <!-- repo-sync:machines:end -->
