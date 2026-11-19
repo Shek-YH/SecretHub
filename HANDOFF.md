@@ -21,7 +21,7 @@
 - 使用说明 `docs/USAGE.md`（§6.1 发布安装包与自动更新）。
 
 ## 下一步
-- **Mac 版收尾**：更新私钥已在 Mac `~/.tauri/secrethub-updater.key`（已验证与应用公钥 ID `5F7FCDD1E5402B44` 一致）；用户已开通 Apple 开发者账号，发布脚本已接入 Developer ID 签名 + 公证（`--adhoc` 为测试用）。**待用户**：① 在 Xcode 创建「Developer ID Application」证书（钥匙串目前只有 Apple Development）；② 在 App Store Connect 建 API Key（.p8）并放到 `~/.appstoreconnect/private_keys/`，把 Issuer ID / Key ID 填进 `~/.config/secrethub-release/macos.env`；③ 在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」。之后跑一次正式签名构建，确认公证通过。
+- **Mac 版签名/公证（2026-11-19 已配好）**：更新私钥在 Mac `~/.tauri/secrethub-updater.key`（与应用公钥 ID `5F7FCDD1E5402B44` 一致）。Developer ID Application 证书（团队 853LA3T8VM，到期 2027-12-19）已导入登录钥匙串，私钥/CSR/证书备份在 `~/.config/secrethub-release/devid/`；公证 API Key `PNLMYNR4SZ`（Developer 角色）的 .p8 在 `~/.appstoreconnect/private_keys/`，配置在 `~/.config/secrethub-release/macos.env`（都不进 git）。首次正式构建已签名并提交公证（submission `84e38f66-e228-423c-aeeb-f40a0026008a`，提交时 In Progress），结果见下一次会话。**待用户**：在 Mac 上打开 `target/release/bundle/macos/SecretHub.app` 看界面、测「连接 AI 工具」；把 `devid.key` 与 .p8 离线备份（.p8 苹果只给下载一次）。
 - Mac 首发：`bash scripts/release-macos.sh --notes "..." --dry-run` → 去掉 `--dry-run`；之后用两个版本在另一台 Mac 实测升级。Intel Mac 暂不支持（只打 aarch64）。
 - Windows 已回归（62d6c16）：`build:sea` + SEA smoke 通过、Rust 303 全过、MCP 仅 import-skill CRLF 既有失败。**未做**：Windows `tauri build`（NSIS）和前端测试（该 worktree 未 `npm --prefix apps/desktop ci`；本次未改前端代码）。
 - 修复 MCP 普通 API Key 的同名检查缺口（`apps/mcp/src/plan.ts` 的 `precheckPlan`，对 `secret_ids` 中非配置组的 `envKey` 也 claim），并补测试。
@@ -50,5 +50,5 @@
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
 | Windows | `F:\CCPJ\SecretHub\.claude\worktrees\secrethub-export-autotodo-e27656` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 04:50 |
-| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 09:42 |
+| Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 10:17 |
 <!-- repo-sync:machines:end -->

@@ -43,6 +43,10 @@ while [ $# -gt 0 ]; do
 done
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# Non-login shells skip ~/.zprofile; fall back to Homebrew's rustup so tauri finds cargo.
+if ! command -v cargo >/dev/null && [ -x /opt/homebrew/opt/rustup/bin/cargo ]; then
+  export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+fi
 VERSION="$(node -p "require('$REPO/apps/desktop/src-tauri/tauri.conf.json').version")"
 case "$(uname -m)" in
   arm64) ARCH=aarch64 ;;
