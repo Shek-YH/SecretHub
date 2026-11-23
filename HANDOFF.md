@@ -3,6 +3,7 @@
 > 推送前由 Claude 更新；另一台电脑打开 Claude 会话时会自动读到这里。
 
 ## 当前进度
+- **最新代码在分支 `claude/project-optimization-71eb64`（2026-11-23，Windows）**：已合并 `claude/secrethub-export-autotodo-e27656` 的全部内容，并修复同名 Key 导出、顶栏提示、两类不稳定测试。验证：Rust 303、前端 212、MCP 161 + smoke 全过。尚未合入 main。
 - **官网与 App 内链接（2026-11-22）**：官网 https://secrethub.bigstoneopc.com 已上线（仓库 bigstoneopc-sites 的 `sites/secrethub`，含 /privacy /terms /support 及 /zh/；Windows 下载指向 `updates.9aizhuan.com/secrethub/SecretHub-setup-latest.exe`，macOS 标「即将推出」，Mac 版发布后改该站 `product.json`）。App「设置」页新增 `AboutLinks.tsx`（官网/隐私政策/用户协议/帮助，随语言跳转，经 `openExternalUrl`）。更新源 `updates.9aizhuan.com` 未改。前端 tsc 通过、215 项测试通过；界面未在真实桌面窗口目视。隐私政策里写了「模型目录远程更新仅在配置了 `SECRETHUB_CATALOG_URL` 的构建中发生」，若以后正式启用该地址，需同步更新政策。
 - **macOS 版（2026-11-19，Mac 上完成，未发布）**：Mac 上 `tauri dev` 能启动，`tauri build` 产出 `SecretHub.app` + `SecretHub_<版本>_aarch64.dmg`（`release-macos.sh` 下为 Developer ID 签名 + 公证）。改动：
   - MCP 数据目录按平台计算（`apps/mcp/src/data-dir.ts`）：Mac 为 `~/Library/Application Support/com.secrethub.desktop`，Windows 行为不变；
@@ -49,6 +50,6 @@
 ## 各电脑本地路径
 | 电脑 | 本地路径 | 分支 | 最后更新 |
 |---|---|---|---|
-| Windows | `F:\CCPJ\SecretHub\.claude\worktrees\secrethub-export-autotodo-e27656` | claude/secrethub-export-autotodo-e27656 | 2026-11-19 04:50 |
+| Windows | `F:\CCPJ\SecretHub\.claude\worktrees\project-optimization-71eb64` | claude/project-optimization-71eb64 | 2026-11-23 12:46 |
 | Mac | `/Volumes/ZJ/AIPG/SecretHub` | claude/secrethub-export-autotodo-e27656 | 2026-11-22 00:00 |
 <!-- repo-sync:machines:end -->
