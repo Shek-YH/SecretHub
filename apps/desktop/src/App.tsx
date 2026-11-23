@@ -109,6 +109,8 @@ export function App() {
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
   useEffect(() => { setActionMessage(''); setValidationMessage(''); setModelMessage(''); }, [selectedId]);
+  // The header message is shown on every page now, so a message from the previous page must not linger.
+  useEffect(() => { setActionMessage(''); }, [activeNav]);
   const selectedSyncedAt = secrets.find((item) => item.id === selectedId)?.modelsSyncedAt;
   useEffect(() => {
     if (!isTauriRuntime()) { setModels([]); return; }
@@ -526,7 +528,8 @@ export function App() {
             <UpdateButton t={t} />
             <button className="language-switch" onClick={() => changeLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')} aria-label={t.header.language}>{t.header.language}</button>
             <button className="secondary-button" onClick={() => setShowImport(true)}>{t.actions.import}</button>
-            {activeNav === 'api_key' && <><button className="secondary-button" disabled={validationRunning} onClick={() => void validateAllApiKeys()}>{validationRunning ? t.actions.validatingAll : t.actions.validateAll}</button>{actionMessage && <span className="header-feedback">{actionMessage}</span>}</>}
+            {activeNav === 'api_key' && <button className="secondary-button" disabled={validationRunning} onClick={() => void validateAllApiKeys()}>{validationRunning ? t.actions.validatingAll : t.actions.validateAll}</button>}
+            {actionMessage && <span className="header-feedback" role="status">{actionMessage}</span>}
             <button className="primary-button" onClick={openAdd}><span aria-hidden="true">+</span>{t.header.add}</button>
           </div>
         </header>

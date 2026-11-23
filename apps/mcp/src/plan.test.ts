@@ -77,6 +77,18 @@ describe('splitPlanBatches', () => {
     expect(result.batches).toHaveLength(2);
     expect(result.batches.map((batch) => batch.bindings.map((binding) => binding.secret_id))).toEqual([['s1'], ['s2']]);
   });
+  it('splits plain secret_ids that export the same env name', () => {
+    const keyed = new Map(secrets);
+    keyed.set('k1', secret('k1', { envKey: 'OPENAI_API_KEY' }));
+    keyed.set('k2', secret('k2', { envKey: 'OPENAI_API_KEY' }));
+    keyed.set('k3', secret('k3', { envKey: 'OTHER_KEY', modelId: 'gpt-x', modelEnvKey: 'OPENAI_API_KEY' }));
+    const keyedLookup = { secret: (id: string) => keyed.get(id), providers };
+    expect(precheckPlan({ secretIds: ['k1', 'k2'] }, keyedLookup)).toMatch(/OPENAI_API_KEY is bound to two different sources/);
+    expect(precheckPlan({ secretIds: ['k1', 'k3'] }, keyedLookup)).toMatch(/OPENAI_API_KEY/);
+    expect(precheckPlan({ secretIds: ['k1', 'k1'] }, keyedLookup)).toBeUndefined();
+    expect(precheckPlan({ secretIds: ['k1'], bindings: [bind({ secret_id: 'k1', env: { api_key: 'OPENAI_API_KEY' } })] }, keyedLookup)).toBeUndefined();
+    expect(splitPlanBatches({ secretIds: ['k1', 'k2'] }, keyedLookup)).toEqual({ batches: [{ secretIds: ['k1'], bindings: [] }, { secretIds: ['k2'], bindings: [] }] });
+  });
   it('still fails when a single item is invalid', () => {
     expect(splitPlanBatches({ secretIds: ['s1', 'nope'] }, lookup)).toEqual({ error: 'Unknown secret id: nope' });
   });

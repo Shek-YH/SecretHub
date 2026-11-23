@@ -79,7 +79,20 @@ export function precheckPlan(input: { secretIds?: string[]; bindings?: AnyBindin
     return undefined;
   };
   for (const id of secretIds) {
-    if (lookup.secret(id)!.valueType === 'env_group') { const problem = groupVariables(id); if (problem) return problem; }
+    const secret = lookup.secret(id)!;
+    if (secret.valueType === 'env_group') { const problem = groupVariables(id); if (problem) return problem; continue; }
+    // Plain items export their key, model and endpoint under the names stored on the item; two items
+    // using the same name would otherwise produce two lines in one .env (the last one silently wins).
+    const named: Array<[string | undefined, string]> = [
+      [secret.envKey, `key:${id}`],
+      [secret.modelId ? secret.modelEnvKey : undefined, `model:${secret.modelId}`],
+      [secret.endpointUrl ? secret.endpointEnvKey : undefined, `url:${secret.endpointUrl}`],
+    ];
+    for (const [name, source] of named) {
+      if (!name?.trim()) continue;
+      const problem = claim(name.trim(), source);
+      if (problem) return problem;
+    }
   }
   for (const binding of bindings) {
     const secret = lookup.secret(binding.secret_id)!;

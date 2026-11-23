@@ -97,6 +97,8 @@ describe('AI import plan banners', () => {
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: t.ai.noticeUndo }));
     expect(undo).toHaveBeenCalledWith('batch-9');
+    // The confirmation must be visible on the default page too, not only on the API Key page.
+    expect(await screen.findByRole('status')).toHaveTextContent(t.ai.undone.replace('{items}', '1').replace('{vars}', '0'));
     expect(screen.queryByText(t.ai.organizeWaitingTitle)).not.toBeInTheDocument();
   });
 });
