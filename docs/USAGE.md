@@ -34,9 +34,12 @@ npm --prefix apps/desktop run tauri dev
 
 第一次编译需要一两分钟。首次启动会进入“创建本地保险库”：主密码至少 9 位，建议 12 位以上且不在别处使用。**主密码无法找回**，请务必定期导出备份（见 §2.8）。
 
-### 1.3 数据存放位置（Windows）
+### 1.3 数据存放位置
 
-`%APPDATA%\com.secrethub.desktop\`
+- Windows：`%APPDATA%\com.secrethub.desktop\`
+- macOS：`~/Library/Application Support/com.secrethub.desktop/`
+
+MCP 服务按同样的规则找保险库（`apps/mcp/src/data-dir.ts`），可用 `SECRETHUB_DB_PATH` 覆盖。
 
 | 路径 | 内容 |
 |---|---|
@@ -297,5 +300,16 @@ foreach ($n in 'secrethub-project-env','secrethub-import','secrethub-model-refre
 **客户端更新行为**：启动约 3 秒后检查，之后每小时一次；有新版本就静默下载（失败不打扰，下次再试）；下载完顶栏出现「更新」按钮，点击后静默安装并自动重启；一直不点，退出应用时静默安装（不自动重启）。「设置 → 软件更新 → 检查更新」是手动入口，会提示结果。安装前安装程序会先结束正在运行的 `secrethub-mcp.exe`（Claude 等客户端下次调用会自动重新拉起），避免文件被占用导致升级失败。
 
 **验证升级必须用真实旧版本**：更新模式由已安装的旧版本决定，所以要连发两个版本，先装旧版，再发新版到服务器，在旧版里实测一次升级。
+
+### 6.2 发布安装包与自动更新（macOS）
+
+产物是 `.dmg`（首次安装）和 `.app.tar.gz`（自动更新包）。Mac 专用配置在 `apps/desktop/src-tauri/tauri.macos.conf.json`（只在 Mac 上合并生效）：打 `app` + `dmg`、ad-hoc 签名、更新地址为单独的 `latest-macos.json`，所以 Mac 和 Windows 可以各自发版。
+
+- 更新签名私钥与 Windows **是同一个文件**，放到 Mac 的 `~/.tauri/secrethub-updater.key`。
+- MCP sidecar：`npm --prefix apps/mcp run build:sea` 在 Mac 上会自动下载 nodejs.org 官方 Node（版本见 `apps/mcp/scripts/sea-platform.mjs`，校验 SHA-256，缓存在 `apps/mcp/build/node-dist/`）；Homebrew 的 node 依赖系统外的动态库，不能打进包里。
+- 每次发布：`bash scripts/release-macos.sh --notes "本次更新说明" --dry-run`，确认后去掉 `--dry-run`。上传顺序：更新包 → dmg → `latest-macos.json`，并把 `SecretHub-latest-<架构>.dmg` 链接指向新 dmg。
+- 当前只打本机架构（Apple Silicon 为 `aarch64`）；Intel Mac 需要另外在 Intel 机器上构建，或以后改成 universal。
+- 签名与公证：脚本自动使用钥匙串里的「Developer ID Application」证书，并用 App Store Connect API Key 公证 .app 和 .dmg（配置在仓库外的 `~/.config/secrethub-release/macos.env`：`APPLE_API_ISSUER`、`APPLE_API_KEY`、`APPLE_API_KEY_PATH`，`.p8` 放 `~/.appstoreconnect/private_keys/`）。缺证书或配置时脚本直接报错；`--adhoc` 只用于本机测试（别人下载会被 Gatekeeper 拦）。开发版（`tauri dev` / 手动 `tauri build`）仍是 ad-hoc 签名。
+- 与 Windows 的差异：Mac 安装更新只替换 `.app`，不会自行重启，所以点「更新」后由应用自己重启（`platform::INSTALLER_RESTARTS_APP`）；运行中的 `secrethub-mcp` 不用先结束（macOS 允许替换正在运行的文件）。
 
 更多设计细节见 `docs/superpowers/specs/`，安全模型见 `SECURITY.md` 和 `docs/security/`。

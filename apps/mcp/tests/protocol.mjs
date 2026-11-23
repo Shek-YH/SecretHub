@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { sidecarFileName, targetTriple } from '../scripts/sea-platform.mjs';
 
 // `--exe [path]` runs the standalone sidecar exe instead of dist/index.js.
 const exeFlag = process.argv.indexOf('--exe');
-const exePath = exeFlag === -1 ? null : (process.argv[exeFlag + 1] ?? fileURLToPath(new URL('../../desktop/src-tauri/binaries/secrethub-mcp-x86_64-pc-windows-msvc.exe', import.meta.url)));
+const exePath = exeFlag === -1 ? null : (process.argv[exeFlag + 1] ?? fileURLToPath(new URL(`../../desktop/src-tauri/binaries/${sidecarFileName(targetTriple())}`, import.meta.url)));
 const serverCommand = exePath ?? process.execPath;
 const serverArgs = exePath ? [] : ['dist/index.js'];
 const directory = mkdtempSync(join(tmpdir(), 'secrethub-mcp-'));

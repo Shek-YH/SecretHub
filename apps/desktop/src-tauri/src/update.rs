@@ -126,7 +126,7 @@ pub async fn update_check_now(app: AppHandle) -> CheckNowResult {
     check_and_download(&app).await
 }
 
-/// Run the downloaded installer silently; it restarts the app when done. Does not return on success.
+/// Install the downloaded update silently and restart into it. Does not return on success.
 #[tauri::command]
 pub fn update_install(app: AppHandle) -> Result<(), String> {
     let ready = app
@@ -136,7 +136,14 @@ pub fn update_install(app: AppHandle) -> Result<(), String> {
         .map_err(|_| "update state is unavailable".to_owned())?
         .take()
         .ok_or_else(|| "no downloaded update".to_owned())?;
-    ready.update.install(&ready.bytes).map_err(|error| error.to_string())
+    ready
+        .update
+        .install(&ready.bytes)
+        .map_err(|error| error.to_string())?;
+    if !crate::platform::INSTALLER_RESTARTS_APP {
+        app.restart();
+    }
+    Ok(())
 }
 
 /// On quit with a downloaded update that the user never applied: install silently and do not relaunch.

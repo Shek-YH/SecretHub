@@ -104,6 +104,37 @@ export function precheckPlan(input: { secretIds?: string[]; bindings?: AnyBindin
   return undefined;
 }
 
+export type PlanBatch = { secretIds: string[]; bindings: AnyBinding[] };
+
+// Same-name variables from different sources cannot share one .env, so a conflicting request is
+// split into several plans; each plan is confirmed in Desktop, and Desktop's preview handles
+// same-name variables that already exist in the .env (overwrite or skip).
+const CONFLICT_MESSAGE = 'bound to two different sources';
+export function splitPlanBatches(input: { secretIds?: string[]; bindings?: AnyBinding[] }, lookup: PlanLookup): { batches: PlanBatch[] } | { error: string } {
+  const whole = precheckPlan(input, lookup);
+  if (whole === undefined) return { batches: [{ secretIds: input.secretIds ?? [], bindings: input.bindings ?? [] }] };
+  if (!whole.includes(CONFLICT_MESSAGE)) return { error: whole };
+  const items: Array<{ secretId: string } | { binding: AnyBinding }> = [
+    ...(input.secretIds ?? []).map((secretId) => ({ secretId })),
+    ...(input.bindings ?? []).map((binding) => ({ binding })),
+  ];
+  const withItem = (batch: PlanBatch, item: (typeof items)[number]): PlanBatch =>
+    'secretId' in item ? { ...batch, secretIds: [...batch.secretIds, item.secretId] } : { ...batch, bindings: [...batch.bindings, item.binding] };
+  const batches: PlanBatch[] = [];
+  let current: PlanBatch = { secretIds: [], bindings: [] };
+  for (const item of items) {
+    const candidate = withItem(current, item);
+    if (precheckPlan(candidate, lookup) === undefined) { current = candidate; continue; }
+    if (current.secretIds.length + current.bindings.length > 0) batches.push(current);
+    const alone = withItem({ secretIds: [], bindings: [] }, item);
+    const problem = precheckPlan(alone, lookup);
+    if (problem) return { error: problem };
+    current = alone;
+  }
+  if (current.secretIds.length + current.bindings.length > 0) batches.push(current);
+  return { batches };
+}
+
 export type PlanStatus =
   | { status: 'pending' | 'not_found' | 'declined'; requestId: string }
   | { status: 'written'; requestId: string; writtenKeys: string[]; skippedKeys: string[]; warnings: string[] }
