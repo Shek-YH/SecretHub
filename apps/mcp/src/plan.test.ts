@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { CatalogSecret } from './catalog.js';
 import type { ModelProvider } from './models.js';
-import { bindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, precheckPlan, type Binding } from './plan.js';
+import { bindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, precheckPlan, splitPlanBatches, type Binding } from './plan.js';
 
 const secret = (id: string, over: Partial<CatalogSecret> = {}): CatalogSecret => ({ id, name: id, provider: 'agg', envKey: '', status: 'valid', tags: [], hasValue: true, archived: false, endpointUrl: '', ...over });
 const secrets = new Map<string, CatalogSecret>([['s1', secret('s1')], ['s2', secret('s2')], ['old', secret('old', { archived: true })], ['empty', secret('empty', { hasValue: false })], ['noprov', secret('noprov', { provider: 'nolist' })]]);
@@ -63,6 +63,34 @@ describe('precheckPlan', () => {
   it('caps bindings', () => {
     const many = Array.from({ length: MAX_BINDINGS + 1 }, (_, i) => bind({ env: { model: `M${i}` }, model_id: `m${i}` }));
     expect(precheckPlan({ bindings: many }, lookup)).toMatch(/At most/);
+  });
+});
+
+describe('splitPlanBatches', () => {
+  it('keeps a conflict-free request in one plan', () => {
+    expect(splitPlanBatches({ secretIds: ['s1', 's2'] }, lookup)).toEqual({ batches: [{ secretIds: ['s1', 's2'], bindings: [] }] });
+  });
+  it('splits a same-name api key from two sources into one plan each', () => {
+    const result = splitPlanBatches({ bindings: [bind({ env: { api_key: 'DASHSCOPE_API_KEY', model: 'QWEN_MODEL' } }), bind({ secret_id: 's2', capability: 'chat', model_id: 'other', env: { api_key: 'DASHSCOPE_API_KEY', model: 'QWEN_MODEL' } })] }, lookup);
+    expect('error' in result).toBe(false);
+    if ('error' in result) return;
+    expect(result.batches).toHaveLength(2);
+    expect(result.batches.map((batch) => batch.bindings.map((binding) => binding.secret_id))).toEqual([['s1'], ['s2']]);
+  });
+  it('splits plain secret_ids that export the same env name', () => {
+    const keyed = new Map(secrets);
+    keyed.set('k1', secret('k1', { envKey: 'OPENAI_API_KEY' }));
+    keyed.set('k2', secret('k2', { envKey: 'OPENAI_API_KEY' }));
+    keyed.set('k3', secret('k3', { envKey: 'OTHER_KEY', modelId: 'gpt-x', modelEnvKey: 'OPENAI_API_KEY' }));
+    const keyedLookup = { secret: (id: string) => keyed.get(id), providers };
+    expect(precheckPlan({ secretIds: ['k1', 'k2'] }, keyedLookup)).toMatch(/OPENAI_API_KEY is bound to two different sources/);
+    expect(precheckPlan({ secretIds: ['k1', 'k3'] }, keyedLookup)).toMatch(/OPENAI_API_KEY/);
+    expect(precheckPlan({ secretIds: ['k1', 'k1'] }, keyedLookup)).toBeUndefined();
+    expect(precheckPlan({ secretIds: ['k1'], bindings: [bind({ secret_id: 'k1', env: { api_key: 'OPENAI_API_KEY' } })] }, keyedLookup)).toBeUndefined();
+    expect(splitPlanBatches({ secretIds: ['k1', 'k2'] }, keyedLookup)).toEqual({ batches: [{ secretIds: ['k1'], bindings: [] }, { secretIds: ['k2'], bindings: [] }] });
+  });
+  it('still fails when a single item is invalid', () => {
+    expect(splitPlanBatches({ secretIds: ['s1', 'nope'] }, lookup)).toEqual({ error: 'Unknown secret id: nope' });
   });
 });
 

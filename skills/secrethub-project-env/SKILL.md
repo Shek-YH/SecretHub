@@ -189,8 +189,10 @@ with the exact `project_path` and:
     inline a value in code, scripts or configuration files.
 
 If the tool returns an error (unknown, archived or value-less secret; no known
-base URL; one variable name bound to two different values), fix the bindings
-with the user instead of retrying blindly. On success keep the `requestId`.
+base URL), fix the bindings with the user instead of retrying blindly. When one
+variable name would get two different values from different sources, the tool
+splits the request into several plans and returns `requestIds`; ask the user to
+approve each plan in Desktop in order, then poll every `requestId`.
 
 ### 8. Report the outcome: `secrethub_get_plan_status`
 

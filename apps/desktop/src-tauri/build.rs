@@ -10,5 +10,7 @@ fn main() {
         let _ = std::fs::create_dir_all("binaries");
         let _ = std::fs::write(&sidecar, b"placeholder: run npm --prefix apps/mcp run build:sea");
     }
+    // platform::dev_sidecar_file() needs the triple build:sea used in the file name.
+    println!("cargo:rustc-env=SECRETHUB_TARGET_TRIPLE={target}");
     tauri_build::build();
 }

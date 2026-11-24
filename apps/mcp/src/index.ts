@@ -1,11 +1,10 @@
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { openCatalogStore, recommendForStack } from './catalog.js';
-import { bindingSchema, groupBindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, precheckPlan, profilePlanFields } from './plan.js';
+import { bindingSchema, groupBindingSchema, getPlanStatus, isValidRequestId, MAX_BINDINGS, type PlanBatch, profilePlanFields, splitPlanBatches } from './plan.js';
 import { MAX_SUGGESTIONS, precheckSuggestions, queueSuggestions, suggestionSchema } from './caps.js';
 import { getMedia, getMediaAddStatus, isValidMediaRequestId, mediaAddSchema, MEDIA_KINDS, ORIENTATIONS, precheckMediaAdd, queueMediaAdd, readMedia, searchMedia } from './media.js';
 import { getCaptureStatus, isValidCaptureRequestId, precheckCapture, queueCapture } from './capture.js';
@@ -14,10 +13,11 @@ import { getImportStatus, importPathSchema, isValidImportRequestId, MAX_IMPORT_P
 import { getInspection, getOrganizeStatus, isValidInspectRequestId, isValidOrganizeRequestId, MAX_PLAN_ITEMS, planItemSchema, precheckInspect, precheckOrganizePlan, queueInspect, queueOrganize } from './organize.js';
 import { getSyncStatus, isValidSyncRequestId, MAX_SYNC_SECRETS, precheckSyncRequest, queueSyncRequest } from './sync.js';
 import { buildInvocation } from './invocation.js';
+import { defaultDbPath } from './data-dir.js';
 import { CAPABILITIES, effectiveModelsPath, findModels, fitToLimit, loadModelProviders, readModelSnapshot } from './models.js';
 
 const CHARACTER_LIMIT = 25_000;
-const dbPath = process.env.SECRETHUB_DB_PATH ?? join(process.env.APPDATA ?? homedir(), 'com.secrethub.desktop', 'vault.sqlite');
+const dbPath = process.env.SECRETHUB_DB_PATH ?? defaultDbPath();
 const planDirectory = process.env.SECRETHUB_PLAN_DIR ?? join(dirname(dbPath), 'mcp-pending');
 const resultDirectory = process.env.SECRETHUB_RESULT_DIR ?? join(dirname(dbPath), 'mcp-results');
 const catalog = openCatalogStore(dbPath);
@@ -41,13 +41,16 @@ server.registerTool('secrethub_suggest_model_capabilities', { title: 'Suggest Mo
   const requestId = queueSuggestions(planDirectory, provider_id, suggestions);
   return catalogResult({ requestId, providerId: provider_id, suggestionCount: suggestions.length, requiresUserConfirmation: true, applied: false, nextStep: 'Open SecretHub Desktop and approve the suggested capabilities; until then nothing changes.' }, response_format);
 });
-const prepareDescription = 'Queue a metadata-only project environment proposal for SecretHub Desktop. The queue contains no Secret values; Desktop must show a masked preview and receive user confirmation before writing files. Pass `bindings` (plan v2) to write model configuration: each binding is { secret_id, capability, model_id, env: { api_key?, base_url?, model? } } where env values are the variable NAMES to write. The api key of a secret is written once even when several bindings share the same env.api_key name; each binding with env.model writes one model variable (model_id) for its capability, so name them per capability (LLM_MODEL, IMAGE_MODEL, ...). Omit env fields the project does not need. base_url defaults to the secret endpoint or the provider catalog URL. Use secrethub_find_models first to pick secret_id and model_id. Config groups (servers, databases, cloud services; valueType env_group) are bound with { secret_id, variables?: [variable names] } and nothing else: omit variables for the whole group, or list the subset the project needs. Legacy `secret_ids` still works and may be combined with bindings (at least one of the two is required). Archived or value-less secrets and one env name bound to two different values are rejected before queuing. After queuing, poll secrethub_get_plan_status with the returned requestId.';
+const prepareDescription = 'Queue a metadata-only project environment proposal for SecretHub Desktop. The queue contains no Secret values; Desktop must show a masked preview and receive user confirmation before writing files. Pass `bindings` (plan v2) to write model configuration: each binding is { secret_id, capability, model_id, env: { api_key?, base_url?, model? } } where env values are the variable NAMES to write. The api key of a secret is written once even when several bindings share the same env.api_key name; each binding with env.model writes one model variable (model_id) for its capability, so name them per capability (LLM_MODEL, IMAGE_MODEL, ...). Omit env fields the project does not need. base_url defaults to the secret endpoint or the provider catalog URL. Use secrethub_find_models first to pick secret_id and model_id. Config groups (servers, databases, cloud services; valueType env_group) are bound with { secret_id, variables?: [variable names] } and nothing else: omit variables for the whole group, or list the subset the project needs. Legacy `secret_ids` still works and may be combined with bindings (at least one of the two is required). Archived or value-less secrets are rejected before queuing; when one env name would be bound to two different values, the request is split into several plans (one per conflicting source), each confirmed separately in Desktop. After queuing, poll secrethub_get_plan_status with the returned requestId.';
 server.registerTool('secrethub_prepare_project_env', { title: 'Prepare Project Environment Plan', description: prepareDescription, inputSchema: { project_path: z.string().min(1).max(400), secret_ids: z.array(z.string().min(1).max(200)).min(1).max(100).optional(), bindings: z.array(z.union([bindingSchema, groupBindingSchema])).min(1).max(MAX_BINDINGS).optional(), response_format: responseFormat }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, ({ project_path, secret_ids, bindings, response_format }) => {
   const known = new Map(catalog.list({ limit: Number.MAX_SAFE_INTEGER, offset: 0 }).items.map((item) => [item.id, item]));
-  const problem = precheckPlan({ secretIds: secret_ids, bindings }, { secret: (id) => known.get(id), providers: modelProviders });
-  if (problem) return { ...catalogResult({ queued: false, error: problem }, response_format), isError: true };
-  const requestId = bindings ? queuePlan({ version: 2, kind: 'prepare_project_env', projectPath: project_path, bindings, ...(secret_ids ? { secretIds: secret_ids } : {}) }) : queuePlan({ kind: 'prepare_project_env', projectPath: project_path, secretIds: secret_ids });
-  return catalogResult({ requestId, projectPath: project_path, ...(secret_ids ? { secretIds: secret_ids } : {}), ...(bindings ? { bindings } : {}), requiresUserConfirmation: true, written: false, nextStep: 'Open SecretHub Desktop and approve the masked preview, then call secrethub_get_plan_status with this requestId.' }, response_format);
+  const split = splitPlanBatches({ secretIds: secret_ids, bindings }, { secret: (id) => known.get(id), providers: modelProviders });
+  if ('error' in split) return { ...catalogResult({ queued: false, error: split.error }, response_format), isError: true };
+  const requestIds = split.batches.map((batch) => queuePrepareBatch(project_path, batch));
+  const nextStep = requestIds.length === 1
+    ? 'Open SecretHub Desktop and approve the masked preview, then call secrethub_get_plan_status with this requestId.'
+    : `Same-name variables from different sources were split into ${requestIds.length} plans. Open SecretHub Desktop and approve each plan in the order of requestIds, then call secrethub_get_plan_status for each. When a later plan writes a variable an earlier plan already wrote, Desktop asks to overwrite or skip it.`;
+  return catalogResult({ requestId: requestIds[0], requestIds, planCount: requestIds.length, projectPath: project_path, ...(secret_ids ? { secretIds: secret_ids } : {}), ...(bindings ? { bindings } : {}), requiresUserConfirmation: true, written: false, nextStep }, response_format);
 });
 server.registerTool('secrethub_get_plan_status', { title: 'Get Plan Status', description: 'Report what happened to a plan queued by secrethub_prepare_project_env or secrethub_apply_profile: pending (waiting for the user in SecretHub Desktop), written (with writtenKeys, skippedKeys and warnings), declined, failed (with an error code), or not_found. Reads only status files; never returns Secret values.', inputSchema: { request_id: z.string().min(1).max(128), response_format: responseFormat }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, ({ request_id, response_format }) => {
   if (!isValidRequestId(request_id)) return { ...catalogResult({ error: 'Invalid request_id; use the requestId returned when the plan was queued.' }, response_format), isError: true };
@@ -153,6 +156,11 @@ server.registerTool('secrethub_apply_import_plan', { title: 'Apply Import Plan',
 
 function catalogResult(value: Record<string, unknown>, format: 'json' | 'markdown') { const text = format === 'json' ? JSON.stringify(value, null, 2) : markdown(value); return { content: [{ type: 'text' as const, text: text.slice(0, CHARACTER_LIMIT) }], structuredContent: value }; }
 function markdown(value: unknown) { return '# SecretHub\n\n```json\n' + JSON.stringify(value, null, 2) + '\n```'; }
+
+function queuePrepareBatch(projectPath: string, batch: PlanBatch): string {
+  if (batch.bindings.length === 0) return queuePlan({ kind: 'prepare_project_env', projectPath, secretIds: batch.secretIds });
+  return queuePlan({ version: 2, kind: 'prepare_project_env', projectPath, bindings: batch.bindings, ...(batch.secretIds.length > 0 ? { secretIds: batch.secretIds } : {}) });
+}
 
 function queuePlan(input: Record<string, unknown>) {
   const requestId = `plan-${Date.now()}-${Math.random().toString(16).slice(2)}`;

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 
 const skillDirectory = new URL('../../../skills/secrethub-import/', import.meta.url);
-const skill = readFileSync(new URL('SKILL.md', skillDirectory), 'utf8');
+// Windows checkouts with autocrlf turn SKILL.md into CRLF; the assertions are about content, not line endings.
+const skill = readFileSync(new URL('SKILL.md', skillDirectory), 'utf8').replace(/\r\n/g, '\n');
 const evals = JSON.parse(readFileSync(new URL('evals/evals.json', skillDirectory), 'utf8')) as { skill_name: string; evals: Array<{ id: number; prompt: string; expected_output: string }> };
 
 describe('secrethub-import skill', () => {

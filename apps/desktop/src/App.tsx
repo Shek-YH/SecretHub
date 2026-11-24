@@ -10,6 +10,7 @@ import { AUTO_LOCK_EVENT, backend, isTauriRuntime, type BackendModel, type Backe
 import { CatalogSettings } from './CatalogSettings';
 import { AiConnectSettings } from './AiConnectSettings';
 import { UpdateButton, UpdateSettings } from './UpdateControls';
+import { AboutLinks } from './AboutLinks';
 import { applyEffectiveCatalog, defaultApiKeyEnvKey, defaultEndpointEnvKey, groupProviders, providerKind, providerTemplates, resolveProviderId, type ProviderTemplate } from './providers';
 import { SecretForm } from './SecretForm';
 import { BankCardForm } from './items/BankCardForm';
@@ -108,6 +109,8 @@ export function App() {
   const t = getTranslation(locale);
   const selected = secrets.find((secret) => secret.id === selectedId) ?? null;
   useEffect(() => { setActionMessage(''); setValidationMessage(''); setModelMessage(''); }, [selectedId]);
+  // The header message is shown on every page now, so a message from the previous page must not linger.
+  useEffect(() => { setActionMessage(''); }, [activeNav]);
   const selectedSyncedAt = secrets.find((item) => item.id === selectedId)?.modelsSyncedAt;
   useEffect(() => {
     if (!isTauriRuntime()) { setModels([]); return; }
@@ -525,7 +528,8 @@ export function App() {
             <UpdateButton t={t} />
             <button className="language-switch" onClick={() => changeLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')} aria-label={t.header.language}>{t.header.language}</button>
             <button className="secondary-button" onClick={() => setShowImport(true)}>{t.actions.import}</button>
-            {activeNav === 'api_key' && <><button className="secondary-button" disabled={validationRunning} onClick={() => void validateAllApiKeys()}>{validationRunning ? t.actions.validatingAll : t.actions.validateAll}</button>{actionMessage && <span className="header-feedback">{actionMessage}</span>}</>}
+            {activeNav === 'api_key' && <button className="secondary-button" disabled={validationRunning} onClick={() => void validateAllApiKeys()}>{validationRunning ? t.actions.validatingAll : t.actions.validateAll}</button>}
+            {actionMessage && <span className="header-feedback" role="status">{actionMessage}</span>}
             <button className="primary-button" onClick={openAdd}><span aria-hidden="true">+</span>{t.header.add}</button>
           </div>
         </header>
@@ -713,7 +717,7 @@ function SettingsPanel({ t, locale, onCatalogUpdated, onRestored }: { t: ReturnT
     } catch (reason) { setError(String(reason)); }
   }
   const choices = AUTO_LOCK_CHOICES.includes(autoLock) ? AUTO_LOCK_CHOICES : [...AUTO_LOCK_CHOICES, autoLock].sort((left, right) => left - right);
-  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><div className="setting-group"><h3>{t.settings.security}</h3><div className="setting-row"><label htmlFor="auto-lock-minutes">{t.settings.autoLock}</label><select id="auto-lock-minutes" value={autoLock} onChange={(event) => void changeAutoLock(Number(event.target.value))}>{choices.map((minutes) => <option key={minutes} value={minutes}>{minutes} {t.tools.autoLockUnit}</option>)}</select></div><p className="cap-hint">{t.tools.autoLockHint}</p><div className="setting-row"><span>{t.items.changePassword}</span><button type="button" className="secondary-button" onClick={() => setShowChange(true)}>{t.items.changePassword}</button></div></div><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US']]}/></div><UpdateSettings t={t} /><AiConnectSettings t={t} /><CatalogSettings t={t} locale={locale} onUpdated={onCatalogUpdated} /><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button><button className="secondary-button" onClick={() => setShowRestore(true)}>{t.tools.restoreOpen}</button>{message && <span className="form-success">{message}</span>}{error && <span className="form-error" role="alert">{error}</span>}</div>{showRestore && <RestoreDialog t={t} onClose={() => setShowRestore(false)} onRestored={() => { setShowRestore(false); setMessage(t.tools.restoreDone); onRestored(); }} />}{showChange && <ChangePasswordDialog t={t} onClose={() => setShowChange(false)} />}</section>;
+  return <section className="settings-panel"><div className="settings-heading"><span className="section-kicker">CONTROL CENTER</span><h2>{t.settings.title}</h2><p>{t.security.warning}</p></div><div className="settings-grid"><div className="setting-group"><h3>{t.settings.security}</h3><div className="setting-row"><label htmlFor="auto-lock-minutes">{t.settings.autoLock}</label><select id="auto-lock-minutes" value={autoLock} onChange={(event) => void changeAutoLock(Number(event.target.value))}>{choices.map((minutes) => <option key={minutes} value={minutes}>{minutes} {t.tools.autoLockUnit}</option>)}</select></div><p className="cap-hint">{t.tools.autoLockHint}</p><div className="setting-row"><span>{t.items.changePassword}</span><button type="button" className="secondary-button" onClick={() => setShowChange(true)}>{t.items.changePassword}</button></div></div><SettingGroup title={t.settings.ai} items={[[t.settings.language, 'zh-CN / en-US']]}/></div><UpdateSettings t={t} /><AiConnectSettings t={t} /><AboutLinks locale={locale} /><CatalogSettings t={t} locale={locale} onUpdated={onCatalogUpdated} /><div className="settings-footer"><button className="secondary-button" onClick={() => void exportBackup()}>{t.settings.backup}</button><button className="secondary-button" onClick={() => setShowRestore(true)}>{t.tools.restoreOpen}</button>{message && <span className="form-success">{message}</span>}{error && <span className="form-error" role="alert">{error}</span>}</div>{showRestore && <RestoreDialog t={t} onClose={() => setShowRestore(false)} onRestored={() => { setShowRestore(false); setMessage(t.tools.restoreDone); onRestored(); }} />}{showChange && <ChangePasswordDialog t={t} onClose={() => setShowChange(false)} />}</section>;
 }
 
 function ProfilePrompt({ t, selectedIds, onClose, onSaved }: { t: ReturnType<typeof getTranslation>; selectedIds: string[]; onClose: () => void; onSaved: () => void }) {
