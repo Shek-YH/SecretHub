@@ -22,3 +22,6 @@ catalog-private-key*
 # Build outputs for the standalone MCP sidecar
 apps/mcp/build/
 apps/desktop/src-tauri/binaries/
+
+# graphify 图谱（自动生成，体积大）
+graphify-out/
