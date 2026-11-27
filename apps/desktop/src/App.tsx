@@ -150,10 +150,10 @@ export function App() {
   const exportable = filtered.filter(isAiVisible);
   const allVisibleSelected = exportable.length > 0 && exportable.every((secret) => selectedIds.includes(secret.id));
 
-  async function refreshSecrets() {
+  async function refreshSecrets(search = query) {
     if (!isTauriRuntime()) return;
     try {
-      const [items, audit] = await Promise.all([backend.list(query), backend.audit()]);
+      const [items, audit] = await Promise.all([backend.list(search), backend.audit()]);
       const counts = audit.reduce<Record<string, number>>((result, event) => { if (event.operation === 'env_exported' && event.secret_id) result[event.secret_id] = (result[event.secret_id] ?? 0) + 1; return result; }, {});
       setUsageCounts(counts);
       setSecrets(items.map((secret) => ({ id: secret.id, name: secret.name, envKey: secret.env_key, provider: secret.provider_id, description: secret.description, tags: secret.tags, status: secret.status === 'valid' ? 'valid' : secret.status, updated: '', updatedAt: secret.updated_at, validatedAt: secret.validated_at, valueType: secret.value_type, category: secret.category, scope: secret.scope, favorite: secret.favorite, archived: secret.archived, modelId: secret.model_id, modelEnvKey: secret.model_env_key, endpointUrl: secret.endpoint_url, endpointEnvKey: secret.endpoint_env_key, modelsSyncedAt: secret.models_synced_at, modelsSyncStatus: secret.models_sync_status, subtitle: secret.subtitle ?? '', devUse: secret.dev_use ?? false, aiValues: secret.ai_values ?? true })));
@@ -247,6 +247,16 @@ export function App() {
       setActionMessage(t.ai.undone.replace('{items}', String(undone.removedItems)).replace('{vars}', String(undone.removedVariables)));
       void refreshSecrets();
     } catch (reason) { setRuntimeError(`${t.ai.undoFailed}: ${String(reason)}`); }
+  }
+
+  // Show the batch in the full list with every filter cleared, so the jump is visible even when
+  // the list was already open or filtered; the first imported item opens in the detail pane.
+  function viewAiImport(notice: AiImportNotice) {
+    setQuery(''); setCategoryFilter('all'); setStatusFilter('all'); setFavoriteOnly(false);
+    setActiveNav('all');
+    const first = notice.secretIds?.[0];
+    if (first) setSelectedId(first);
+    void refreshSecrets('');
   }
 
   async function dismissAiNotice(notice: AiImportNotice) {
@@ -539,7 +549,7 @@ export function App() {
         {pendingPlans.map((plan) => <McpPlanBanner key={plan.request_id} plan={plan} t={t} onReview={() => setReviewPlan(plan)} />)}
         {vaultStatus && !vaultStatus.unlocked && pendingSync.map((request) => <SyncRequestBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus && !vaultStatus.unlocked && pendingOrganize.map((request) => <OrganizeWaitingBanner key={request.requestId} request={request} t={t} />)}
-        {vaultStatus?.unlocked && aiNotices.map((notice) => <AiImportNoticeBanner key={notice.batchId} notice={notice} t={t} onView={() => { setActiveNav('env_group'); void refreshSecrets(); }} onUndo={() => void undoAiImport(notice)} onDismiss={() => void dismissAiNotice(notice)} />)}
+        {vaultStatus?.unlocked && aiNotices.map((notice) => <AiImportNoticeBanner key={notice.batchId} notice={notice} t={t} onView={() => viewAiImport(notice)} onUndo={() => void undoAiImport(notice)} onDismiss={() => void dismissAiNotice(notice)} />)}
         {vaultStatus && !vaultStatus.unlocked && inputRequests.map((request) => <InputWaitingBanner key={request.requestId} request={request} t={t} />)}
         {vaultStatus?.unlocked && captureRequests.map((request) => <CaptureRequestBanner key={request.requestId} request={request} t={t} onStart={() => void decideCapture(request, true)} onDecline={() => void decideCapture(request, false)} />)}
         {vaultStatus?.unlocked && importRequests.map((request) => <ImportRequestBanner key={request.requestId} request={request} t={t} onView={() => void viewImport(request)} onDecline={() => void declineImport(request)} />)}

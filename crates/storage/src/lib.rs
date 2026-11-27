@@ -77,6 +77,10 @@ pub struct ImportBatch {
     pub other_items: i64,
     pub undone: bool,
     pub dismissed: bool,
+    /// Items this batch created or added variables to, in write order (ids only), so the
+    /// notice's "view" can jump to them.
+    #[serde(default)]
+    pub secret_ids: Vec<String>,
 }
 
 impl SecretMetadata {
@@ -831,9 +835,16 @@ impl Database {
         let mut statement = self.connection.prepare(
             "SELECT batch_id, created_at, created_groups, added_vars, saved_separately, other_items, undone, dismissed FROM import_batches WHERE dismissed = 0 AND undone = 0 ORDER BY created_at DESC, rowid DESC LIMIT 20",
         )?;
-        let rows = statement
+        let mut rows = statement
             .query_map([], batch_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
+        for batch in &mut rows {
+            for (secret_id, _) in self.list_batch_entries(&batch.batch_id)? {
+                if !batch.secret_ids.contains(&secret_id) {
+                    batch.secret_ids.push(secret_id);
+                }
+            }
+        }
         Ok(rows)
     }
 
@@ -1536,6 +1547,7 @@ fn batch_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportBatch> {
         other_items: row.get(5)?,
         undone: row.get::<_, i64>(6)? != 0,
         dismissed: row.get::<_, i64>(7)? != 0,
+        secret_ids: Vec::new(),
     })
 }
 
